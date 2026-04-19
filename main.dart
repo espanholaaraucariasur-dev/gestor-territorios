@@ -40,9 +40,7 @@ class AraucariaApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: const PantallaVerificacion(),
-      routes: {
-        '/login': (context) => const PantallaAcceso(),
-      },
+      routes: {'/login': (context) => const PantallaAcceso()},
     );
   }
 }
@@ -51,10 +49,12 @@ class PantallaVerificacionLegacy extends StatefulWidget {
   const PantallaVerificacionLegacy({super.key});
 
   @override
-  State<PantallaVerificacionLegacy> createState() => _PantallaVerificacionLegacyState();
+  State<PantallaVerificacionLegacy> createState() =>
+      _PantallaVerificacionLegacyState();
 }
 
-class _PantallaVerificacionLegacyState extends State<PantallaVerificacionLegacy> {
+class _PantallaVerificacionLegacyState
+    extends State<PantallaVerificacionLegacy> {
   @override
   void initState() {
     super.initState();
@@ -65,7 +65,7 @@ class _PantallaVerificacionLegacyState extends State<PantallaVerificacionLegacy>
     final prefs = await SharedPreferences.getInstance();
     final bool yaInicioSesion = prefs.getBool('isLoggedIn') ?? false;
     final String correoGuardado = prefs.getString('userEmail') ?? '';
-    
+
     await Future.delayed(const Duration(seconds: 1));
     if (!mounted) return;
 
@@ -78,7 +78,8 @@ class _PantallaVerificacionLegacyState extends State<PantallaVerificacionLegacy>
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => PantallaHomeLegacy(usuarioData: snapshot.docs.first.data()),
+            builder: (context) =>
+                PantallaHomeLegacy(usuarioData: snapshot.docs.first.data()),
           ),
         );
       } else {
@@ -99,14 +100,17 @@ class _PantallaVerificacionLegacyState extends State<PantallaVerificacionLegacy>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1B5E20),
+      backgroundColor: const Color.fromARGB(255, 84, 155, 89),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
             Icon(Icons.explore_outlined, size: 80, color: Colors.white),
             SizedBox(height: 20),
-            Text('Cargando...', style: TextStyle(color: Colors.white, fontSize: 20)),
+            Text(
+              'Cargando...',
+              style: TextStyle(color: Colors.white, fontSize: 20),
+            ),
           ],
         ),
       ),
@@ -136,7 +140,10 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
       hintText: hint,
       filled: true,
       fillColor: const Color(0xFFF5F5F5),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xFF1B5E20), width: 2),
@@ -181,20 +188,29 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
     try {
       final didAuthenticate = await _localAuth.authenticate(
         localizedReason: 'Autentícate con huella o rostro para iniciar sesión',
-        options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+          stickyAuth: true,
+        ),
       );
       if (!didAuthenticate) return;
       final storedEmail = await _secureStorage.read(key: 'biometric_email');
       if (storedEmail == null || storedEmail.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se encontró cuenta biométrica configurada.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No se encontró cuenta biométrica configurada.'),
+            ),
+          );
         }
         return;
       }
       await _loginWithStoredEmail(storedEmail);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error biométrico: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error biométrico: $e')));
       }
     }
   }
@@ -202,7 +218,10 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
   Future<void> _loginWithStoredEmail(String email) async {
     setState(() => _isLoading = true);
     try {
-      final snapshot = await _db.collection('usuarios').where('email', isEqualTo: email).get();
+      final snapshot = await _db
+          .collection('usuarios')
+          .where('email', isEqualTo: email)
+          .get();
       if (snapshot.docs.isEmpty) {
         if (mounted) _mostrarError('Usuario biométrico no encontrado.');
         return;
@@ -217,7 +236,12 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
         await prefs.setBool('isLoggedIn', true);
         await prefs.setString('userEmail', email);
         if (mounted) {
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => PantallaHomeLegacy(usuarioData: u)));
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PantallaHomeLegacy(usuarioData: u),
+            ),
+          );
         }
       }
     } catch (_) {
@@ -236,29 +260,55 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(24.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.person_add_outlined, size: 40, color: Color(0xFF1B5E20)),
+                const Icon(
+                  Icons.person_add_outlined,
+                  size: 40,
+                  color: Color(0xFF1B5E20),
+                ),
                 const SizedBox(height: 16),
-                const Text('Solicitar Acceso', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Solicitar Acceso',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 20),
-                TextField(controller: nomCtrl, decoration: _inputDec('Nombre Completo')),
+                TextField(
+                  controller: nomCtrl,
+                  decoration: _inputDec('Nombre Completo'),
+                ),
                 const SizedBox(height: 12),
-                TextField(controller: emailCtrl, keyboardType: TextInputType.emailAddress, decoration: _inputDec('Correo electrónico')),
+                TextField(
+                  controller: emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: _inputDec('Correo electrónico'),
+                ),
                 const SizedBox(height: 12),
-                TextField(controller: passCtrl, obscureText: true, decoration: _inputDec('Crear Contraseña')),
+                TextField(
+                  controller: passCtrl,
+                  obscureText: true,
+                  decoration: _inputDec('Crear Contraseña'),
+                ),
                 const SizedBox(height: 24),
                 SizedBox(
                   width: double.infinity,
                   height: 45,
                   child: ElevatedButton(
                     onPressed: () async {
-                      if (nomCtrl.text.isEmpty || emailCtrl.text.isEmpty || passCtrl.text.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Completa todos los campos')));
+                      if (nomCtrl.text.isEmpty ||
+                          emailCtrl.text.isEmpty ||
+                          passCtrl.text.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Completa todos los campos'),
+                          ),
+                        );
                         return;
                       }
                       try {
@@ -275,19 +325,29 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
                         });
                         Navigator.pop(context);
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('¡Solicitud enviada!'), backgroundColor: Color(0xFF1B5E20)),
+                          const SnackBar(
+                            content: Text('¡Solicitud enviada!'),
+                            backgroundColor: Color(0xFF1B5E20),
+                          ),
                         );
                       } catch (e) {
                         Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(SnackBar(content: Text('Error: $e')));
                       }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1B5E20),
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    child: const Text('Enviar Solicitud', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'Enviar Solicitud',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -301,7 +361,10 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
   void _iniciarSesion() async {
     setState(() => _isLoading = true);
     try {
-      final snapshot = await _db.collection('usuarios').where('email', isEqualTo: _emailController.text.trim()).get();
+      final snapshot = await _db
+          .collection('usuarios')
+          .where('email', isEqualTo: _emailController.text.trim())
+          .get();
       if (snapshot.docs.isEmpty) {
         _mostrarError('Usuario no encontrado.');
         return;
@@ -320,11 +383,19 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
         await prefs.setBool('isLoggedIn', true);
         await prefs.setString('userEmail', _emailController.text.trim());
         if (_canCheckBiometrics) {
-          await _secureStorage.write(key: 'biometric_email', value: _emailController.text.trim());
+          await _secureStorage.write(
+            key: 'biometric_email',
+            value: _emailController.text.trim(),
+          );
           setState(() => _hasBiometricAccount = true);
         }
         if (mounted) {
-          Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => PantallaHomeLegacy(usuarioData: u)));
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PantallaHomeLegacy(usuarioData: u),
+            ),
+          );
         }
       }
     } catch (e) {
@@ -336,7 +407,9 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
 
   void _mostrarError(String m) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: Colors.redAccent));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(m), backgroundColor: Colors.redAccent),
+      );
     }
   }
 
@@ -363,32 +436,75 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.92),
                     borderRadius: BorderRadius.circular(24),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20, spreadRadius: 5)],
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      ),
+                    ],
                   ),
                   child: Column(
                     children: [
-                      Icon(Icons.explore_outlined, size: 60, color: Theme.of(context).colorScheme.primary),
+                      Icon(
+                        Icons.explore_outlined,
+                        size: 60,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       const SizedBox(height: 16),
-                      const Text('Araucária Sur', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF263238))),
+                      const Text(
+                        'Araucária Sur',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF263238),
+                        ),
+                      ),
                       const SizedBox(height: 8),
-                      const Text('Gestión Territorial · Congregación Español', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey)),
+                      const Text(
+                        'Gestión Territorial · Congregación Español',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 14, color: Colors.grey),
+                      ),
                       const SizedBox(height: 32),
-                      TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: _inputDec('Correo electrónico')),
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: _inputDec('Correo electrónico'),
+                      ),
                       const SizedBox(height: 16),
-                      TextField(controller: _passwordController, obscureText: true, decoration: _inputDec('Contraseña')),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: _inputDec('Contraseña'),
+                      ),
                       const SizedBox(height: 24),
                       if (_hasBiometricAccount) ...[
                         SizedBox(
                           width: double.infinity,
                           height: 50,
                           child: OutlinedButton.icon(
-                            onPressed: _isLoading ? null : _authenticateWithBiometrics,
-                            icon: const Icon(Icons.fingerprint, color: Color(0xFF1B5E20)),
-                            label: const Text('Iniciar con Huella/Face', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                            onPressed: _isLoading
+                                ? null
+                                : _authenticateWithBiometrics,
+                            icon: const Icon(
+                              Icons.fingerprint,
+                              color: Color(0xFF1B5E20),
+                            ),
+                            label: const Text(
+                              'Iniciar con Huella/Face',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1B5E20),
+                              ),
+                            ),
                             style: OutlinedButton.styleFrom(
                               backgroundColor: Colors.white,
                               side: const BorderSide(color: Color(0xFF1B5E20)),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                           ),
                         ),
@@ -402,25 +518,44 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF1B5E20),
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                             elevation: 5,
                           ),
                           child: _isLoading
-                              ? const CircularProgressIndicator(color: Colors.white)
-                              : const Text('Iniciar Sesión', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white,
+                                )
+                              : const Text(
+                                  'Iniciar Sesión',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 20),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Text('¿No tienes cuenta?', style: TextStyle(color: Colors.grey)),
+                          const Text(
+                            '¿No tienes cuenta?',
+                            style: TextStyle(color: Colors.grey),
+                          ),
                           GestureDetector(
                             onTap: () => _mostrarDialogoSolicitud(context),
                             child: const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 4),
-                              child: Text(' Solicitar acceso',
-                                  style: TextStyle(color: Color(0xFF1B5E20), fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+                              child: Text(
+                                ' Solicitar acceso',
+                                style: TextStyle(
+                                  color: Color(0xFF1B5E20),
+                                  fontWeight: FontWeight.bold,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -445,7 +580,8 @@ class PantallaHomeLegacy extends StatefulWidget {
   State<PantallaHomeLegacy> createState() => _PantallaHomeLegacyState();
 }
 
-class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTickerProviderStateMixin {
+class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
+    with SingleTickerProviderStateMixin {
   int _indiceActual = 0;
   bool _modoAdminActivo = false;
   bool _modoAdminTerritoriosActivo = false;
@@ -459,11 +595,15 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
   bool _campanaGeneralActiva = false;
   String _anuncioGeneral = '';
   bool _cargandoConfiguracion = true;
-  final TextEditingController _campanaEspecialController = TextEditingController();
-  final TextEditingController _anuncioGeneralController = TextEditingController();
+  final TextEditingController _campanaEspecialController =
+      TextEditingController();
+  final TextEditingController _anuncioGeneralController =
+      TextEditingController();
   final TextEditingController _localizadorController = TextEditingController();
-  final TextEditingController _complementoLocalizadorController = TextEditingController();
-  final TextEditingController _detallesLocalizadorController = TextEditingController();
+  final TextEditingController _complementoLocalizadorController =
+      TextEditingController();
+  final TextEditingController _detallesLocalizadorController =
+      TextEditingController();
   bool _localizadorBuscado = false;
   bool _localizadorEncontrada = false;
   String _localizadorMensaje = '';
@@ -477,7 +617,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     _usuarioEmail = widget.usuarioData['email'] ?? '';
     _cargarConfiguracionComunicacion();
     _procesarEnviosProgramados();
-    final esAdminTerritorios = widget.usuarioData['es_admin_territorios'] ?? false;
+    final esAdminTerritorios =
+        widget.usuarioData['es_admin_territorios'] ?? false;
     final esAdmin = widget.usuarioData['es_admin'] ?? false;
     if (esAdminTerritorios && !esAdmin) {
       _modoAdminTerritoriosActivo = true;
@@ -499,13 +640,19 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     if (mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const PantallaAccesoLegacy()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const PantallaAccesoLegacy()),
+      );
     }
   }
 
   void _cargarConfiguracionComunicacion() async {
     try {
-      final snapshot = await FirebaseFirestore.instance.collection('configuraciones').doc('comunicacion').get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('configuraciones')
+          .doc('comunicacion')
+          .get();
       if (!mounted) return;
       if (snapshot.exists) {
         final data = snapshot.data() ?? {};
@@ -533,21 +680,30 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
 
   void _guardarConfiguracionComunicacion() async {
     try {
-      await FirebaseFirestore.instance.collection('configuraciones').doc('comunicacion').set({
-        'campana_especial_activa': _campanaEspecialActiva,
-        'nombre_campana_especial': _nombreCampanaEspecial,
-        'campana_general_activa': _campanaGeneralActiva,
-        'anuncio_general': _anuncioGeneral,
-        'updated_at': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance
+          .collection('configuraciones')
+          .doc('comunicacion')
+          .set({
+            'campana_especial_activa': _campanaEspecialActiva,
+            'nombre_campana_especial': _nombreCampanaEspecial,
+            'campana_general_activa': _campanaGeneralActiva,
+            'anuncio_general': _anuncioGeneral,
+            'updated_at': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configuración de comunicación guardada'), backgroundColor: Colors.green),
+        const SnackBar(
+          content: Text('Configuración de comunicación guardada'),
+          backgroundColor: Colors.green,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al guardar la comunicación: $e'), backgroundColor: Colors.redAccent),
+        SnackBar(
+          content: Text('Error al guardar la comunicación: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     }
   }
@@ -588,15 +744,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     });
 
     try {
-      final snapshot = await FirebaseFirestore.instance.collection('direcciones_globales').get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
       for (final doc in snapshot.docs) {
         final calle = (doc['calle'] ?? '') as String;
         final complemento = (doc['complemento'] ?? '') as String;
-        final docNormalizada = (doc['direccion_normalizada'] as String?) ?? _normalizarDireccion('$calle $complemento');
+        final docNormalizada =
+            (doc['direccion_normalizada'] as String?) ??
+            _normalizarDireccion('$calle $complemento');
         if (docNormalizada == normalizada) {
           setState(() {
             _localizadorEncontrada = true;
-            _localizadorMensaje = 'Dirección encontrada: $calle${complemento.isNotEmpty ? ' • $complemento' : ''}';
+            _localizadorMensaje =
+                'Dirección encontrada: $calle${complemento.isNotEmpty ? ' • $complemento' : ''}';
             _mostrarSolicitudLocalizador = false;
           });
           return;
@@ -610,7 +771,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       if (pendientes.docs.isNotEmpty) {
         setState(() {
           _localizadorEncontrada = false;
-          _localizadorMensaje = 'Esta dirección ya fue solicitada y está pendiente de revisión.';
+          _localizadorMensaje =
+              'Esta dirección ya fue solicitada y está pendiente de revisión.';
           _mostrarSolicitudLocalizador = false;
         });
         return;
@@ -618,7 +780,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
 
       setState(() {
         _localizadorEncontrada = false;
-        _localizadorMensaje = 'No se encontró en el directorio global. Completa el formulario para enviarla al administrador.';
+        _localizadorMensaje =
+            'No se encontró en el directorio global. Completa el formulario para enviarla al administrador.';
         _mostrarSolicitudLocalizador = true;
       });
     } catch (e) {
@@ -635,7 +798,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     final direccion = _localizadorController.text.trim();
     if (direccion.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ingresa una dirección antes de enviar'), backgroundColor: Colors.orange),
+        const SnackBar(
+          content: Text('Ingresa una dirección antes de enviar'),
+          backgroundColor: Colors.orange,
+        ),
       );
       return;
     }
@@ -661,25 +827,29 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     if (existenteSolicitud.docs.isNotEmpty) {
       setState(() {
         _localizadorEncontrada = false;
-        _localizadorMensaje = 'Esta dirección ya fue solicitada y está pendiente de revisión.';
+        _localizadorMensaje =
+            'Esta dirección ya fue solicitada y está pendiente de revisión.';
         _mostrarSolicitudLocalizador = false;
       });
       return;
     }
 
     try {
-      await FirebaseFirestore.instance.collection('solicitudes_direcciones').add({
-        'direccion_original': direccion,
-        'direccion_normalizada': normalizada,
-        'direccion_consultada': direccion,
-        'complemento': _complementoLocalizadorController.text.trim(),
-        'detalles': _detallesLocalizadorController.text.trim(),
-        'solicitante_email': _usuarioEmail,
-        'estado': 'pendiente',
-        'created_at': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance
+          .collection('solicitudes_direcciones')
+          .add({
+            'direccion_original': direccion,
+            'direccion_normalizada': normalizada,
+            'direccion_consultada': direccion,
+            'complemento': _complementoLocalizadorController.text.trim(),
+            'detalles': _detallesLocalizadorController.text.trim(),
+            'solicitante_email': _usuarioEmail,
+            'estado': 'pendiente',
+            'created_at': FieldValue.serverTimestamp(),
+          });
       setState(() {
-        _localizadorMensaje = 'Solicitud enviada correctamente. El admin revisará la dirección pronto.';
+        _localizadorMensaje =
+            'Solicitud enviada correctamente. El admin revisará la dirección pronto.';
         _mostrarSolicitudLocalizador = false;
         _localizadorController.clear();
         _complementoLocalizadorController.clear();
@@ -688,7 +858,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al enviar solicitud: $e'), backgroundColor: Colors.redAccent),
+        SnackBar(
+          content: Text('Error al enviar solicitud: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     }
   }
@@ -698,48 +871,72 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     try {
       await FirebaseFirestore.instance.collection('direcciones_globales').add({
         'calle': datos['direccion_original'] ?? '',
-        'direccion_normalizada': datos['direccion_normalizada'] ?? _normalizarDireccion('${datos['direccion_original'] ?? ''} ${datos['complemento'] ?? ''}'),
+        'direccion_normalizada':
+            datos['direccion_normalizada'] ??
+            _normalizarDireccion(
+              '${datos['direccion_original'] ?? ''} ${datos['complemento'] ?? ''}',
+            ),
         'complemento': datos['complemento'] ?? '',
         'detalles_admin': datos['detalles'] ?? '',
         'estado': 'pendiente',
         'created_at': FieldValue.serverTimestamp(),
         'solicitante_email': datos['solicitante_email'] ?? '',
       });
-      await FirebaseFirestore.instance.collection('solicitudes_direcciones').doc(solicitudDoc.id).update({
-        'estado': 'aprobada',
-        'revisado_por': _usuarioEmail,
-        'revisado_en': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance
+          .collection('solicitudes_direcciones')
+          .doc(solicitudDoc.id)
+          .update({
+            'estado': 'aprobada',
+            'revisado_por': _usuarioEmail,
+            'revisado_en': FieldValue.serverTimestamp(),
+          });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Solicitud aprobada y agregada al directorio global'), backgroundColor: Colors.green),
+          const SnackBar(
+            content: Text('Solicitud aprobada y agregada al directorio global'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al aprobar solicitud: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Error al aprobar solicitud: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     }
   }
 
-  Future<void> _rechazarSolicitudDireccion(DocumentSnapshot solicitudDoc) async {
+  Future<void> _rechazarSolicitudDireccion(
+    DocumentSnapshot solicitudDoc,
+  ) async {
     try {
-      await FirebaseFirestore.instance.collection('solicitudes_direcciones').doc(solicitudDoc.id).update({
-        'estado': 'rechazada',
-        'revisado_por': _usuarioEmail,
-        'revisado_en': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance
+          .collection('solicitudes_direcciones')
+          .doc(solicitudDoc.id)
+          .update({
+            'estado': 'rechazada',
+            'revisado_por': _usuarioEmail,
+            'revisado_en': FieldValue.serverTimestamp(),
+          });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Solicitud rechazada'), backgroundColor: Colors.orange),
+          const SnackBar(
+            content: Text('Solicitud rechazada'),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al rechazar solicitud: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Error al rechazar solicitud: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     }
@@ -755,13 +952,26 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
             return AlertDialog(
               title: const Text('Solicitar tarjetas de territorio'),
               content: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collectionGroup('tarjetas').where('disponible_para_publicadores', isEqualTo: true).snapshots(),
+                stream: FirebaseFirestore.instance
+                    .collectionGroup('tarjetas')
+                    .where('disponible_para_publicadores', isEqualTo: true)
+                    .snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
-                    return const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()));
+                    return const SizedBox(
+                      height: 120,
+                      child: Center(child: CircularProgressIndicator()),
+                    );
                   }
                   if (snapshot.data!.docs.isEmpty) {
-                    return const SizedBox(height: 120, child: Center(child: Text('No hay tarjetas disponibles para solicitud por el momento.')));
+                    return const SizedBox(
+                      height: 120,
+                      child: Center(
+                        child: Text(
+                          'No hay tarjetas disponibles para solicitud por el momento.',
+                        ),
+                      ),
+                    );
                   }
                   return SingleChildScrollView(
                     child: Column(
@@ -770,25 +980,38 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         final data = doc.data() as Map<String, dynamic>;
                         final tarjetaPath = doc.reference.path;
                         final nombre = data['nombre'] ?? 'Tarjeta';
-                        final terNombre = data['territorio_nombre'] ?? data['territorio_id'] ?? 'Territorio';
-                        final seleccionado = _solicitudTarjetasSeleccionadas.contains(tarjetaPath);
+                        final terNombre =
+                            data['territorio_nombre'] ??
+                            data['territorio_id'] ??
+                            'Territorio';
+                        final seleccionado = _solicitudTarjetasSeleccionadas
+                            .contains(tarjetaPath);
                         return CheckboxListTile(
                           value: seleccionado,
                           title: Text(nombre),
                           subtitle: Text('Territorio: $terNombre'),
                           onChanged: (selected) {
                             if (selected == null) return;
-                            if (selected && _solicitudTarjetasSeleccionadas.length >= 2) {
+                            if (selected &&
+                                _solicitudTarjetasSeleccionadas.length >= 2) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Solo se pueden solicitar hasta 2 tarjetas a la vez.')),
+                                const SnackBar(
+                                  content: Text(
+                                    'Solo se pueden solicitar hasta 2 tarjetas a la vez.',
+                                  ),
+                                ),
                               );
                               return;
                             }
                             setStateDialog(() {
                               if (selected) {
-                                _solicitudTarjetasSeleccionadas.add(tarjetaPath);
+                                _solicitudTarjetasSeleccionadas.add(
+                                  tarjetaPath,
+                                );
                               } else {
-                                _solicitudTarjetasSeleccionadas.remove(tarjetaPath);
+                                _solicitudTarjetasSeleccionadas.remove(
+                                  tarjetaPath,
+                                );
                               }
                             });
                           },
@@ -799,14 +1022,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 },
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancelar'),
+                ),
                 ElevatedButton(
                   onPressed: _solicitudTarjetasSeleccionadas.isEmpty
                       ? null
                       : () async {
                           final batch = FirebaseFirestore.instance.batch();
-                          for (final tarjetaPath in _solicitudTarjetasSeleccionadas) {
-                            final docRef = FirebaseFirestore.instance.doc(tarjetaPath);
+                          for (final tarjetaPath
+                              in _solicitudTarjetasSeleccionadas) {
+                            final docRef = FirebaseFirestore.instance.doc(
+                              tarjetaPath,
+                            );
                             batch.set(docRef, {
                               'solicitado_por_publicador_email': _usuarioEmail,
                               'solicitado_en': FieldValue.serverTimestamp(),
@@ -816,7 +1045,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           await batch.commit();
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Solicitud de tarjetas enviada.'), backgroundColor: Colors.green),
+                              const SnackBar(
+                                content: Text('Solicitud de tarjetas enviada.'),
+                                backgroundColor: Colors.green,
+                              ),
                             );
                           }
                           Navigator.of(context).pop();
@@ -836,12 +1068,18 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     try {
       final queryTerritorios = await FirebaseFirestore.instance
           .collection('territorios')
-          .where('programado_para', isLessThanOrEqualTo: Timestamp.fromDate(now))
+          .where(
+            'programado_para',
+            isLessThanOrEqualTo: Timestamp.fromDate(now),
+          )
           .where('estatus_envio', isEqualTo: 'programado')
           .get();
       final queryTarjetas = await FirebaseFirestore.instance
           .collectionGroup('tarjetas')
-          .where('programado_para', isLessThanOrEqualTo: Timestamp.fromDate(now))
+          .where(
+            'programado_para',
+            isLessThanOrEqualTo: Timestamp.fromDate(now),
+          )
           .where('estatus_envio', isEqualTo: 'programado')
           .get();
 
@@ -860,7 +1098,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           'enviado_a': doc['conductor_email'] ?? '',
         });
       }
-      bool hasUpdates = queryTerritorios.docs.isNotEmpty || queryTarjetas.docs.isNotEmpty;
+      bool hasUpdates =
+          queryTerritorios.docs.isNotEmpty || queryTarjetas.docs.isNotEmpty;
       if (hasUpdates) {
         await batch.commit();
       }
@@ -869,9 +1108,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     }
   }
 
-  Future<void> _mostrarDialogoProgramarEnvio(String terId, {String? tarjetaId, required String nombre, required bool isTarjeta}) async {
-    final conductoresSnapshot = await FirebaseFirestore.instance.collection('usuarios').where('es_conductor', isEqualTo: true).get();
-    final conductores = conductoresSnapshot.docs.map((doc) => doc.data()['email'] as String? ?? '').where((email) => email.isNotEmpty).toList();
+  Future<void> _mostrarDialogoProgramarEnvio(
+    String terId, {
+    String? tarjetaId,
+    required String nombre,
+    required bool isTarjeta,
+  }) async {
+    final conductoresSnapshot = await FirebaseFirestore.instance
+        .collection('usuarios')
+        .where('es_conductor', isEqualTo: true)
+        .get();
+    final conductores = conductoresSnapshot.docs
+        .map((doc) => doc.data()['email'] as String? ?? '')
+        .where((email) => email.isNotEmpty)
+        .toList();
     if (!mounted) return;
     String selectedConductor = conductores.isNotEmpty ? conductores.first : '';
     DateTime fechaSeleccionada = DateTime.now();
@@ -882,20 +1132,37 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         return StatefulBuilder(
           builder: (context, setStateDialog) {
             return AlertDialog(
-              title: Text(isTarjeta ? 'Programar envío de tarjeta' : 'Programar envío de territorio'),
+              title: Text(
+                isTarjeta
+                    ? 'Programar envío de tarjeta'
+                    : 'Programar envío de territorio',
+              ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (conductores.isEmpty)
-                    const Text('No hay conductores registrados. Agrega un conductor antes de programar.')
+                    const Text(
+                      'No hay conductores registrados. Agrega un conductor antes de programar.',
+                    )
                   else
                     DropdownButtonFormField<String>(
                       value: selectedConductor,
-                      items: conductores.map((email) => DropdownMenuItem(value: email, child: Text(email))).toList(),
+                      items: conductores
+                          .map(
+                            (email) => DropdownMenuItem(
+                              value: email,
+                              child: Text(email),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (value) {
-                        if (value != null) setStateDialog(() => selectedConductor = value);
+                        if (value != null)
+                          setStateDialog(() => selectedConductor = value);
                       },
-                      decoration: const InputDecoration(labelText: 'Conductor', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(
+                        labelText: 'Conductor',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   const SizedBox(height: 12),
                   InkWell(
@@ -903,7 +1170,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                       final picked = await showDatePicker(
                         context: dialogContext,
                         initialDate: fechaSeleccionada,
-                        firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: 1),
+                        ),
                         lastDate: DateTime.now().add(const Duration(days: 365)),
                       );
                       if (picked != null) {
@@ -911,24 +1180,36 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                       }
                     },
                     child: InputDecorator(
-                      decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'Fecha de envío'),
-                      child: Text('${fechaSeleccionada.day}/${fechaSeleccionada.month}/${fechaSeleccionada.year}'),
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'Fecha de envío',
+                      ),
+                      child: Text(
+                        '${fechaSeleccionada.day}/${fechaSeleccionada.month}/${fechaSeleccionada.year}',
+                      ),
                     ),
                   ),
                 ],
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancelar'),
+                ),
                 ElevatedButton(
                   onPressed: conductores.isEmpty
                       ? null
                       : () async {
                           try {
                             final data = {
-                              'programado_para': Timestamp.fromDate(fechaSeleccionada),
+                              'programado_para': Timestamp.fromDate(
+                                fechaSeleccionada,
+                              ),
                               'conductor_email': selectedConductor,
                               'estatus_envio': 'programado',
-                              'programado_tipo': isTarjeta ? 'tarjeta' : 'territorio',
+                              'programado_tipo': isTarjeta
+                                  ? 'tarjeta'
+                                  : 'territorio',
                               'programado_nombre': nombre,
                             };
                             if (isTarjeta) {
@@ -939,17 +1220,28 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                   .doc(tarjetaId)
                                   .set(data, SetOptions(merge: true));
                             } else {
-                              await FirebaseFirestore.instance.collection('territorios').doc(terId).set(data, SetOptions(merge: true));
+                              await FirebaseFirestore.instance
+                                  .collection('territorios')
+                                  .doc(terId)
+                                  .set(data, SetOptions(merge: true));
                             }
                             if (!mounted) return;
                             Navigator.pop(dialogContext);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Programación guardada para $nombre'), backgroundColor: Colors.green),
+                              SnackBar(
+                                content: Text(
+                                  'Programación guardada para $nombre',
+                                ),
+                                backgroundColor: Colors.green,
+                              ),
                             );
                           } catch (e) {
                             if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error al programar envío: $e'), backgroundColor: Colors.redAccent),
+                              SnackBar(
+                                content: Text('Error al programar envío: $e'),
+                                backgroundColor: Colors.redAccent,
+                              ),
                             );
                           }
                         },
@@ -963,23 +1255,34 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     );
   }
 
-  Future<void> _solicitarTerritorioPublicador(String territorioId, String territorioNombre) async {
+  Future<void> _solicitarTerritorioPublicador(
+    String territorioId,
+    String territorioNombre,
+  ) async {
     try {
-      await FirebaseFirestore.instance.collection('solicitudes_publicadores').add({
-        'territorio_id': territorioId,
-        'territorio_nombre': territorioNombre,
-        'publicador_email': _usuarioEmail,
-        'estado': 'pendiente',
-        'created_at': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance
+          .collection('solicitudes_publicadores')
+          .add({
+            'territorio_id': territorioId,
+            'territorio_nombre': territorioNombre,
+            'publicador_email': _usuarioEmail,
+            'estado': 'pendiente',
+            'created_at': FieldValue.serverTimestamp(),
+          });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Solicitud enviada al administrador'), backgroundColor: Colors.green),
+        const SnackBar(
+          content: Text('Solicitud enviada al administrador'),
+          backgroundColor: Colors.green,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al solicitar territorio: $e'), backgroundColor: Colors.redAccent),
+        SnackBar(
+          content: Text('Error al solicitar territorio: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     }
   }
@@ -989,19 +1292,40 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       final now = DateTime.now();
       final mesId = '${now.year}-${now.month.toString().padLeft(2, '0')}';
       final mesNombre = '${now.month.toString().padLeft(2, '0')}/${now.year}';
-      final territoriosSnapshot = await FirebaseFirestore.instance.collection('territorios').get();
-      final tarjetasSnapshot = await FirebaseFirestore.instance.collectionGroup('tarjetas').get();
-      final direccionesSnapshot = await FirebaseFirestore.instance.collection('direcciones_globales').get();
-      final solicitudesSnapshot = await FirebaseFirestore.instance.collection('solicitudes_direcciones').where('estado', isEqualTo: 'pendiente').get();
+      final territoriosSnapshot = await FirebaseFirestore.instance
+          .collection('territorios')
+          .get();
+      final tarjetasSnapshot = await FirebaseFirestore.instance
+          .collectionGroup('tarjetas')
+          .get();
+      final direccionesSnapshot = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
+      final solicitudesSnapshot = await FirebaseFirestore.instance
+          .collection('solicitudes_direcciones')
+          .where('estado', isEqualTo: 'pendiente')
+          .get();
       final totalTerritorios = territoriosSnapshot.docs.length;
       final totalTarjetas = tarjetasSnapshot.docs.length;
       final totalDirecciones = direccionesSnapshot.docs.length;
       final totalSolicitudesEnviadas = solicitudesSnapshot.docs.length;
-      final predicadas = direccionesSnapshot.docs.where((doc) => (doc['predicado'] ?? false) == true).length;
-      final noPredicadas = direccionesSnapshot.docs.where((doc) => (doc['no_predicado'] ?? false) == true).length;
-      final noHispanos = direccionesSnapshot.docs.where((doc) => (doc['es_hispano'] ?? true) == false).length;
-      final invitaciones = direccionesSnapshot.docs.where((doc) => (doc['entrego_invitacion'] ?? false) == true).length;
-      final usuariosActivos = direccionesSnapshot.docs.map((doc) => doc['publicador_email'] ?? '').where((email) => (email as String).isNotEmpty).toSet().length;
+      final predicadas = direccionesSnapshot.docs
+          .where((doc) => (doc['predicado'] ?? false) == true)
+          .length;
+      final noPredicadas = direccionesSnapshot.docs
+          .where((doc) => (doc['no_predicado'] ?? false) == true)
+          .length;
+      final noHispanos = direccionesSnapshot.docs
+          .where((doc) => (doc['es_hispano'] ?? true) == false)
+          .length;
+      final invitaciones = direccionesSnapshot.docs
+          .where((doc) => (doc['entrego_invitacion'] ?? false) == true)
+          .length;
+      final usuariosActivos = direccionesSnapshot.docs
+          .map((doc) => doc['publicador_email'] ?? '')
+          .where((email) => (email as String).isNotEmpty)
+          .toSet()
+          .length;
       final topPublicadores = <String, int>{};
       for (final doc in direccionesSnapshot.docs) {
         final email = doc['publicador_email'] ?? '';
@@ -1009,30 +1333,44 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           topPublicadores[email] = (topPublicadores[email] ?? 0) + 1;
         }
       }
-      final topPublicador = topPublicadores.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-      await FirebaseFirestore.instance.collection('estadisticas_mensuales').doc(mesId).set({
-        'mes': mesNombre,
-        'timestamp': FieldValue.serverTimestamp(),
-        'territorios': totalTerritorios,
-        'tarjetas': totalTarjetas,
-        'direcciones': totalDirecciones,
-        'direcciones_enviadas': totalSolicitudesEnviadas,
-        'predicadas': predicadas,
-        'no_predicadas': noPredicadas,
-        'no_hispano': noHispanos,
-        'invitaciones': invitaciones,
-        'usuarios_activos': usuariosActivos,
-        'top_publicador': topPublicador.isNotEmpty ? topPublicador.first.key : '',
-        'top_publicador_cantidad': topPublicador.isNotEmpty ? topPublicador.first.value : 0,
-      });
+      final topPublicador = topPublicadores.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      await FirebaseFirestore.instance
+          .collection('estadisticas_mensuales')
+          .doc(mesId)
+          .set({
+            'mes': mesNombre,
+            'timestamp': FieldValue.serverTimestamp(),
+            'territorios': totalTerritorios,
+            'tarjetas': totalTarjetas,
+            'direcciones': totalDirecciones,
+            'direcciones_enviadas': totalSolicitudesEnviadas,
+            'predicadas': predicadas,
+            'no_predicadas': noPredicadas,
+            'no_hispano': noHispanos,
+            'invitaciones': invitaciones,
+            'usuarios_activos': usuariosActivos,
+            'top_publicador': topPublicador.isNotEmpty
+                ? topPublicador.first.key
+                : '',
+            'top_publicador_cantidad': topPublicador.isNotEmpty
+                ? topPublicador.first.value
+                : 0,
+          });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Estadísticas mensuales guardadas'), backgroundColor: Colors.green),
+        const SnackBar(
+          content: Text('Estadísticas mensuales guardadas'),
+          backgroundColor: Colors.green,
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al guardar estadísticas: $e'), backgroundColor: Colors.redAccent),
+        SnackBar(
+          content: Text('Error al guardar estadísticas: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     }
   }
@@ -1043,40 +1381,67 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Comunicación', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+          const Text(
+            'Comunicación',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1B5E20),
+            ),
+          ),
           const SizedBox(height: 16),
           _cargandoConfiguracion
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Campaña especial', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Campaña especial',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _campanaEspecialController,
-                      decoration: _inputStyleHelper('Nombre de la campaña especial'),
-                      onChanged: (value) => setState(() => _nombreCampanaEspecial = value),
+                      decoration: _inputStyleHelper(
+                        'Nombre de la campaña especial',
+                      ),
+                      onChanged: (value) =>
+                          setState(() => _nombreCampanaEspecial = value),
                     ),
                     const SizedBox(height: 12),
                     SwitchListTile(
                       title: const Text('Activar campaña especial'),
                       value: _campanaEspecialActiva,
-                      onChanged: (value) => setState(() => _campanaEspecialActiva = value),
+                      onChanged: (value) =>
+                          setState(() => _campanaEspecialActiva = value),
                     ),
                     const SizedBox(height: 20),
-                    const Text('Anuncio general', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Anuncio general',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextField(
                       controller: _anuncioGeneralController,
-                      decoration: _inputStyleHelper('Mensaje para todos los usuarios'),
+                      decoration: _inputStyleHelper(
+                        'Mensaje para todos los usuarios',
+                      ),
                       maxLines: 3,
-                      onChanged: (value) => setState(() => _anuncioGeneral = value),
+                      onChanged: (value) =>
+                          setState(() => _anuncioGeneral = value),
                     ),
                     const SizedBox(height: 12),
                     SwitchListTile(
                       title: const Text('Activar anuncio general'),
                       value: _campanaGeneralActiva,
-                      onChanged: (value) => setState(() => _campanaGeneralActiva = value),
+                      onChanged: (value) =>
+                          setState(() => _campanaGeneralActiva = value),
                     ),
                     const SizedBox(height: 20),
                     SizedBox(
@@ -1084,28 +1449,57 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                       height: 45,
                       child: ElevatedButton(
                         onPressed: _guardarConfiguracionComunicacion,
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
-                        child: const Text('Guardar configuración', style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1B5E20),
+                        ),
+                        child: const Text(
+                          'Guardar configuración',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
-                    const Text('Direcciones enviadas por usuarios', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Direcciones enviadas por usuarios',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance.collection('solicitudes_direcciones').snapshots(),
+                      stream: FirebaseFirestore.instance
+                          .collection('solicitudes_direcciones')
+                          .snapshots(),
                       builder: (context, todasSnapshot) {
                         if (!todasSnapshot.hasData) {
-                          return const SizedBox(height: 16, child: Center(child: CircularProgressIndicator()));
+                          return const SizedBox(
+                            height: 16,
+                            child: Center(child: CircularProgressIndicator()),
+                          );
                         }
-                        final totalSolicitudes = todasSnapshot.data!.docs.length;
+                        final totalSolicitudes =
+                            todasSnapshot.data!.docs.length;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 16.0),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Total solicitudes: $totalSolicitudes', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600)),
+                              Text(
+                                'Total solicitudes: $totalSolicitudes',
+                                style: const TextStyle(
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                               Chip(
-                                label: Text('${todasSnapshot.data!.docs.where((doc) => (doc['estado'] ?? '') == 'pendiente').length} pendientes', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                                label: Text(
+                                  '${todasSnapshot.data!.docs.where((doc) => (doc['estado'] ?? '') == 'pendiente').length} pendientes',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                ),
                                 backgroundColor: const Color(0xFF1B5E20),
                               ),
                             ],
@@ -1121,21 +1515,29 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           .snapshots(),
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
                         }
                         if (snapshot.data!.docs.isEmpty) {
                           return const Padding(
                             padding: EdgeInsets.symmetric(vertical: 12),
-                            child: Text('No hay solicitudes de direcciones pendientes.', style: TextStyle(color: Colors.grey)),
+                            child: Text(
+                              'No hay solicitudes de direcciones pendientes.',
+                              style: TextStyle(color: Colors.grey),
+                            ),
                           );
                         }
                         return Column(
                           children: snapshot.data!.docs.map((solicitud) {
-                            final datos = solicitud.data() as Map<String, dynamic>;
-                            final direccion = datos['direccion_original'] ?? 'Dirección';
+                            final datos =
+                                solicitud.data() as Map<String, dynamic>;
+                            final direccion =
+                                datos['direccion_original'] ?? 'Dirección';
                             final complemento = datos['complemento'] ?? '';
                             final detalles = datos['detalles'] ?? '';
-                            final solicitante = datos['solicitante_email'] ?? 'Desconocido';
+                            final solicitante =
+                                datos['solicitante_email'] ?? 'Desconocido';
                             return Card(
                               margin: const EdgeInsets.only(bottom: 12),
                               child: Padding(
@@ -1143,27 +1545,64 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(direccion, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                    if (complemento.isNotEmpty) Text('Complemento: $complemento', style: const TextStyle(color: Colors.black54)),
-                                    if (detalles.isNotEmpty) Text('Detalle: $detalles', style: const TextStyle(color: Colors.black54)),
+                                    Text(
+                                      direccion,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (complemento.isNotEmpty)
+                                      Text(
+                                        'Complemento: $complemento',
+                                        style: const TextStyle(
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    if (detalles.isNotEmpty)
+                                      Text(
+                                        'Detalle: $detalles',
+                                        style: const TextStyle(
+                                          color: Colors.black54,
+                                        ),
+                                      ),
                                     const SizedBox(height: 8),
-                                    Text('Solicitante: $solicitante', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                    Text(
+                                      'Solicitante: $solicitante',
+                                      style: const TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                     const SizedBox(height: 12),
                                     Row(
                                       children: [
                                         Expanded(
                                           child: OutlinedButton(
-                                            onPressed: () => _rechazarSolicitudDireccion(solicitud),
+                                            onPressed: () =>
+                                                _rechazarSolicitudDireccion(
+                                                  solicitud,
+                                                ),
                                             child: const Text('Rechazar'),
-                                            style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: Colors.redAccent,
+                                            ),
                                           ),
                                         ),
                                         const SizedBox(width: 10),
                                         Expanded(
                                           child: ElevatedButton(
-                                            onPressed: () => _aprobarSolicitudDireccion(solicitud),
-                                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
-                                            child: const Text('Aprobar e incluir'),
+                                            onPressed: () =>
+                                                _aprobarSolicitudDireccion(
+                                                  solicitud,
+                                                ),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(
+                                                0xFF1B5E20,
+                                              ),
+                                            ),
+                                            child: const Text(
+                                              'Aprobar e incluir',
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -1187,15 +1626,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     return Padding(
       padding: const EdgeInsets.all(20),
       child: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('estadisticas_mensuales').orderBy('timestamp', descending: true).snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('estadisticas_mensuales')
+            .orderBy('timestamp', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Estadísticas y Historial', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+              const Text(
+                'Estadísticas y Historial',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1B5E20),
+                ),
+              ),
               const SizedBox(height: 16),
               Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 elevation: 2,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -1205,10 +1656,18 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Resumen mensual', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                          const Text(
+                            'Resumen mensual',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           ElevatedButton(
                             onPressed: _guardarEstadisticasMensuales,
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1B5E20),
+                            ),
                             child: const Text('Cerrar mes'),
                           ),
                         ],
@@ -1218,21 +1677,50 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         future: _cargarResumenEstadisticasActual(),
                         builder: (context, snapshotResumen) {
                           if (!snapshotResumen.hasData) {
-                            return const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 20), child: CircularProgressIndicator()));
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.symmetric(vertical: 20),
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
                           }
                           final data = snapshotResumen.data!;
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _filaEstadistica('Territorios', data['territorios']),
+                              _filaEstadistica(
+                                'Territorios',
+                                data['territorios'],
+                              ),
                               _filaEstadistica('Tarjetas', data['tarjetas']),
-                              _filaEstadistica('Direcciones', data['direcciones']),
-                              _filaEstadistica('Direcciones enviadas', data['direcciones_enviadas']),
-                              _filaEstadistica('Predicadas', data['predicadas']),
-                              _filaEstadistica('No predicadas', data['no_predicadas']),
-                              _filaEstadistica('No hispanohablantes', data['no_hispano']),
-                              _filaEstadistica('Invitaciones entregadas', data['invitaciones']),
-                              _filaEstadistica('Usuarios activos', data['usuarios_activos']),
+                              _filaEstadistica(
+                                'Direcciones',
+                                data['direcciones'],
+                              ),
+                              _filaEstadistica(
+                                'Direcciones enviadas',
+                                data['direcciones_enviadas'],
+                              ),
+                              _filaEstadistica(
+                                'Predicadas',
+                                data['predicadas'],
+                              ),
+                              _filaEstadistica(
+                                'No predicadas',
+                                data['no_predicadas'],
+                              ),
+                              _filaEstadistica(
+                                'No hispanohablantes',
+                                data['no_hispano'],
+                              ),
+                              _filaEstadistica(
+                                'Invitaciones entregadas',
+                                data['invitaciones'],
+                              ),
+                              _filaEstadistica(
+                                'Usuarios activos',
+                                data['usuarios_activos'],
+                              ),
                             ],
                           );
                         },
@@ -1242,18 +1730,28 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 ),
               ),
               const SizedBox(height: 20),
-              const Text('Historial de meses', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              const Text(
+                'Historial de meses',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 12),
               if (!snapshot.hasData)
                 const Center(child: CircularProgressIndicator())
               else if (snapshot.data!.docs.isEmpty)
-                const Center(child: Text('No hay registros históricos aún.', style: TextStyle(color: Colors.grey)))
+                const Center(
+                  child: Text(
+                    'No hay registros históricos aún.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                )
               else
                 Expanded(
                   child: ListView.builder(
                     itemCount: snapshot.data!.docs.length,
                     itemBuilder: (context, index) {
-                      final doc = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+                      final doc =
+                          snapshot.data!.docs[index].data()
+                              as Map<String, dynamic>;
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
                         child: Padding(
@@ -1261,13 +1759,25 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(doc['mes'] ?? 'Sin mes', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              Text(
+                                doc['mes'] ?? 'Sin mes',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
                               const SizedBox(height: 8),
-                              Text('Territorios: ${doc['territorios'] ?? 0} • Tarjetas: ${doc['tarjetas'] ?? 0} • Direcciones: ${doc['direcciones'] ?? 0}'),
+                              Text(
+                                'Territorios: ${doc['territorios'] ?? 0} • Tarjetas: ${doc['tarjetas'] ?? 0} • Direcciones: ${doc['direcciones'] ?? 0}',
+                              ),
                               const SizedBox(height: 4),
-                              Text('Predicadas: ${doc['predicadas'] ?? 0} • No predicadas: ${doc['no_predicadas'] ?? 0}'),
+                              Text(
+                                'Predicadas: ${doc['predicadas'] ?? 0} • No predicadas: ${doc['no_predicadas'] ?? 0}',
+                              ),
                               const SizedBox(height: 4),
-                              Text('Top publicador: ${doc['top_publicador'] ?? '-'} (${doc['top_publicador_cantidad'] ?? 0})'),
+                              Text(
+                                'Top publicador: ${doc['top_publicador'] ?? '-'} (${doc['top_publicador_cantidad'] ?? 0})',
+                              ),
                             ],
                           ),
                         ),
@@ -1288,27 +1798,57 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(nombre, style: const TextStyle(fontSize: 13, color: Colors.black87)),
-          Text(valor.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+          Text(
+            nombre,
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
+          ),
+          Text(
+            valor.toString(),
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1B5E20),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Future<Map<String, dynamic>> _cargarResumenEstadisticasActual() async {
-    final territoriosSnapshot = await FirebaseFirestore.instance.collection('territorios').get();
-    final tarjetasSnapshot = await FirebaseFirestore.instance.collectionGroup('tarjetas').get();
-    final direccionesSnapshot = await FirebaseFirestore.instance.collection('direcciones_globales').get();
-    final solicitudesSnapshot = await FirebaseFirestore.instance.collection('solicitudes_direcciones').where('estado', isEqualTo: 'pendiente').get();
+    final territoriosSnapshot = await FirebaseFirestore.instance
+        .collection('territorios')
+        .get();
+    final tarjetasSnapshot = await FirebaseFirestore.instance
+        .collectionGroup('tarjetas')
+        .get();
+    final direccionesSnapshot = await FirebaseFirestore.instance
+        .collection('direcciones_globales')
+        .get();
+    final solicitudesSnapshot = await FirebaseFirestore.instance
+        .collection('solicitudes_direcciones')
+        .where('estado', isEqualTo: 'pendiente')
+        .get();
     final totalTerritorios = territoriosSnapshot.docs.length;
     final totalTarjetas = tarjetasSnapshot.docs.length;
     final totalDirecciones = direccionesSnapshot.docs.length;
     final totalSolicitudesEnviadas = solicitudesSnapshot.docs.length;
-    final predicadas = direccionesSnapshot.docs.where((doc) => (doc['predicado'] ?? false) == true).length;
-    final noPredicadas = direccionesSnapshot.docs.where((doc) => (doc['no_predicado'] ?? false) == true).length;
-    final noHispanos = direccionesSnapshot.docs.where((doc) => (doc['es_hispano'] ?? true) == false).length;
-    final invitaciones = direccionesSnapshot.docs.where((doc) => (doc['entrego_invitacion'] ?? false) == true).length;
-    final usuariosActivos = direccionesSnapshot.docs.map((doc) => doc['publicador_email'] ?? '').where((email) => (email as String).isNotEmpty).toSet().length;
+    final predicadas = direccionesSnapshot.docs
+        .where((doc) => (doc['predicado'] ?? false) == true)
+        .length;
+    final noPredicadas = direccionesSnapshot.docs
+        .where((doc) => (doc['no_predicado'] ?? false) == true)
+        .length;
+    final noHispanos = direccionesSnapshot.docs
+        .where((doc) => (doc['es_hispano'] ?? true) == false)
+        .length;
+    final invitaciones = direccionesSnapshot.docs
+        .where((doc) => (doc['entrego_invitacion'] ?? false) == true)
+        .length;
+    final usuariosActivos = direccionesSnapshot.docs
+        .map((doc) => doc['publicador_email'] ?? '')
+        .where((email) => (email as String).isNotEmpty)
+        .toSet()
+        .length;
 
     return {
       'territorios': totalTerritorios,
@@ -1327,7 +1867,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
   Widget build(BuildContext context) {
     final esConductor = widget.usuarioData['es_conductor'] ?? false;
     final esAdmin = widget.usuarioData['es_admin'] ?? false;
-    final esAdminTerritorios = widget.usuarioData['es_admin_territorios'] ?? false;
+    final esAdminTerritorios =
+        widget.usuarioData['es_admin_territorios'] ?? false;
     final nombre = widget.usuarioData['nombre'] ?? 'Hermano';
 
     return Scaffold(
@@ -1339,16 +1880,28 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 12.0),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 16.0,
+                  horizontal: 12.0,
+                ),
                 child: Row(
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Color(0xFF263238)),
+                      icon: const Icon(
+                        Icons.arrow_back,
+                        color: Color(0xFF263238),
+                      ),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                     const SizedBox(width: 4),
                     const Expanded(
-                      child: Text('Menú de modos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      child: Text(
+                        'Menú de modos',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -1361,23 +1914,36 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay notificaciones nuevas')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No hay notificaciones nuevas'),
+                    ),
+                  );
                 },
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 4.0,
+                ),
                 child: Row(
                   children: [
                     const Icon(Icons.language, color: Color(0xFF1B5E20)),
                     const SizedBox(width: 12),
-                    const Expanded(child: Text('Idioma', style: TextStyle(fontWeight: FontWeight.bold))),
+                    const Expanded(
+                      child: Text(
+                        'Idioma',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
                     ChoiceChip(
                       label: const Text('ES'),
                       selected: _idiomaActual == 'ES',
                       selectedColor: const Color(0xFF1B5E20),
                       labelStyle: const TextStyle(color: Colors.white),
                       backgroundColor: Colors.grey.shade200,
-                      onSelected: (selected) => setState(() => _idiomaActual = 'ES'),
+                      onSelected: (selected) =>
+                          setState(() => _idiomaActual = 'ES'),
                     ),
                     const SizedBox(width: 8),
                     ChoiceChip(
@@ -1386,7 +1952,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                       selectedColor: const Color(0xFF1B5E20),
                       labelStyle: const TextStyle(color: Colors.white),
                       backgroundColor: Colors.grey.shade200,
-                      onSelected: (selected) => setState(() => _idiomaActual = 'PT'),
+                      onSelected: (selected) =>
+                          setState(() => _idiomaActual = 'PT'),
                     ),
                   ],
                 ),
@@ -1444,7 +2011,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               const Divider(),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                child: Text('Vistas', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                child: Text(
+                  'Vistas',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ),
               ListTile(
                 leading: const Icon(Icons.home_outlined),
@@ -1490,7 +2060,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               ),
               const Spacer(),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20.0,
+                  vertical: 8.0,
+                ),
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.clear),
                   label: const Text('Limpiar modo'),
@@ -1505,10 +2078,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20.0,
+                  vertical: 12.0,
+                ),
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.logout, color: Colors.red),
-                  label: const Text('Cerrar sesión', style: TextStyle(color: Colors.red)),
+                  label: const Text(
+                    'Cerrar sesión',
+                    style: TextStyle(color: Colors.red),
+                  ),
                   onPressed: () {
                     Navigator.of(context).pop();
                     _cerrarSesion();
@@ -1542,7 +2121,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           icon: const Icon(Icons.menu, color: Color(0xFF1B5E20)),
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
-        title: const Text('Araucária Sur', style: TextStyle(color: Color(0xFF1B5E20), fontWeight: FontWeight.bold, letterSpacing: 0.3)),
+        title: const Text(
+          'Araucária Sur',
+          style: TextStyle(
+            color: Color(0xFF1B5E20),
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.3,
+          ),
+        ),
         centerTitle: true,
       ),
       body: IndexedStack(
@@ -1554,7 +2140,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: !_modoAdminActivo && !_modoAdminTerritoriosActivo && !_modoConductorActivo
+      floatingActionButton:
+          !_modoAdminActivo &&
+              !_modoAdminTerritoriosActivo &&
+              !_modoConductorActivo
           ? Container(
               margin: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1569,7 +2158,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               ),
               child: FloatingActionButton.extended(
                 onPressed: _mostrarDialogoSolicitarTarjetasPublicador,
-                icon: const Icon(Icons.card_giftcard, color: Colors.white, size: 24),
+                icon: const Icon(
+                  Icons.card_giftcard,
+                  color: Colors.white,
+                  size: 24,
+                ),
                 label: const Text(
                   'Solicitar Território',
                   style: TextStyle(
@@ -1590,7 +2183,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     );
   }
 
-  Widget _buildVistaHome(String nombre, bool esConductor, bool esAdmin, bool esAdminTerritorios) {
+  Widget _buildVistaHome(
+    String nombre,
+    bool esConductor,
+    bool esAdmin,
+    bool esAdminTerritorios,
+  ) {
     if (_modoAdminActivo) {
       return SizedBox.expand(child: _buildContenidoAdmin());
     }
@@ -1615,7 +2213,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               children: const [
                 Icon(Icons.admin_panel_settings, color: Color(0xFF1B5E20)),
                 SizedBox(width: 10),
-                Expanded(child: Text('Administración', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF263238)))),
+                Expanded(
+                  child: Text(
+                    'Administración',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF263238),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1627,12 +2234,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               indicatorWeight: 3,
               labelColor: const Color(0xFF1B5E20),
               unselectedLabelColor: Colors.black54,
-              labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
               tabs: const [
-                Tab(icon: Icon(Icons.folder_copy, color: Color(0xFF1B5E20)), text: 'Estructura'),
-                Tab(icon: Icon(Icons.map, color: Color(0xFF1B5E20)), text: 'Territorios'),
-                Tab(icon: Icon(Icons.campaign, color: Color(0xFF1B5E20)), text: 'Comunicación'),
-                Tab(icon: Icon(Icons.people_outline, color: Color(0xFF1B5E20)), text: 'Usuarios'),
+                Tab(
+                  icon: Icon(Icons.folder_copy, color: Color(0xFF1B5E20)),
+                  text: 'Estructura',
+                ),
+                Tab(
+                  icon: Icon(Icons.map, color: Color(0xFF1B5E20)),
+                  text: 'Territorios',
+                ),
+                Tab(
+                  icon: Icon(Icons.campaign, color: Color(0xFF1B5E20)),
+                  text: 'Comunicación',
+                ),
+                Tab(
+                  icon: Icon(Icons.people_outline, color: Color(0xFF1B5E20)),
+                  text: 'Usuarios',
+                ),
               ],
             ),
           ),
@@ -1645,7 +2267,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('1. Directorio Maestro', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                      const Text(
+                        '1. Directorio Maestro',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B5E20),
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       SizedBox(
                         width: double.infinity,
@@ -1653,23 +2282,44 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         child: ElevatedButton.icon(
                           onPressed: _levantarArchivoCSV,
                           icon: const Icon(Icons.upload_file),
-                          label: const Text('Subir CSV a Directorio Maestro', style: TextStyle(fontSize: 14)),
+                          label: const Text(
+                            'Subir CSV a Directorio Maestro',
+                            style: TextStyle(fontSize: 14),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.grey.shade200,
                             foregroundColor: Colors.black87,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
                       ),
                       TextButton.icon(
                         onPressed: _verDirectorioGlobal,
-                        icon: const Icon(Icons.list_alt, color: Color(0xFF1B5E20)),
-                        label: const Text('Ver contenido del Directorio Global', style: TextStyle(color: Color(0xFF1B5E20), fontWeight: FontWeight.w600)),
+                        icon: const Icon(
+                          Icons.list_alt,
+                          color: Color(0xFF1B5E20),
+                        ),
+                        label: const Text(
+                          'Ver contenido del Directorio Global',
+                          style: TextStyle(
+                            color: Color(0xFF1B5E20),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 30),
                       const Divider(),
                       const SizedBox(height: 10),
-                      const Text('2. Gestión de Territorios', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                      const Text(
+                        '2. Gestión de Territorios',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B5E20),
+                        ),
+                      ),
                       const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
@@ -1677,23 +2327,48 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         child: ElevatedButton.icon(
                           onPressed: _mostrarDialogoCrearTerritorio,
                           icon: const Icon(Icons.create_new_folder),
-                          label: const Text('Crear Nuevo Territorio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          label: const Text(
+                            'Crear Nuevo Territorio',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF1B5E20),
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 20),
-                      const Text('Territorios Creados:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                      const Text(
+                        'Territorios Creados:',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('territorios').snapshots(),
+                        stream: FirebaseFirestore.instance
+                            .collection('territorios')
+                            .snapshots(),
                         builder: (context, snapshot) {
-                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                          if (!snapshot.hasData ||
+                              snapshot.data!.docs.isEmpty) {
                             return const Padding(
                               padding: EdgeInsets.only(top: 20),
-                              child: Center(child: Text('No hay territorios creados aún.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                              child: Center(
+                                child: Text(
+                                  'No hay territorios creados aún.',
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
                             );
                           }
                           return ListView.builder(
@@ -1703,14 +2378,24 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                             itemBuilder: (context, index) {
                               var doc = snapshot.data!.docs[index];
                               return GestureDetector(
-                                onTap: () => _abrirTerritorio(doc.id, doc['nombre']),
+                                onTap: () =>
+                                    _abrirTerritorio(doc.id, doc['nombre']),
                                 child: Card(
                                   margin: const EdgeInsets.only(bottom: 10),
                                   color: Colors.green.shade50,
                                   elevation: 2,
                                   child: ListTile(
-                                    leading: const Icon(Icons.folder, color: Color(0xFF1B5E20)),
-                                    title: Text(doc['nombre'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                    leading: const Icon(
+                                      Icons.folder,
+                                      color: Color(0xFF1B5E20),
+                                    ),
+                                    title: Text(
+                                      doc['nombre'],
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
                                     subtitle: StreamBuilder<QuerySnapshot>(
                                       stream: FirebaseFirestore.instance
                                           .collection('territorios')
@@ -1718,20 +2403,45 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                           .collection('tarjetas')
                                           .snapshots(),
                                       builder: (context, tarjetasSnapshot) {
-                                        int cantidadTarjetas = tarjetasSnapshot.data?.docs.length ?? 0;
-                                        return Text('Tarjetas vinculadas: $cantidadTarjetas');
+                                        int cantidadTarjetas =
+                                            tarjetasSnapshot
+                                                .data
+                                                ?.docs
+                                                .length ??
+                                            0;
+                                        return Text(
+                                          'Tarjetas vinculadas: $cantidadTarjetas',
+                                        );
                                       },
                                     ),
                                     trailing: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         IconButton(
-                                          icon: const Icon(Icons.edit, color: Colors.orange),
-                                          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Editar ${doc['nombre']} (Próximo paso)'))),
+                                          icon: const Icon(
+                                            Icons.edit,
+                                            color: Colors.orange,
+                                          ),
+                                          onPressed: () =>
+                                              ScaffoldMessenger.of(
+                                                context,
+                                              ).showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    'Editar ${doc['nombre']} (Próximo paso)',
+                                                  ),
+                                                ),
+                                              ),
                                         ),
                                         IconButton(
-                                          icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
-                                          onPressed: () => _borrarTerritorio(doc.id, doc['nombre']),
+                                          icon: const Icon(
+                                            Icons.delete_forever,
+                                            color: Colors.redAccent,
+                                          ),
+                                          onPressed: () => _borrarTerritorio(
+                                            doc.id,
+                                            doc['nombre'],
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -1751,74 +2461,157 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Territorios', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)) ),
+                      const Text(
+                        'Territorios',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B5E20),
+                        ),
+                      ),
                       const SizedBox(height: 12),
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('territorios').snapshots(),
+                        stream: FirebaseFirestore.instance
+                            .collection('territorios')
+                            .snapshots(),
                         builder: (context, snapshot) {
-                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                          if (!snapshot.hasData ||
+                              snapshot.data!.docs.isEmpty) {
                             return const Padding(
                               padding: EdgeInsets.only(top: 20),
-                              child: Center(child: Text('No hay territorios creados aún.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                              child: Center(
+                                child: Text(
+                                  'No hay territorios creados aún.',
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
                             );
                           }
-                                    return ListView.builder(
+                          return ListView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: snapshot.data!.docs.length,
                             itemBuilder: (context, index) {
                               var doc = snapshot.data!.docs[index];
                               return InkWell(
-                                onTap: () => _abrirTerritorio(doc.id, doc['nombre'], readOnly: true),
+                                onTap: () => _abrirTerritorio(
+                                  doc.id,
+                                  doc['nombre'],
+                                  readOnly: true,
+                                ),
                                 child: Card(
                                   margin: const EdgeInsets.only(bottom: 12),
                                   elevation: 3,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
                                   child: Padding(
                                     padding: const EdgeInsets.all(16),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Container(
                                               width: 42,
                                               height: 42,
-                                              decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(14)),
-                                              child: const Icon(Icons.folder, color: Color(0xFF1B5E20)),
+                                              decoration: BoxDecoration(
+                                                color: Colors.green.shade50,
+                                                borderRadius:
+                                                    BorderRadius.circular(14),
+                                              ),
+                                              child: const Icon(
+                                                Icons.folder,
+                                                color: Color(0xFF1B5E20),
+                                              ),
                                             ),
                                             const SizedBox(width: 12),
                                             Expanded(
                                               child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
                                                 children: [
-                                                  Text(doc['nombre'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                                  Text(
+                                                    doc['nombre'],
+                                                    style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 16,
+                                                    ),
+                                                  ),
                                                   const SizedBox(height: 6),
                                                   StreamBuilder<QuerySnapshot>(
-                                                    stream: FirebaseFirestore.instance.collection('territorios').doc(doc.id).collection('tarjetas').snapshots(),
-                                                    builder: (context, tarjetasSnapshot) {
-                                                      final int cantidadTarjetas = tarjetasSnapshot.data?.docs.length ?? 0;
-                                                      return Text('Tarjetas vinculadas: $cantidadTarjetas', style: const TextStyle(color: Colors.grey));
-                                                    },
+                                                    stream: FirebaseFirestore
+                                                        .instance
+                                                        .collection(
+                                                          'territorios',
+                                                        )
+                                                        .doc(doc.id)
+                                                        .collection('tarjetas')
+                                                        .snapshots(),
+                                                    builder:
+                                                        (
+                                                          context,
+                                                          tarjetasSnapshot,
+                                                        ) {
+                                                          final int
+                                                          cantidadTarjetas =
+                                                              tarjetasSnapshot
+                                                                  .data
+                                                                  ?.docs
+                                                                  .length ??
+                                                              0;
+                                                          return Text(
+                                                            'Tarjetas vinculadas: $cantidadTarjetas',
+                                                            style:
+                                                                const TextStyle(
+                                                                  color: Colors
+                                                                      .grey,
+                                                                ),
+                                                          );
+                                                        },
                                                   ),
                                                 ],
                                               ),
                                             ),
-                                            const Icon(Icons.arrow_forward_ios, size: 18, color: Colors.grey),
+                                            const Icon(
+                                              Icons.arrow_forward_ios,
+                                              size: 18,
+                                              color: Colors.grey,
+                                            ),
                                           ],
                                         ),
                                         const SizedBox(height: 14),
                                         SizedBox(
                                           width: double.infinity,
                                           child: OutlinedButton.icon(
-                                            onPressed: () => _confirmarEnvioTerritorio(doc.id, doc['nombre']),
-                                            icon: const Icon(Icons.send, color: Colors.green),
-                                            label: const Text('Enviar territorio completo'),
+                                            onPressed: () =>
+                                                _confirmarEnvioTerritorio(
+                                                  doc.id,
+                                                  doc['nombre'],
+                                                ),
+                                            icon: const Icon(
+                                              Icons.send,
+                                              color: Colors.green,
+                                            ),
+                                            label: const Text(
+                                              'Enviar territorio completo',
+                                            ),
                                             style: OutlinedButton.styleFrom(
                                               foregroundColor: Colors.green,
-                                              side: const BorderSide(color: Colors.green),
-                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                              side: const BorderSide(
+                                                color: Colors.green,
+                                              ),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -1840,10 +2633,19 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Gestión de Usuarios', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                      const Text(
+                        'Gestión de Usuarios',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B5E20),
+                        ),
+                      ),
                       const SizedBox(height: 12),
                       StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+                        stream: FirebaseFirestore.instance
+                            .collection('usuarios')
+                            .snapshots(),
                         builder: (context, snapshot) {
                           if (!snapshot.hasData) {
                             return const Padding(
@@ -1855,42 +2657,80 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           if (snapshot.data!.docs.isEmpty) {
                             return const Padding(
                               padding: EdgeInsets.only(top: 20),
-                              child: Center(child: Text('No hay usuarios registrados.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                              child: Center(
+                                child: Text(
+                                  'No hay usuarios registrados.',
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
                             );
                           }
 
                           return Column(
                             children: snapshot.data!.docs.map((usuario) {
-                              final data = usuario.data() as Map<String, dynamic>;
-                              final String nombreUsuario = data['nombre'] ?? 'Usuario';
+                              final data =
+                                  usuario.data() as Map<String, dynamic>;
+                              final String nombreUsuario =
+                                  data['nombre'] ?? 'Usuario';
                               final String emailUsuario = data['email'] ?? '';
-                              final String estadoUsuario = data['estado'] ?? 'pendiente';
-                              final bool esAdminUsuario = data['es_admin'] ?? false;
-                              final bool esConductorUsuario = data['es_conductor'] ?? false;
-                              final bool esAdminTerritoriosUsuario = data['es_admin_territorios'] ?? false;
-                              final bool esPublicadorUsuario = data['es_publicador'] ?? false;
+                              final String estadoUsuario =
+                                  data['estado'] ?? 'pendiente';
+                              final bool esAdminUsuario =
+                                  data['es_admin'] ?? false;
+                              final bool esConductorUsuario =
+                                  data['es_conductor'] ?? false;
+                              final bool esAdminTerritoriosUsuario =
+                                  data['es_admin_territorios'] ?? false;
+                              final bool esPublicadorUsuario =
+                                  data['es_publicador'] ?? false;
 
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 12),
                                 child: Padding(
                                   padding: const EdgeInsets.all(12),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text(nombreUsuario, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                      Text(emailUsuario, style: const TextStyle(color: Colors.grey)),
+                                      Text(
+                                        nombreUsuario,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      Text(
+                                        emailUsuario,
+                                        style: const TextStyle(
+                                          color: Colors.grey,
+                                        ),
+                                      ),
                                       const SizedBox(height: 8),
                                       Row(
                                         children: [
                                           Expanded(
-                                            child: Text('Estado: $estadoUsuario', style: const TextStyle(color: Colors.black87)),
+                                            child: Text(
+                                              'Estado: $estadoUsuario',
+                                              style: const TextStyle(
+                                                color: Colors.black87,
+                                              ),
+                                            ),
                                           ),
                                           if (estadoUsuario != 'aprobado')
                                             ElevatedButton(
                                               onPressed: () async {
-                                                await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'estado': 'aprobado'});
+                                                await FirebaseFirestore.instance
+                                                    .collection('usuarios')
+                                                    .doc(usuario.id)
+                                                    .update({
+                                                      'estado': 'aprobado',
+                                                    });
                                               },
-                                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.green,
+                                              ),
                                               child: const Text('Aprobar'),
                                             ),
                                         ],
@@ -1902,7 +2742,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                         activeColor: Colors.redAccent,
                                         contentPadding: EdgeInsets.zero,
                                         onChanged: (value) async {
-                                          await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_admin': value});
+                                          await FirebaseFirestore.instance
+                                              .collection('usuarios')
+                                              .doc(usuario.id)
+                                              .update({'es_admin': value});
                                         },
                                       ),
                                       SwitchListTile(
@@ -1911,7 +2754,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                         activeColor: Colors.purple,
                                         contentPadding: EdgeInsets.zero,
                                         onChanged: (value) async {
-                                          await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_admin_territorios': value});
+                                          await FirebaseFirestore.instance
+                                              .collection('usuarios')
+                                              .doc(usuario.id)
+                                              .update({
+                                                'es_admin_territorios': value,
+                                              });
                                         },
                                       ),
                                       SwitchListTile(
@@ -1920,7 +2768,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                         activeColor: const Color(0xFF1B5E20),
                                         contentPadding: EdgeInsets.zero,
                                         onChanged: (value) async {
-                                          await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_conductor': value});
+                                          await FirebaseFirestore.instance
+                                              .collection('usuarios')
+                                              .doc(usuario.id)
+                                              .update({'es_conductor': value});
                                         },
                                       ),
                                       SwitchListTile(
@@ -1929,7 +2780,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                         activeColor: Colors.blue,
                                         contentPadding: EdgeInsets.zero,
                                         onChanged: (value) async {
-                                          await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_publicador': value});
+                                          await FirebaseFirestore.instance
+                                              .collection('usuarios')
+                                              .doc(usuario.id)
+                                              .update({'es_publicador': value});
                                         },
                                       ),
                                       const SizedBox(height: 8),
@@ -1937,8 +2791,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                         children: [
                                           Expanded(
                                             child: OutlinedButton(
-                                              onPressed: () => _mostrarDialogoGestionUsuarios(),
-                                              child: const Text('Gestión avanzada'),
+                                              onPressed: () =>
+                                                  _mostrarDialogoGestionUsuarios(),
+                                              child: const Text(
+                                                'Gestión avanzada',
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -1967,64 +2824,110 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Eliminar Territorio'),
-        content: Text('¿Eliminar el territorio "$nombreTerritorio"? Esto NO eliminará las direcciones del directorio global.'),
+        content: Text(
+          '¿Eliminar el territorio "$nombreTerritorio"? Esto NO eliminará las direcciones del directorio global.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Eliminar', style: TextStyle(color: Colors.red))),
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Eliminar', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
-    
+
     if (confirmar == true) {
       try {
-        await FirebaseFirestore.instance.collection('territorios').doc(territorioId).delete();
+        await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(territorioId)
+            .delete();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$nombreTerritorio eliminado correctamente')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$nombreTerritorio eliminado correctamente'),
+            ),
+          );
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al eliminar: $e')));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Error al eliminar: $e')));
         }
       }
     }
   }
 
-  void _confirmarEnvioTerritorio(String territorioId, String nombreTerritorio) async {
+  void _confirmarEnvioTerritorio(
+    String territorioId,
+    String nombreTerritorio,
+  ) async {
     bool? confirmar = await showDialog(
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Enviar Territorio'),
-        content: Text('¿Deseas enviar el territorio "$nombreTerritorio" completo?'),
+        content: Text(
+          '¿Deseas enviar el territorio "$nombreTerritorio" completo?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Confirmar')),
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Confirmar'),
+          ),
         ],
       ),
     );
 
     if (confirmar == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Se envió el territorio "$nombreTerritorio" correctamente.')),
+        SnackBar(
+          content: Text(
+            'Se envió el territorio "$nombreTerritorio" correctamente.',
+          ),
+        ),
       );
     }
   }
 
-  void _confirmarEnvioTarjeta(String terId, String tarjetaId, String tarjetaNombre) async {
+  void _confirmarEnvioTarjeta(
+    String terId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
     bool? confirmar = await showDialog(
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Enviar Tarjeta'),
-        content: Text('¿Deseas enviar la tarjeta "$tarjetaNombre" del territorio?'),
+        content: Text(
+          '¿Deseas enviar la tarjeta "$tarjetaNombre" del territorio?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Confirmar')),
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Confirmar'),
+          ),
         ],
       ),
     );
 
     if (confirmar == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Se envió la tarjeta "$tarjetaNombre" correctamente.')),
+        SnackBar(
+          content: Text('Se envió la tarjeta "$tarjetaNombre" correctamente.'),
+        ),
       );
     }
   }
@@ -2036,7 +2939,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Stack(
@@ -2044,9 +2949,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.folder_open, size: 40, color: Color(0xFF1B5E20)),
+                    const Icon(
+                      Icons.folder_open,
+                      size: 40,
+                      color: Color(0xFF1B5E20),
+                    ),
                     const SizedBox(height: 16),
-                    const Text('Crear Nuevo Territorio', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                    const Text(
+                      'Crear Nuevo Territorio',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                     const SizedBox(height: 20),
                     TextField(
                       controller: nombreCtrl,
@@ -2055,8 +2971,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         hintText: 'Nombre del territorio',
                         filled: true,
                         fillColor: const Color(0xFFF5F5F5),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF1B5E20), width: 2)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                            color: Color(0xFF1B5E20),
+                            width: 2,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -2067,22 +2992,34 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         onPressed: () async {
                           String nombre = nombreCtrl.text.trim();
                           if (nombre.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ingresa un nombre')));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Ingresa un nombre'),
+                              ),
+                            );
                             return;
                           }
-                          await FirebaseFirestore.instance.collection('territorios').doc(nombre).set({
-                            'nombre': nombre,
-                            'cantidad_direcciones': 0,
-                            'created_at': FieldValue.serverTimestamp(),
-                          });
+                          await FirebaseFirestore.instance
+                              .collection('territorios')
+                              .doc(nombre)
+                              .set({
+                                'nombre': nombre,
+                                'cantidad_direcciones': 0,
+                                'created_at': FieldValue.serverTimestamp(),
+                              });
                           if (mounted) Navigator.pop(context);
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF1B5E20),
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
-                        child: const Text('Crear Carpeta', style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Crear Carpeta',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ],
@@ -2108,26 +3045,37 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Container(
             width: double.infinity,
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.8,
+            ),
             padding: const EdgeInsets.all(20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Gestión de Usuarios', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Gestión de Usuarios',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 12),
                 Expanded(
                   child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('usuarios').snapshots(),
+                    stream: FirebaseFirestore.instance
+                        .collection('usuarios')
+                        .snapshots(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
                       final docs = snapshot.data!.docs;
                       if (docs.isEmpty) {
-                        return const Center(child: Text('No hay usuarios registrados.'));
+                        return const Center(
+                          child: Text('No hay usuarios registrados.'),
+                        );
                       }
                       return ListView.builder(
                         itemCount: docs.length,
@@ -2137,7 +3085,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           final esAdmin = data['es_admin'] ?? false;
                           final esConductor = data['es_conductor'] ?? false;
                           final esPublicador = data['es_publicador'] ?? false;
-                          final esAdminTerritorios = data['es_admin_territorios'] ?? false;
+                          final esAdminTerritorios =
+                              data['es_admin_territorios'] ?? false;
                           final grupoId = data['grupo_id'] ?? '';
 
                           return Card(
@@ -2147,8 +3096,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(data['nombre'] ?? 'Usuario', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  Text(data['email'] ?? '', style: const TextStyle(color: Colors.grey)),
+                                  Text(
+                                    data['nombre'] ?? 'Usuario',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    data['email'] ?? '',
+                                    style: const TextStyle(color: Colors.grey),
+                                  ),
                                   const SizedBox(height: 8),
                                   Row(
                                     children: [
@@ -2159,7 +3116,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                           contentPadding: EdgeInsets.zero,
                                           activeColor: Colors.redAccent,
                                           onChanged: (value) async {
-                                            await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_admin': value});
+                                            await FirebaseFirestore.instance
+                                                .collection('usuarios')
+                                                .doc(usuario.id)
+                                                .update({'es_admin': value});
                                           },
                                         ),
                                       ),
@@ -2170,7 +3130,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                           contentPadding: EdgeInsets.zero,
                                           activeColor: const Color(0xFF1B5E20),
                                           onChanged: (value) async {
-                                            await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_conductor': value});
+                                            await FirebaseFirestore.instance
+                                                .collection('usuarios')
+                                                .doc(usuario.id)
+                                                .update({
+                                                  'es_conductor': value,
+                                                });
                                           },
                                         ),
                                       ),
@@ -2182,7 +3147,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                     contentPadding: EdgeInsets.zero,
                                     activeColor: Colors.blue,
                                     onChanged: (value) async {
-                                      await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_publicador': value});
+                                      await FirebaseFirestore.instance
+                                          .collection('usuarios')
+                                          .doc(usuario.id)
+                                          .update({'es_publicador': value});
                                     },
                                   ),
                                   SwitchListTile(
@@ -2191,16 +3159,25 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                     contentPadding: EdgeInsets.zero,
                                     activeColor: Colors.purple,
                                     onChanged: (value) async {
-                                      await FirebaseFirestore.instance.collection('usuarios').doc(usuario.id).update({'es_admin_territorios': value});
+                                      await FirebaseFirestore.instance
+                                          .collection('usuarios')
+                                          .doc(usuario.id)
+                                          .update({
+                                            'es_admin_territorios': value,
+                                          });
                                     },
                                   ),
                                   TextField(
                                     decoration: InputDecoration(
                                       labelText: 'Grupo ID',
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
                                       isDense: true,
                                     ),
-                                    controller: TextEditingController(text: grupoId.toString()),
+                                    controller: TextEditingController(
+                                      text: grupoId.toString(),
+                                    ),
                                     readOnly: true,
                                   ),
                                 ],
@@ -2218,8 +3195,13 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   height: 45,
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
-                    child: const Text('Cerrar', style: TextStyle(color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B5E20),
+                    ),
+                    child: const Text(
+                      'Cerrar',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ),
                 ),
               ],
@@ -2230,7 +3212,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     );
   }
 
-  void _abrirTerritorio(String terId, String terNombre, {bool readOnly = false}) {
+  void _abrirTerritorio(
+    String terId,
+    String terNombre, {
+    bool readOnly = false,
+  }) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -2238,10 +3224,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Container(
                 width: double.maxFinite,
-                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.9,
+                ),
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -2249,8 +3239,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(child: Text(terNombre, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)))),
-                        IconButton(icon: const Icon(Icons.close, size: 28), onPressed: () => Navigator.pop(context)),
+                        Expanded(
+                          child: Text(
+                            terNombre,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1B5E20),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 28),
+                          onPressed: () => Navigator.pop(context),
+                        ),
                       ],
                     ),
                     const Divider(thickness: 2),
@@ -2260,13 +3262,22 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         width: double.infinity,
                         height: 50,
                         child: OutlinedButton.icon(
-                          onPressed: () => _confirmarEnvioTerritorio(terId, terNombre),
+                          onPressed: () =>
+                              _confirmarEnvioTerritorio(terId, terNombre),
                           icon: const Icon(Icons.send, color: Colors.green),
-                          label: const Text('Enviar territorio completo', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          label: const Text(
+                            'Enviar territorio completo',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.green,
                             side: const BorderSide(color: Colors.green),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
                       ),
@@ -2277,18 +3288,33 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         width: double.infinity,
                         height: 50,
                         child: ElevatedButton.icon(
-                          onPressed: () => _mostrarDialogoCrearTarjeta(context, terId),
+                          onPressed: () =>
+                              _mostrarDialogoCrearTarjeta(context, terId),
                           icon: const Icon(Icons.folder_open),
-                          label: const Text('Crear Nueva Tarjeta', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          label: const Text(
+                            'Crear Nueva Tarjeta',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF1B5E20),
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
                       ),
                     if (!readOnly) const SizedBox(height: 16),
-                    const Text('Tarjetas en este Territorio:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Tarjetas en este Territorio:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 10),
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
@@ -2298,14 +3324,26 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                             .collection('tarjetas')
                             .snapshots(),
                         builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator());
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
                           }
-                          
-                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                            return const Center(child: Text('No hay tarjetas creadas aún.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)));
+
+                          if (!snapshot.hasData ||
+                              snapshot.data!.docs.isEmpty) {
+                            return const Center(
+                              child: Text(
+                                'No hay tarjetas creadas aún.',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            );
                           }
-                          
+
                           return ListView.builder(
                             shrinkWrap: true,
                             itemCount: snapshot.data!.docs.length,
@@ -2313,7 +3351,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                               var tarjeta = snapshot.data!.docs[index];
                               String tarjetaId = tarjeta.id;
                               String tarjetaNombre = tarjeta['nombre'];
-                              int cantidadDir = tarjeta['cantidad_direcciones'] ?? 0;
+                              int cantidadDir =
+                                  tarjeta['cantidad_direcciones'] ?? 0;
 
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 10),
@@ -2322,29 +3361,64 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                 child: Column(
                                   children: [
                                     ListTile(
-                                      leading: const Icon(Icons.folder, color: Colors.blue),
-                                      title: Text(tarjetaNombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                      subtitle: Text('Dir. vinculadas: $cantidadDir'),
+                                      leading: const Icon(
+                                        Icons.folder,
+                                        color: Colors.blue,
+                                      ),
+                                      title: Text(
+                                        tarjetaNombre,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        'Dir. vinculadas: $cantidadDir',
+                                      ),
                                       trailing: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           if (readOnly)
                                             IconButton(
-                                              icon: const Icon(Icons.send, color: Colors.green),
-                                              onPressed: () => _confirmarEnvioTarjeta(terId, tarjetaId, tarjetaNombre),
+                                              icon: const Icon(
+                                                Icons.send,
+                                                color: Colors.green,
+                                              ),
+                                              onPressed: () =>
+                                                  _confirmarEnvioTarjeta(
+                                                    terId,
+                                                    tarjetaId,
+                                                    tarjetaNombre,
+                                                  ),
                                               tooltip: 'Enviar tarjeta',
                                             ),
                                           if (!readOnly)
                                             IconButton(
-                                              icon: const Icon(Icons.add_circle_outline, color: Colors.blue),
-                                              onPressed: () => _agregarDireccionesATarjeta(context, terId, tarjetaId, tarjetaNombre),
+                                              icon: const Icon(
+                                                Icons.add_circle_outline,
+                                                color: Colors.blue,
+                                              ),
+                                              onPressed: () =>
+                                                  _agregarDireccionesATarjeta(
+                                                    context,
+                                                    terId,
+                                                    tarjetaId,
+                                                    tarjetaNombre,
+                                                  ),
                                               tooltip: 'Agregar direcciones',
                                             ),
                                           if (!readOnly)
                                             IconButton(
                                               icon: Icon(
-                                                tarjeta['disponible_para_publicadores'] == true ? Icons.lock_open : Icons.lock,
-                                                color: tarjeta['disponible_para_publicadores'] == true ? Colors.green : Colors.grey,
+                                                tarjeta['disponible_para_publicadores'] ==
+                                                        true
+                                                    ? Icons.lock_open
+                                                    : Icons.lock,
+                                                color:
+                                                    tarjeta['disponible_para_publicadores'] ==
+                                                        true
+                                                    ? Colors.green
+                                                    : Colors.grey,
                                               ),
                                               onPressed: () async {
                                                 await FirebaseFirestore.instance
@@ -2353,51 +3427,106 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                                     .collection('tarjetas')
                                                     .doc(tarjetaId)
                                                     .set({
-                                                      'disponible_para_publicadores': !(tarjeta['disponible_para_publicadores'] ?? false),
-                                                    },
-                                                    SetOptions(merge: true),
-                                                );
+                                                      'disponible_para_publicadores':
+                                                          !(tarjeta['disponible_para_publicadores'] ??
+                                                              false),
+                                                    }, SetOptions(merge: true));
                                               },
-                                              tooltip: tarjeta['disponible_para_publicadores'] == true
+                                              tooltip:
+                                                  tarjeta['disponible_para_publicadores'] ==
+                                                      true
                                                   ? 'Quitar disponibilidad para publicadores'
                                                   : 'Hacer disponible para publicadores',
                                             ),
                                           if (!readOnly)
                                             IconButton(
-                                              icon: const Icon(Icons.schedule, color: Colors.deepPurple),
-                                              onPressed: () => _mostrarDialogoProgramarEnvio(terId, tarjetaId: tarjetaId, nombre: tarjetaNombre, isTarjeta: true),
-                                              tooltip: 'Programar envío de tarjeta',
+                                              icon: const Icon(
+                                                Icons.schedule,
+                                                color: Colors.deepPurple,
+                                              ),
+                                              onPressed: () =>
+                                                  _mostrarDialogoProgramarEnvio(
+                                                    terId,
+                                                    tarjetaId: tarjetaId,
+                                                    nombre: tarjetaNombre,
+                                                    isTarjeta: true,
+                                                  ),
+                                              tooltip:
+                                                  'Programar envío de tarjeta',
                                             ),
                                           if (!readOnly)
                                             IconButton(
-                                              icon: const Icon(Icons.edit, color: Colors.orange),
-                                              onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Editar Tarjeta (Próximo paso)'))),
+                                              icon: const Icon(
+                                                Icons.edit,
+                                                color: Colors.orange,
+                                              ),
+                                              onPressed: () =>
+                                                  ScaffoldMessenger.of(
+                                                    context,
+                                                  ).showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                        'Editar Tarjeta (Próximo paso)',
+                                                      ),
+                                                    ),
+                                                  ),
                                               tooltip: 'Editar tarjeta',
                                             ),
                                           if (!readOnly)
                                             IconButton(
-                                              icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
+                                              icon: const Icon(
+                                                Icons.delete_forever,
+                                                color: Colors.redAccent,
+                                              ),
                                               tooltip: 'Eliminar tarjeta',
                                               onPressed: () async {
-                                                bool? confirmar = await showDialog(
+                                                bool?
+                                                confirmar = await showDialog(
                                                   context: context,
                                                   builder: (c) => AlertDialog(
-                                                    title: const Text('⚠️ Eliminar Tarjeta'),
-                                                    content: Text('¿Eliminar la tarjeta "$tarjetaNombre"? Esto eliminará todas sus direcciones vinculadas.'),
+                                                    title: const Text(
+                                                      '⚠️ Eliminar Tarjeta',
+                                                    ),
+                                                    content: Text(
+                                                      '¿Eliminar la tarjeta "$tarjetaNombre"? Esto eliminará todas sus direcciones vinculadas.',
+                                                    ),
                                                     actions: [
                                                       TextButton(
-                                                        onPressed: () => Navigator.pop(c, false),
-                                                        child: const Text('Cancelar', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                                                        onPressed: () =>
+                                                            Navigator.pop(
+                                                              c,
+                                                              false,
+                                                            ),
+                                                        child: const Text(
+                                                          'Cancelar',
+                                                          style: TextStyle(
+                                                            color: Colors.grey,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                          ),
+                                                        ),
                                                       ),
                                                       TextButton(
-                                                        onPressed: () => Navigator.pop(c, true),
-                                                        child: const Text('SÍ, Eliminar', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                                        onPressed: () =>
+                                                            Navigator.pop(
+                                                              c,
+                                                              true,
+                                                            ),
+                                                        child: const Text(
+                                                          'SÍ, Eliminar',
+                                                          style: TextStyle(
+                                                            color: Colors.red,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                          ),
+                                                        ),
                                                       ),
                                                     ],
                                                   ),
                                                 );
                                                 if (confirmar == true) {
-                                                  await FirebaseFirestore.instance
+                                                  await FirebaseFirestore
+                                                      .instance
                                                       .collection('territorios')
                                                       .doc(terId)
                                                       .collection('tarjetas')
@@ -2410,59 +3539,131 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                       ),
                                     ),
                                     Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16.0,
+                                        vertical: 8.0,
+                                      ),
                                       child: StreamBuilder<QuerySnapshot>(
                                         stream: FirebaseFirestore.instance
                                             .collection('direcciones_globales')
-                                            .where('tarjeta_id', isEqualTo: tarjetaId)
+                                            .where(
+                                              'tarjeta_id',
+                                              isEqualTo: tarjetaId,
+                                            )
                                             .snapshots(),
                                         builder: (context, dirSnapshot) {
-                                          if (!dirSnapshot.hasData || dirSnapshot.data!.docs.isEmpty) {
+                                          if (!dirSnapshot.hasData ||
+                                              dirSnapshot.data!.docs.isEmpty) {
                                             return const Padding(
                                               padding: EdgeInsets.all(8.0),
-                                              child: Text('Sin direcciones asignadas', style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic)),
+                                              child: Text(
+                                                'Sin direcciones asignadas',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey,
+                                                  fontStyle: FontStyle.italic,
+                                                ),
+                                              ),
                                             );
                                           }
 
                                           return Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
-                                              const Text('Direcciones:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue)),
+                                              const Text(
+                                                'Direcciones:',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.blue,
+                                                ),
+                                              ),
                                               const SizedBox(height: 8),
-                                              ...dirSnapshot.data!.docs.map((dirDoc) {
-                                                String complemento = dirDoc['complemento'] ?? '';
-                                                String informacion = dirDoc['informacion'] ?? '';
-                                                
+                                              ...dirSnapshot.data!.docs.map((
+                                                dirDoc,
+                                              ) {
+                                                String complemento =
+                                                    dirDoc['complemento'] ?? '';
+                                                String informacion =
+                                                    dirDoc['informacion'] ?? '';
+
                                                 return Padding(
-                                                  padding: const EdgeInsets.only(bottom: 10.0),
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 10.0,
+                                                      ),
                                                   child: Container(
                                                     decoration: BoxDecoration(
                                                       color: Colors.white,
-                                                      borderRadius: BorderRadius.circular(10),
-                                                      border: Border.all(color: Colors.blue.shade200),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            10,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: Colors
+                                                            .blue
+                                                            .shade200,
+                                                      ),
                                                       boxShadow: [
-                                                        BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)
+                                                        BoxShadow(
+                                                          color: Colors.black
+                                                              .withOpacity(
+                                                                0.05,
+                                                              ),
+                                                          blurRadius: 4,
+                                                        ),
                                                       ],
                                                     ),
                                                     child: Column(
                                                       children: [
                                                         Padding(
-                                                          padding: const EdgeInsets.all(12),
+                                                          padding:
+                                                              const EdgeInsets.all(
+                                                                12,
+                                                              ),
                                                           child: Row(
                                                             children: [
-                                                              const Icon(Icons.location_on, size: 18, color: Colors.blue),
-                                                              const SizedBox(width: 10),
+                                                              const Icon(
+                                                                Icons
+                                                                    .location_on,
+                                                                size: 18,
+                                                                color:
+                                                                    Colors.blue,
+                                                              ),
+                                                              const SizedBox(
+                                                                width: 10,
+                                                              ),
                                                               Expanded(
                                                                 child: Column(
-                                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .start,
                                                                   children: [
                                                                     Text(
-                                                                      dirDoc['calle'] ?? '',
-                                                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF263238)),
+                                                                      dirDoc['calle'] ??
+                                                                          '',
+                                                                      style: const TextStyle(
+                                                                        fontSize:
+                                                                            13,
+                                                                        fontWeight:
+                                                                            FontWeight.w600,
+                                                                        color: Color(
+                                                                          0xFF263238,
+                                                                        ),
+                                                                      ),
                                                                     ),
                                                                     Text(
-                                                                      dirDoc['barrio'] ?? 'Sin barrio',
-                                                                      style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500),
+                                                                      dirDoc['barrio'] ??
+                                                                          'Sin barrio',
+                                                                      style: const TextStyle(
+                                                                        fontSize:
+                                                                            11,
+                                                                        color: Colors
+                                                                            .grey,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                      ),
                                                                     ),
                                                                   ],
                                                                 ),
@@ -2470,30 +3671,86 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                                               SizedBox(
                                                                 width: 100,
                                                                 child: Row(
-                                                                  mainAxisAlignment: MainAxisAlignment.end,
+                                                                  mainAxisAlignment:
+                                                                      MainAxisAlignment
+                                                                          .end,
                                                                   children: [
                                                                     IconButton(
-                                                                      icon: const Icon(Icons.info_outline, size: 16, color: Colors.blue),
-                                                                      onPressed: () => _mostrarDetallesDireccion(dirDoc),
-                                                                      padding: EdgeInsets.zero,
-                                                                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                                                      tooltip: 'Ver detalles',
+                                                                      icon: const Icon(
+                                                                        Icons
+                                                                            .info_outline,
+                                                                        size:
+                                                                            16,
+                                                                        color: Colors
+                                                                            .blue,
+                                                                      ),
+                                                                      onPressed: () =>
+                                                                          _mostrarDetallesDireccion(
+                                                                            dirDoc,
+                                                                          ),
+                                                                      padding:
+                                                                          EdgeInsets
+                                                                              .zero,
+                                                                      constraints: const BoxConstraints(
+                                                                        minWidth:
+                                                                            32,
+                                                                        minHeight:
+                                                                            32,
+                                                                      ),
+                                                                      tooltip:
+                                                                          'Ver detalles',
                                                                     ),
                                                                     if (!readOnly)
                                                                       IconButton(
-                                                                        icon: const Icon(Icons.edit, size: 16, color: Colors.orange),
-                                                                        onPressed: () => _editarDireccion(dirDoc),
-                                                                        padding: EdgeInsets.zero,
-                                                                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                                                        tooltip: 'Editar',
+                                                                        icon: const Icon(
+                                                                          Icons
+                                                                              .edit,
+                                                                          size:
+                                                                              16,
+                                                                          color:
+                                                                              Colors.orange,
+                                                                        ),
+                                                                        onPressed: () =>
+                                                                            _editarDireccion(
+                                                                              dirDoc,
+                                                                            ),
+                                                                        padding:
+                                                                            EdgeInsets.zero,
+                                                                        constraints: const BoxConstraints(
+                                                                          minWidth:
+                                                                              32,
+                                                                          minHeight:
+                                                                              32,
+                                                                        ),
+                                                                        tooltip:
+                                                                            'Editar',
                                                                       ),
                                                                     if (!readOnly)
                                                                       IconButton(
-                                                                        icon: const Icon(Icons.delete, size: 16, color: Colors.red),
-                                                                        onPressed: () => _eliminarDireccion(dirDoc.id, terId, tarjetaId),
-                                                                        padding: EdgeInsets.zero,
-                                                                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                                                        tooltip: 'Eliminar',
+                                                                        icon: const Icon(
+                                                                          Icons
+                                                                              .delete,
+                                                                          size:
+                                                                              16,
+                                                                          color:
+                                                                              Colors.red,
+                                                                        ),
+                                                                        onPressed: () => _eliminarDireccion(
+                                                                          dirDoc
+                                                                              .id,
+                                                                          terId,
+                                                                          tarjetaId,
+                                                                        ),
+                                                                        padding:
+                                                                            EdgeInsets.zero,
+                                                                        constraints: const BoxConstraints(
+                                                                          minWidth:
+                                                                              32,
+                                                                          minHeight:
+                                                                              32,
+                                                                        ),
+                                                                        tooltip:
+                                                                            'Eliminar',
                                                                       ),
                                                                   ],
                                                                 ),
@@ -2501,46 +3758,107 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                                             ],
                                                           ),
                                                         ),
-                                                        if (complemento.isNotEmpty || informacion.isNotEmpty)
+                                                        if (complemento
+                                                                .isNotEmpty ||
+                                                            informacion
+                                                                .isNotEmpty)
                                                           Container(
-                                                            width: double.infinity,
-                                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                                            width:
+                                                                double.infinity,
+                                                            padding:
+                                                                const EdgeInsets.symmetric(
+                                                                  horizontal:
+                                                                      12,
+                                                                  vertical: 8,
+                                                                ),
                                                             decoration: BoxDecoration(
-                                                              color: Colors.grey.shade50,
-                                                              border: Border(top: BorderSide(color: Colors.blue.shade100)),
+                                                              color: Colors
+                                                                  .grey
+                                                                  .shade50,
+                                                              border: Border(
+                                                                top: BorderSide(
+                                                                  color: Colors
+                                                                      .blue
+                                                                      .shade100,
+                                                                ),
+                                                              ),
                                                             ),
                                                             child: Column(
-                                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
                                                               children: [
-                                                                if (complemento.isNotEmpty)
+                                                                if (complemento
+                                                                    .isNotEmpty)
                                                                   Padding(
-                                                                    padding: const EdgeInsets.only(bottom: 6),
+                                                                    padding:
+                                                                        const EdgeInsets.only(
+                                                                          bottom:
+                                                                              6,
+                                                                        ),
                                                                     child: Row(
-                                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                                      crossAxisAlignment:
+                                                                          CrossAxisAlignment
+                                                                              .start,
                                                                       children: [
-                                                                        const Icon(Icons.apartment, size: 14, color: Colors.orange),
-                                                                        const SizedBox(width: 6),
+                                                                        const Icon(
+                                                                          Icons
+                                                                              .apartment,
+                                                                          size:
+                                                                              14,
+                                                                          color:
+                                                                              Colors.orange,
+                                                                        ),
+                                                                        const SizedBox(
+                                                                          width:
+                                                                              6,
+                                                                        ),
                                                                         Expanded(
                                                                           child: Text(
                                                                             complemento,
-                                                                            style: const TextStyle(fontSize: 11, color: Color(0xFF263238)),
+                                                                            style: const TextStyle(
+                                                                              fontSize: 11,
+                                                                              color: Color(
+                                                                                0xFF263238,
+                                                                              ),
+                                                                            ),
                                                                           ),
                                                                         ),
                                                                       ],
                                                                     ),
                                                                   ),
-                                                                if (informacion.isNotEmpty)
+                                                                if (informacion
+                                                                    .isNotEmpty)
                                                                   Row(
-                                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                                    crossAxisAlignment:
+                                                                        CrossAxisAlignment
+                                                                            .start,
                                                                     children: [
-                                                                      const Icon(Icons.note, size: 14, color: Colors.green),
-                                                                      const SizedBox(width: 6),
+                                                                      const Icon(
+                                                                        Icons
+                                                                            .note,
+                                                                        size:
+                                                                            14,
+                                                                        color: Colors
+                                                                            .green,
+                                                                      ),
+                                                                      const SizedBox(
+                                                                        width:
+                                                                            6,
+                                                                      ),
                                                                       Expanded(
                                                                         child: Text(
                                                                           informacion,
-                                                                          style: const TextStyle(fontSize: 11, color: Colors.grey),
-                                                                          maxLines: 2,
-                                                                          overflow: TextOverflow.ellipsis,
+                                                                          style: const TextStyle(
+                                                                            fontSize:
+                                                                                11,
+                                                                            color:
+                                                                                Colors.grey,
+                                                                          ),
+                                                                          maxLines:
+                                                                              2,
+                                                                          overflow:
+                                                                              TextOverflow.ellipsis,
                                                                         ),
                                                                       ),
                                                                     ],
@@ -2581,7 +3899,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     final String informacion = dirDoc['informacion'] ?? 'No especificada';
     final String calle = dirDoc['calle'] ?? '';
     final String barrio = dirDoc['barrio'] ?? 'Sin barrio';
-    final String estadoPredicacion = dirDoc['estado_predicacion'] ?? 'pendiente';
+    final String estadoPredicacion =
+        dirDoc['estado_predicacion'] ?? 'pendiente';
     final bool predicado = dirDoc['predicado'] ?? false;
     final bool noPredicado = dirDoc['no_predicado'] ?? false;
     final bool esHispano = dirDoc['es_hispano'] ?? true;
@@ -2592,7 +3911,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -2609,15 +3930,40 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   ],
                 ),
                 const SizedBox(height: 16),
-                _detalleCard('📍 Calle', calle, Colors.blue, const Color(0xFFB3E5FC)),
+                _detalleCard(
+                  '📍 Calle',
+                  calle,
+                  Colors.blue,
+                  const Color(0xFFB3E5FC),
+                ),
                 const SizedBox(height: 12),
-                _detalleCard('🏘️ Barrio', barrio, Colors.green, const Color(0xFFC8E6C9)),
+                _detalleCard(
+                  '🏘️ Barrio',
+                  barrio,
+                  Colors.green,
+                  const Color(0xFFC8E6C9),
+                ),
                 const SizedBox(height: 12),
-                _detalleCard('🏠 Complemento', complemento, Colors.orange, const Color(0xFFFFE0B2)),
+                _detalleCard(
+                  '🏠 Complemento',
+                  complemento,
+                  Colors.orange,
+                  const Color(0xFFFFE0B2),
+                ),
                 const SizedBox(height: 12),
-                _detalleCard('📝 Información', informacion, Colors.purple, const Color(0xFFE1BEE7)),
+                _detalleCard(
+                  '📝 Información',
+                  informacion,
+                  Colors.purple,
+                  const Color(0xFFE1BEE7),
+                ),
                 const SizedBox(height: 12),
-                _detalleCard('📌 Estado predicación', estadoPredicacion, Colors.teal, const Color(0xFFB2DFDB)),
+                _detalleCard(
+                  '📌 Estado predicación',
+                  estadoPredicacion,
+                  Colors.teal,
+                  const Color(0xFFB2DFDB),
+                ),
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -2629,7 +3975,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    _chipDetalle(esHispano ? 'Hispano' : 'No hispano', esHispano),
+                    _chipDetalle(
+                      esHispano ? 'Hispano' : 'No hispano',
+                      esHispano,
+                    ),
                     const SizedBox(width: 8),
                     _chipDetalle('Entregó invitación', entregoInvitacion),
                   ],
@@ -2646,9 +3995,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1B5E20),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
-                    child: const Text('Entendido', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                    child: const Text(
+                      'Entendido',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -2659,7 +4016,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     );
   }
 
-  Widget _detalleCard(String titulo, String valor, Color iconColor, Color backgroundColor) {
+  Widget _detalleCard(
+    String titulo,
+    String valor,
+    Color iconColor,
+    Color backgroundColor,
+  ) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -2671,9 +4033,19 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(titulo, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: iconColor)),
+          Text(
+            titulo,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: iconColor,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(valor, style: const TextStyle(fontSize: 14, color: Color(0xFF263238))),
+          Text(
+            valor,
+            style: const TextStyle(fontSize: 14, color: Color(0xFF263238)),
+          ),
         ],
       ),
     );
@@ -2686,11 +4058,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         color: activo ? Colors.green.shade100 : Colors.grey.shade200,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Text(texto, style: TextStyle(fontSize: 12, color: activo ? Colors.green.shade900 : Colors.black54)),
+      child: Text(
+        texto,
+        style: TextStyle(
+          fontSize: 12,
+          color: activo ? Colors.green.shade900 : Colors.black54,
+        ),
+      ),
     );
   }
 
-  Widget _buildDirectionStatusButton(QueryDocumentSnapshot doc, String estado, String label) {
+  Widget _buildDirectionStatusButton(
+    QueryDocumentSnapshot doc,
+    String estado,
+    String label,
+  ) {
     return ElevatedButton(
       onPressed: () async {
         final data = doc.data() as Map<String, dynamic>;
@@ -2713,14 +4095,23 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         elevation: 0,
       ),
-      child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
     );
   }
 
   void _editarDireccion(QueryDocumentSnapshot dirDoc) {
-    final TextEditingController calleCtrl = TextEditingController(text: dirDoc['calle'] ?? '');
-    final TextEditingController complementoCtrl = TextEditingController(text: dirDoc['complemento'] ?? '');
-    final TextEditingController informacionCtrl = TextEditingController(text: dirDoc['informacion'] ?? '');
+    final TextEditingController calleCtrl = TextEditingController(
+      text: dirDoc['calle'] ?? '',
+    );
+    final TextEditingController complementoCtrl = TextEditingController(
+      text: dirDoc['complemento'] ?? '',
+    );
+    final TextEditingController informacionCtrl = TextEditingController(
+      text: dirDoc['informacion'] ?? '',
+    );
     bool predicado = dirDoc['predicado'] ?? false;
     bool noPredicado = dirDoc['no_predicado'] ?? false;
     bool noHispano = (dirDoc['es_hispano'] ?? true) == false;
@@ -2733,16 +4124,28 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.edit_location, size: 40, color: Colors.orange),
+                      const Icon(
+                        Icons.edit_location,
+                        size: 40,
+                        color: Colors.orange,
+                      ),
                       const SizedBox(height: 16),
-                      const Text('Editar Dirección', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const Text(
+                        'Editar Dirección',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 20),
                       TextField(
                         controller: calleCtrl,
@@ -2750,8 +4153,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           hintText: 'Calle',
                           filled: true,
                           fillColor: const Color(0xFFF5F5F5),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.orange, width: 2)),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Colors.orange,
+                              width: 2,
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -2761,8 +4173,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           hintText: 'Complemento',
                           filled: true,
                           fillColor: const Color(0xFFF5F5F5),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.orange, width: 2)),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Colors.orange,
+                              width: 2,
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -2772,8 +4193,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           hintText: 'Información',
                           filled: true,
                           fillColor: const Color(0xFFF5F5F5),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.orange, width: 2)),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                              color: Colors.orange,
+                              width: 2,
+                            ),
+                          ),
                         ),
                         maxLines: 2,
                       ),
@@ -2807,22 +4237,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         title: const Text('No vive hispanohablante'),
                         value: noHispano,
                         activeColor: Colors.orange,
-                        onChanged: (value) => setDialogState(() => noHispano = value ?? false),
+                        onChanged: (value) =>
+                            setDialogState(() => noHispano = value ?? false),
                       ),
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Entregó invitación'),
                         value: entregoInvitacion,
                         activeColor: Colors.blue,
-                        onChanged: (value) => setDialogState(() => entregoInvitacion = value ?? false),
+                        onChanged: (value) => setDialogState(
+                          () => entregoInvitacion = value ?? false,
+                        ),
                       ),
-                      if (_campanaEspecialActiva) 
+                      if (_campanaEspecialActiva)
                         CheckboxListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Campaña especial activa'),
                           value: campanaEspecial,
                           activeColor: Colors.deepOrange,
-                          onChanged: (value) => setDialogState(() => campanaEspecial = value ?? false),
+                          onChanged: (value) => setDialogState(
+                            () => campanaEspecial = value ?? false,
+                          ),
                         ),
                       const SizedBox(height: 16),
                       Row(
@@ -2830,7 +4265,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           Expanded(
                             child: ElevatedButton(
                               onPressed: () => Navigator.pop(context),
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.grey),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey,
+                              ),
                               child: const Text('Cancelar'),
                             ),
                           ),
@@ -2841,28 +4278,40 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                 final estadoPredicacion = predicado
                                     ? 'predicado'
                                     : noPredicado
-                                        ? 'no_predicado'
-                                        : 'pendiente';
-                                await FirebaseFirestore.instance.collection('direcciones_globales').doc(dirDoc.id).update({
-                                  'calle': calleCtrl.text.trim(),
-                                  'complemento': complementoCtrl.text.trim(),
-                                  'informacion': informacionCtrl.text.trim(),
-                                  'direccion_normalizada': _normalizarDireccion('${calleCtrl.text.trim()} ${complementoCtrl.text.trim()}'),
-                                  'predicado': predicado,
-                                  'no_predicado': noPredicado,
-                                  'es_hispano': !noHispano,
-                                  'entrego_invitacion': entregoInvitacion,
-                                  'campana_especial': campanaEspecial,
-                                  'estado_predicacion': estadoPredicacion,
-                                });
+                                    ? 'no_predicado'
+                                    : 'pendiente';
+                                await FirebaseFirestore.instance
+                                    .collection('direcciones_globales')
+                                    .doc(dirDoc.id)
+                                    .update({
+                                      'calle': calleCtrl.text.trim(),
+                                      'complemento': complementoCtrl.text
+                                          .trim(),
+                                      'informacion': informacionCtrl.text
+                                          .trim(),
+                                      'direccion_normalizada': _normalizarDireccion(
+                                        '${calleCtrl.text.trim()} ${complementoCtrl.text.trim()}',
+                                      ),
+                                      'predicado': predicado,
+                                      'no_predicado': noPredicado,
+                                      'es_hispano': !noHispano,
+                                      'entrego_invitacion': entregoInvitacion,
+                                      'campana_especial': campanaEspecial,
+                                      'estado_predicacion': estadoPredicacion,
+                                    });
                                 if (context.mounted) Navigator.pop(context);
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('✅ Dirección actualizada'), backgroundColor: Colors.green),
+                                    const SnackBar(
+                                      content: Text('✅ Dirección actualizada'),
+                                      backgroundColor: Colors.green,
+                                    ),
                                   );
                                 }
                               },
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                              ),
                               child: const Text('Guardar'),
                             ),
                           ),
@@ -2884,15 +4333,23 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('⚠️ Eliminar Dirección'),
-        content: const Text('¿Estás completamente seguro de que deseas eliminar esta dirección? Esta acción no se puede deshacer.'),
+        content: const Text(
+          '¿Estás completamente seguro de que deseas eliminar esta dirección? Esta acción no se puede deshacer.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+            child: const Text(
+              'Cancelar',
+              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('SÍ, Eliminar', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            child: const Text(
+              'SÍ, Eliminar',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -2900,7 +4357,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
 
     if (confirmar == true) {
       try {
-        await FirebaseFirestore.instance.collection('direcciones_globales').doc(dirId).delete();
+        await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .doc(dirId)
+            .delete();
 
         DocumentSnapshot snap = await FirebaseFirestore.instance
             .collection('territorios')
@@ -2908,7 +4368,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
             .collection('tarjetas')
             .doc(tarjetaId)
             .get();
-        int currentCount = snap.data() != null ? (snap.data() as Map)['cantidad_direcciones'] ?? 0 : 0;
+        int currentCount = snap.data() != null
+            ? (snap.data() as Map)['cantidad_direcciones'] ?? 0
+            : 0;
 
         if (currentCount > 0) {
           await FirebaseFirestore.instance
@@ -2916,20 +4378,24 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               .doc(terId)
               .collection('tarjetas')
               .doc(tarjetaId)
-              .update({
-            'cantidad_direcciones': currentCount - 1,
-          });
+              .update({'cantidad_direcciones': currentCount - 1});
         }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ Dirección eliminada correctamente'), backgroundColor: Colors.green),
+            const SnackBar(
+              content: Text('✅ Dirección eliminada correctamente'),
+              backgroundColor: Colors.green,
+            ),
           );
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('❌ Error al eliminar: $e'), backgroundColor: Colors.red),
+            SnackBar(
+              content: Text('❌ Error al eliminar: $e'),
+              backgroundColor: Colors.red,
+            ),
           );
         }
       }
@@ -2942,7 +4408,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       context: parentContext,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Stack(
             children: [
               Padding(
@@ -2952,9 +4420,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   children: [
                     const Icon(Icons.folder_open, size: 40, color: Colors.blue),
                     const SizedBox(height: 16),
-                    const Text('Crear Nueva Tarjeta', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                    const Text(
+                      'Crear Nueva Tarjeta',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                     const SizedBox(height: 20),
-                    TextField(controller: ctrl, textAlign: TextAlign.center, decoration: _inputStyleHelper('Ej: A01 - CENTRO 1')),
+                    TextField(
+                      controller: ctrl,
+                      textAlign: TextAlign.center,
+                      decoration: _inputStyleHelper('Ej: A01 - CENTRO 1'),
+                    ),
                     const SizedBox(height: 24),
                     SizedBox(
                       width: double.infinity,
@@ -2963,11 +4442,15 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         onPressed: () async {
                           if (ctrl.text.trim().isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Por favor ingresa un nombre para la tarjeta')),
+                              const SnackBar(
+                                content: Text(
+                                  'Por favor ingresa un nombre para la tarjeta',
+                                ),
+                              ),
                             );
                             return;
                           }
-                          
+
                           try {
                             String nombreTarjeta = ctrl.text.trim();
                             await FirebaseFirestore.instance
@@ -2976,20 +4459,22 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                 .collection('tarjetas')
                                 .doc(nombreTarjeta)
                                 .set({
-                              'nombre': nombreTarjeta,
-                              'territorio_id': terId,
-                              'estado': 'disponible',
-                              'cantidad_direcciones': 0,
-                              'barrio': '',
-                              'created_at': FieldValue.serverTimestamp(),
-                            });
-                            
+                                  'nombre': nombreTarjeta,
+                                  'territorio_id': terId,
+                                  'estado': 'disponible',
+                                  'cantidad_direcciones': 0,
+                                  'barrio': '',
+                                  'created_at': FieldValue.serverTimestamp(),
+                                });
+
                             if (context.mounted) {
                               Navigator.pop(context);
                             }
-                            
+
                             if (parentContext.mounted) {
-                              await Future.delayed(const Duration(milliseconds: 500));
+                              await Future.delayed(
+                                const Duration(milliseconds: 500),
+                              );
                               ScaffoldMessenger.of(parentContext).showSnackBar(
                                 const SnackBar(
                                   content: Text('✅ ¡Tarjeta creada con éxito!'),
@@ -3011,9 +4496,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
-                        child: const Text('Crear Tarjeta', style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'Crear Tarjeta',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
                   ],
@@ -3034,7 +4524,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     );
   }
 
-  void _agregarDireccionesATarjeta(BuildContext parentContext, String terId, String tarjetaId, String tarjetaNombre) {
+  void _agregarDireccionesATarjeta(
+    BuildContext parentContext,
+    String terId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) {
     Set<String> idsSeleccionados = {};
     final TextEditingController direccionCtrl = TextEditingController();
     final TextEditingController complementoCtrl = TextEditingController();
@@ -3046,10 +4541,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         return StatefulBuilder(
           builder: (context, setLocalState) {
             return Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Container(
                 width: double.maxFinite,
-                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.9,
+                ),
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -3057,13 +4556,25 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(child: Text(tarjetaNombre, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue))),
-                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                        Expanded(
+                          child: Text(
+                            tarjetaNombre,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context),
+                        ),
                       ],
                     ),
                     const Divider(),
                     const SizedBox(height: 16),
-                    
+
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -3076,11 +4587,19 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         children: [
                           const Row(
                             children: [
-                              Icon(Icons.edit_document, color: Colors.blue, size: 20),
+                              Icon(
+                                Icons.edit_document,
+                                color: Colors.blue,
+                                size: 20,
+                              ),
                               SizedBox(width: 8),
                               Text(
                                 'Crear Dirección Manual',
-                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blue),
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue,
+                                ),
                               ),
                             ],
                           ),
@@ -3091,12 +4610,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                               hintText: 'Ej: Calle Martín Peña 123',
                               filled: true,
                               fillColor: Colors.white,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: Colors.blue, width: 2),
+                                borderSide: const BorderSide(
+                                  color: Colors.blue,
+                                  width: 2,
+                                ),
                               ),
-                              prefixIcon: const Icon(Icons.location_on, color: Colors.blue),
+                              prefixIcon: const Icon(
+                                Icons.location_on,
+                                color: Colors.blue,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -3106,27 +4634,46 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                               hintText: 'Complemento (Apto, Casa, Lote, etc.)',
                               filled: true,
                               fillColor: Colors.white,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: Colors.blue, width: 2),
+                                borderSide: const BorderSide(
+                                  color: Colors.blue,
+                                  width: 2,
+                                ),
                               ),
-                              prefixIcon: const Icon(Icons.home, color: Colors.blue),
+                              prefixIcon: const Icon(
+                                Icons.home,
+                                color: Colors.blue,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
                           TextField(
                             controller: informacionCtrl,
                             decoration: InputDecoration(
-                              hintText: 'Información (Notas, referencias, etc.)',
+                              hintText:
+                                  'Información (Notas, referencias, etc.)',
                               filled: true,
                               fillColor: Colors.white,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none,
+                              ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: Colors.blue, width: 2),
+                                borderSide: const BorderSide(
+                                  color: Colors.blue,
+                                  width: 2,
+                                ),
                               ),
-                              prefixIcon: const Icon(Icons.info, color: Colors.blue),
+                              prefixIcon: const Icon(
+                                Icons.info,
+                                color: Colors.blue,
+                              ),
                             ),
                             maxLines: 2,
                           ),
@@ -3138,44 +4685,64 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                               onPressed: () async {
                                 if (direccionCtrl.text.trim().isEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Por favor ingresa una dirección')),
+                                    const SnackBar(
+                                      content: Text(
+                                        'Por favor ingresa una dirección',
+                                      ),
+                                    ),
                                   );
                                   return;
                                 }
 
                                 try {
-                                  String nombreDireccion = direccionCtrl.text.trim();
-                                  String docId = "${terId}_${tarjetaId}_${nombreDireccion.replaceAll(' ', '_')}";
-                                  
-                                  await FirebaseFirestore.instance.collection('direcciones_globales').doc(docId).set({
-                                    'calle': nombreDireccion,
-                                    'direccion_normalizada': _normalizarDireccion('$nombreDireccion ${complementoCtrl.text.trim()}'),
-                                    'complemento': complementoCtrl.text.trim(),
-                                    'informacion': informacionCtrl.text.trim(),
-                                    'barrio': terId,
-                                    'lat': '0',
-                                    'lon': '0',
-                                    'estado': 'activa',
-                                    'territorio_id': terId,
-                                    'tarjeta_id': tarjetaId,
-                                    'created_at': FieldValue.serverTimestamp(),
-                                    'tipo': 'manual',
-                                    'estado_predicacion': 'pendiente',
-                                    'predicado': false,
-                                    'no_predicado': false,
-                                    'es_hispano': true,
-                                    'entrego_invitacion': false,
-                                    'campana_especial': false,
-                                    'publicador_email': null,
-                                  });
+                                  String nombreDireccion = direccionCtrl.text
+                                      .trim();
+                                  String docId =
+                                      "${terId}_${tarjetaId}_${nombreDireccion.replaceAll(' ', '_')}";
 
-                                  DocumentSnapshot snap = await FirebaseFirestore.instance
-                                      .collection('territorios')
-                                      .doc(terId)
-                                      .collection('tarjetas')
-                                      .doc(tarjetaId)
-                                      .get();
-                                  int currentCount = snap.data() != null ? (snap.data() as Map)['cantidad_direcciones'] ?? 0 : 0;
+                                  await FirebaseFirestore.instance
+                                      .collection('direcciones_globales')
+                                      .doc(docId)
+                                      .set({
+                                        'calle': nombreDireccion,
+                                        'direccion_normalizada':
+                                            _normalizarDireccion(
+                                              '$nombreDireccion ${complementoCtrl.text.trim()}',
+                                            ),
+                                        'complemento': complementoCtrl.text
+                                            .trim(),
+                                        'informacion': informacionCtrl.text
+                                            .trim(),
+                                        'barrio': terId,
+                                        'lat': '0',
+                                        'lon': '0',
+                                        'estado': 'activa',
+                                        'territorio_id': terId,
+                                        'tarjeta_id': tarjetaId,
+                                        'created_at':
+                                            FieldValue.serverTimestamp(),
+                                        'tipo': 'manual',
+                                        'estado_predicacion': 'pendiente',
+                                        'predicado': false,
+                                        'no_predicado': false,
+                                        'es_hispano': true,
+                                        'entrego_invitacion': false,
+                                        'campana_especial': false,
+                                        'publicador_email': null,
+                                      });
+
+                                  DocumentSnapshot snap =
+                                      await FirebaseFirestore.instance
+                                          .collection('territorios')
+                                          .doc(terId)
+                                          .collection('tarjetas')
+                                          .doc(tarjetaId)
+                                          .get();
+                                  int currentCount = snap.data() != null
+                                      ? (snap.data()
+                                                as Map)['cantidad_direcciones'] ??
+                                            0
+                                      : 0;
 
                                   await FirebaseFirestore.instance
                                       .collection('territorios')
@@ -3183,8 +4750,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                       .collection('tarjetas')
                                       .doc(tarjetaId)
                                       .update({
-                                    'cantidad_direcciones': currentCount + 1,
-                                  });
+                                        'cantidad_direcciones':
+                                            currentCount + 1,
+                                      });
 
                                   if (context.mounted) {
                                     direccionCtrl.clear();
@@ -3193,7 +4761,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                     setLocalState(() {});
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content: Text('✅ Dirección agregada correctamente'),
+                                        content: Text(
+                                          '✅ Dirección agregada correctamente',
+                                        ),
                                         backgroundColor: Colors.green,
                                       ),
                                     );
@@ -3201,7 +4771,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                 } catch (e) {
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+                                      SnackBar(
+                                        content: Text('❌ Error: $e'),
+                                        backgroundColor: Colors.red,
+                                      ),
                                     );
                                   }
                                 }
@@ -3209,7 +4782,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.blue,
                                 foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                               ),
                               icon: const Icon(Icons.add),
                               label: const Text('Agregar Dirección'),
@@ -3218,14 +4793,18 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         ],
                       ),
                     ),
-                    
+
                     const SizedBox(height: 16),
                     const Text(
                       'O seleccionar del Directorio Global:',
-                      style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 10),
-                    
+
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
@@ -3233,14 +4812,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                             .where('tarjeta_id', isNull: true)
                             .snapshots(),
                         builder: (context, snapshot) {
-                          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                          
+                          if (!snapshot.hasData)
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+
                           if (snapshot.data!.docs.isEmpty) {
                             return Center(
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: const [
-                                  Icon(Icons.inbox, size: 40, color: Colors.grey),
+                                  Icon(
+                                    Icons.inbox,
+                                    size: 40,
+                                    color: Colors.grey,
+                                  ),
                                   SizedBox(height: 10),
                                   Text(
                                     'No hay direcciones sin asignar en el Directorio Global',
@@ -3257,20 +4843,32 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                             itemCount: snapshot.data!.docs.length,
                             itemBuilder: (context, index) {
                               var doc = snapshot.data!.docs[index];
-                              bool isChecked = idsSeleccionados.contains(doc.id);
+                              bool isChecked = idsSeleccionados.contains(
+                                doc.id,
+                              );
                               return CheckboxListTile(
                                 dense: true,
                                 title: Text(
                                   doc['calle'],
-                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                                 subtitle: Row(
                                   children: [
-                                    const Icon(Icons.location_on, size: 12, color: Colors.grey),
+                                    const Icon(
+                                      Icons.location_on,
+                                      size: 12,
+                                      color: Colors.grey,
+                                    ),
                                     const SizedBox(width: 4),
                                     Text(
                                       doc['barrio'] ?? 'Sin barrio',
-                                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -3291,7 +4889,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         },
                       ),
                     ),
-                    
+
                     const SizedBox(height: 15),
                     SizedBox(
                       width: double.infinity,
@@ -3300,11 +4898,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         onPressed: idsSeleccionados.isEmpty
                             ? null
                             : () async {
-                                WriteBatch batch = FirebaseFirestore.instance.batch();
+                                WriteBatch batch = FirebaseFirestore.instance
+                                    .batch();
 
                                 for (String idDir in idsSeleccionados) {
                                   batch.update(
-                                    FirebaseFirestore.instance.collection('direcciones_globales').doc(idDir),
+                                    FirebaseFirestore.instance
+                                        .collection('direcciones_globales')
+                                        .doc(idDir),
                                     {
                                       'tarjeta_id': tarjetaId,
                                       'territorio_id': terId,
@@ -3321,13 +4922,18 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                   );
                                 }
 
-                                DocumentSnapshot snap = await FirebaseFirestore.instance
+                                DocumentSnapshot snap = await FirebaseFirestore
+                                    .instance
                                     .collection('territorios')
                                     .doc(terId)
                                     .collection('tarjetas')
                                     .doc(tarjetaId)
                                     .get();
-                                int currentCount = snap.data() != null ? (snap.data() as Map)['cantidad_direcciones'] ?? 0 : 0;
+                                int currentCount = snap.data() != null
+                                    ? (snap.data()
+                                              as Map)['cantidad_direcciones'] ??
+                                          0
+                                    : 0;
 
                                 batch.update(
                                   FirebaseFirestore.instance
@@ -3335,16 +4941,23 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                       .doc(terId)
                                       .collection('tarjetas')
                                       .doc(tarjetaId),
-                                  {'cantidad_direcciones': currentCount + idsSeleccionados.length},
+                                  {
+                                    'cantidad_direcciones':
+                                        currentCount + idsSeleccionados.length,
+                                  },
                                 );
 
                                 await batch.commit();
 
                                 if (parentContext.mounted) {
                                   Navigator.pop(context);
-                                  ScaffoldMessenger.of(parentContext).showSnackBar(
+                                  ScaffoldMessenger.of(
+                                    parentContext,
+                                  ).showSnackBar(
                                     SnackBar(
-                                      content: Text('✅ ${idsSeleccionados.length} direcciones asignadas a $tarjetaNombre'),
+                                      content: Text(
+                                        '✅ ${idsSeleccionados.length} direcciones asignadas a $tarjetaNombre',
+                                      ),
                                       backgroundColor: Colors.green,
                                     ),
                                   );
@@ -3358,7 +4971,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       ),
                     ),
@@ -3377,8 +4992,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       hintText: hint,
       filled: true,
       fillColor: const Color(0xFFF5F5F5),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.blue, width: 2)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Colors.blue, width: 2),
+      ),
     );
   }
 
@@ -3387,10 +5008,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: Container(
             width: double.maxFinite,
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.8,
+            ),
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -3398,64 +5023,114 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Directorio Global', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    IconButton(icon: const Icon(Icons.close, color: Colors.grey), onPressed: () => Navigator.pop(context))
+                    const Text(
+                      'Directorio Global',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.grey),
+                      onPressed: () => Navigator.pop(context),
+                    ),
                   ],
                 ),
                 const Divider(),
                 const SizedBox(height: 16),
                 Expanded(
                   child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('direcciones_globales').snapshots(),
+                    stream: FirebaseFirestore.instance
+                        .collection('direcciones_globales')
+                        .snapshots(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      
+
                       if (snapshot.data!.docs.isEmpty) {
-                        return const Center(child: Text('El Directorio Global está vacío', style: TextStyle(color: Colors.grey)));
+                        return const Center(
+                          child: Text(
+                            'El Directorio Global está vacío',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        );
                       }
-                      
+
                       return ListView.builder(
                         shrinkWrap: true,
                         itemCount: snapshot.data!.docs.length,
                         itemBuilder: (context, index) {
                           var doc = snapshot.data!.docs[index];
                           String estado = doc['estado'] ?? 'desconocido';
-                          Color colorEstado = estado == 'asignada' ? Colors.green : Colors.grey;
-                          
+                          Color colorEstado = estado == 'asignada'
+                              ? Colors.green
+                              : Colors.grey;
+
                           return ListTile(
                             dense: true,
-                            leading: Icon(Icons.location_on, color: colorEstado, size: 20),
-                            title: Text(doc['calle'], style: const TextStyle(fontSize: 14)),
+                            leading: Icon(
+                              Icons.location_on,
+                              color: colorEstado,
+                              size: 20,
+                            ),
+                            title: Text(
+                              doc['calle'],
+                              style: const TextStyle(fontSize: 14),
+                            ),
                             subtitle: Text(
                               doc['barrio'] ?? 'Sin barrio',
-                              style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey,
+                              ),
                             ),
                             trailing: PopupMenuButton<String>(
-                              icon: const Icon(Icons.more_vert, color: Colors.grey),
+                              icon: const Icon(
+                                Icons.more_vert,
+                                color: Colors.grey,
+                              ),
                               onSelected: (value) async {
                                 if (value == 'eliminar') {
                                   bool? confirmar = await showDialog(
                                     context: context,
                                     builder: (c) => AlertDialog(
                                       title: const Text('Eliminar Dirección'),
-                                      content: Text('¿Eliminar "${doc['calle']}" del directorio global?'),
+                                      content: Text(
+                                        '¿Eliminar "${doc['calle']}" del directorio global?',
+                                      ),
                                       actions: [
-                                        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-                                        TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Eliminar', style: TextStyle(color: Colors.red))),
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(c, false),
+                                          child: const Text('Cancelar'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(c, true),
+                                          child: const Text(
+                                            'Eliminar',
+                                            style: TextStyle(color: Colors.red),
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   );
                                   if (confirmar == true) {
-                                    await FirebaseFirestore.instance.collection('direcciones_globales').doc(doc.id).delete();
+                                    await FirebaseFirestore.instance
+                                        .collection('direcciones_globales')
+                                        .doc(doc.id)
+                                        .delete();
                                   }
                                 }
                               },
                               itemBuilder: (context) => [
                                 const PopupMenuItem(
                                   value: 'eliminar',
-                                  child: Text('Eliminar dirección', style: TextStyle(color: Colors.red)),
+                                  child: Text(
+                                    'Eliminar dirección',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
                                 ),
                               ],
                             ),
@@ -3473,13 +5148,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
     );
   }
 
-  double _calcularDistanciaKm(double lat1, double lon1, double lat2, double lon2) {
+  double _calcularDistanciaKm(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
     const R = 6371;
     final dLat = _degreesToRadians(lat2 - lat1);
     final dLon = _degreesToRadians(lon2 - lon1);
-    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_degreesToRadians(lat1)) * math.cos(_degreesToRadians(lat2)) *
-            math.sin(dLon / 2) * math.sin(dLon / 2);
+    final a =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(_degreesToRadians(lat1)) *
+            math.cos(_degreesToRadians(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
     final c = 2 * math.asin(math.sqrt(a));
     return R * c;
   }
@@ -3513,7 +5196,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
             _iniciarGeolocalizacionOSM(direccionesExtraidas);
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Error: No se pudieron extraer calles.'), backgroundColor: Colors.redAccent),
+              const SnackBar(
+                content: Text('Error: No se pudieron extraer calles.'),
+                backgroundColor: Colors.redAccent,
+              ),
             );
           }
         }
@@ -3521,7 +5207,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       onUnsupported: () {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Carga de CSV solo está disponible en la web.'), backgroundColor: Colors.orangeAccent),
+            const SnackBar(
+              content: Text('Carga de CSV solo está disponible en la web.'),
+              backgroundColor: Colors.orangeAccent,
+            ),
           );
         }
       },
@@ -3545,11 +5234,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Obteniendo coordenadas exactas. Esto tomará aproximadamente 2 minutos.\n¡Por favor no cierre la app!'),
+                  const Text(
+                    'Obteniendo coordenadas exactas. Esto tomará aproximadamente 2 minutos.\n¡Por favor no cierre la app!',
+                  ),
                   const SizedBox(height: 20),
-                  LinearProgressIndicator(value: porcentaje, backgroundColor: Colors.grey.shade300, color: const Color(0xFF1B5E20)),
+                  LinearProgressIndicator(
+                    value: porcentaje,
+                    backgroundColor: Colors.grey.shade300,
+                    color: const Color(0xFF1B5E20),
+                  ),
                   const SizedBox(height: 10),
-                  Text('Dirección $progresoActual de ${direcciones.length}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(
+                    'Dirección $progresoActual de ${direcciones.length}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ],
               ),
             );
@@ -3563,21 +5261,23 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       String busquedaCompleta = "$calle, Araucária - PR, Brasil";
 
       try {
-        String url = 'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(busquedaCompleta)}&format=json&limit=1';
+        String url =
+            'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(busquedaCompleta)}&format=json&limit=1';
         http.Response respuesta = await http.get(Uri.parse(url));
 
         if (respuesta.statusCode == 200) {
           List datos = jsonDecode(respuesta.body);
-          
+
           if (datos.isNotEmpty) {
             String latitud = datos[0]['lat'].toString();
             String longitud = datos[0]['lon'].toString();
-            
+
             String barrio = "";
-            if (datos[0].containsKey('address') && datos[0]['address'].containsKey('suburb')) {
+            if (datos[0].containsKey('address') &&
+                datos[0]['address'].containsKey('suburb')) {
               barrio = datos[0]['address']['suburb'].toString();
             }
-            
+
             direccionesGeolocalizadas.add({
               'calle': calle,
               'lat': latitud,
@@ -3610,7 +5310,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
 
     if (mounted) {
       Navigator.pop(context);
-      
+
       List<Map<String, dynamic>> exitosas = direccionesGeolocalizadas
           .where((d) => d['lat'].toString().isNotEmpty)
           .toList();
@@ -3618,28 +5318,32 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
 
       if (exitosas.isNotEmpty) {
         showDialog(
-          context: context, 
-          barrierDismissible: false, 
+          context: context,
+          barrierDismissible: false,
           builder: (c) => const AlertDialog(
             content: Row(
               children: [
                 CircularProgressIndicator(),
                 SizedBox(width: 20),
-                Text("Guardando en Directorio Global...")
+                Text("Guardando en Directorio Global..."),
               ],
             ),
-          )
+          ),
         );
 
         WriteBatch batch = FirebaseFirestore.instance.batch();
-        CollectionReference refGlobal = FirebaseFirestore.instance.collection('direcciones_globales');
+        CollectionReference refGlobal = FirebaseFirestore.instance.collection(
+          'direcciones_globales',
+        );
 
         for (var dir in exitosas) {
           String docId = dir['calle'].toString().replaceAll(' ', '_');
-          
+
           batch.set(refGlobal.doc(docId), {
             'calle': dir['calle'],
-            'direccion_normalizada': _normalizarDireccion(dir['calle'].toString()),
+            'direccion_normalizada': _normalizarDireccion(
+              dir['calle'].toString(),
+            ),
             'complemento': '',
             'informacion': '',
             'lat': dir['lat'],
@@ -3665,10 +5369,13 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   'Se guardaron ${exitosas.length} direcciones exactas en el Directorio Global.\n'
                   'Se detectaron automáticamente los barrios reales.\n\n'
                   '❌ $fallidas no se guardaron por falta de datos GPS.\n\n'
-                  'Presiona "Ver contenido del Directorio Global" para revisar.'
+                  'Presiona "Ver contenido del Directorio Global" para revisar.',
                 ),
                 actions: [
-                  TextButton(onPressed: () => Navigator.pop(context), child: const Text('Entendido')),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Entendido'),
+                  ),
                 ],
               ),
             );
@@ -3676,7 +5383,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         } catch (e) {
           if (mounted) {
             Navigator.pop(context);
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al guardar: $e')));
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Error al guardar: $e')));
           }
         }
       }
@@ -3690,7 +5399,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         children: const [
           Icon(Icons.credit_card, size: 80, color: Color(0xFF1B5E20)),
           SizedBox(height: 20),
-          Text('Tarjetas (En desarrollo)', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.grey)),
+          Text(
+            'Tarjetas (En desarrollo)',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+            ),
+          ),
         ],
       ),
     );
@@ -3702,13 +5418,25 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Localizador de direcciones', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF263238))),
+          const Text(
+            'Localizador de direcciones',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF263238),
+            ),
+          ),
           const SizedBox(height: 8),
-          const Text('Busca una dirección en el registro global o solicita al administrador agregarla si no existe.', style: TextStyle(fontSize: 14, color: Colors.black54)),
+          const Text(
+            'Busca una dirección en el registro global o solicita al administrador agregarla si no existe.',
+            style: TextStyle(fontSize: 14, color: Colors.black54),
+          ),
           const SizedBox(height: 20),
           TextField(
             controller: _localizadorController,
-            decoration: _inputStyleHelper('Ingresa calle, número o punto de referencia'),
+            decoration: _inputStyleHelper(
+              'Ingresa calle, número o punto de referencia',
+            ),
             onChanged: (_) {
               if (_localizadorBuscado) {
                 setState(() {
@@ -3725,10 +5453,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               Expanded(
                 child: ElevatedButton(
                   onPressed: _buscarDireccionGlobal,
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1B5E20),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                   child: const Padding(
                     padding: EdgeInsets.symmetric(vertical: 14),
-                    child: Text('Buscar dirección', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    child: Text(
+                      'Buscar dirección',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -3737,8 +5476,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           const SizedBox(height: 20),
           if (_localizadorBuscado) ...[
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              color: _localizadorEncontrada ? Colors.green.shade50 : Colors.orange.shade50,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              color: _localizadorEncontrada
+                  ? Colors.green.shade50
+                  : Colors.orange.shade50,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -3748,20 +5491,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                       _localizadorMensaje,
                       style: TextStyle(
                         fontSize: 14,
-                        color: _localizadorEncontrada ? const Color(0xFF1B5E20) : const Color(0xFF4E342E),
+                        color: _localizadorEncontrada
+                            ? const Color(0xFF1B5E20)
+                            : const Color(0xFF4E342E),
                       ),
                     ),
-                    if (!_localizadorEncontrada && _mostrarSolicitudLocalizador) ...[
+                    if (!_localizadorEncontrada &&
+                        _mostrarSolicitudLocalizador) ...[
                       const SizedBox(height: 16),
                       TextField(
                         controller: _complementoLocalizadorController,
-                        decoration: _inputStyleHelper('Complemento / referencia adicional'),
+                        decoration: _inputStyleHelper(
+                          'Complemento / referencia adicional',
+                        ),
                       ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _detallesLocalizadorController,
                         maxLines: 3,
-                        decoration: _inputStyleHelper('Detalles de la ubicación, piso, casa o nota para el admin'),
+                        decoration: _inputStyleHelper(
+                          'Detalles de la ubicación, piso, casa o nota para el admin',
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Row(
@@ -3769,10 +5519,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           Expanded(
                             child: ElevatedButton(
                               onPressed: _enviarDireccionParaRegistro,
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1B5E20),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
                               child: const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 14),
-                                child: Text('Enviar solicitud al admin', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                                child: Text(
+                                  'Enviar solicitud al admin',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -3798,7 +5559,13 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 14, offset: Offset(0, 6))],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 14,
+              offset: Offset(0, 6),
+            ),
+          ],
         ),
         child: Column(
           children: [
@@ -3808,7 +5575,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 children: const [
                   Icon(Icons.map, color: Color(0xFF4A148C)),
                   SizedBox(width: 10),
-                  Expanded(child: Text('Territorios', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF263238)))),
+                  Expanded(
+                    child: Text(
+                      'Territorios',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF263238),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -3819,10 +5595,22 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 labelColor: Color(0xFF4A148C),
                 unselectedLabelColor: Colors.black54,
                 tabs: [
-                  Tab(icon: Icon(Icons.map, color: Color(0xFF4A148C)), text: 'Territorios'),
-                  Tab(icon: Icon(Icons.timer, color: Color(0xFF4A148C)), text: 'Temporales'),
-                  Tab(icon: Icon(Icons.delete_sweep, color: Color(0xFF4A148C)), text: 'Removidas'),
-                  Tab(icon: Icon(Icons.bar_chart, color: Color(0xFF4A148C)), text: 'Estadísticas'),
+                  Tab(
+                    icon: Icon(Icons.map, color: Color(0xFF4A148C)),
+                    text: 'Territorios',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.timer, color: Color(0xFF4A148C)),
+                    text: 'Temporales',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.delete_sweep, color: Color(0xFF4A148C)),
+                    text: 'Removidas',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.bar_chart, color: Color(0xFF4A148C)),
+                    text: 'Estadísticas',
+                  ),
                 ],
               ),
             ),
@@ -3830,86 +5618,164 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               child: TabBarView(
                 children: [
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 0,
+                    ),
                     child: StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance.collection('territorios').orderBy('created_at', descending: true).snapshots(),
+                      stream: FirebaseFirestore.instance
+                          .collection('territorios')
+                          .orderBy('created_at', descending: true)
+                          .snapshots(),
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
                         }
                         if (snapshot.data!.docs.isEmpty) {
                           return const Center(
-                            child: Text('No hay territorios creados todavía.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                            child: Text(
+                              'No hay territorios creados todavía.',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                           );
                         }
                         return ListView.separated(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           itemCount: snapshot.data!.docs.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 10),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
                           itemBuilder: (context, index) {
                             final territorio = snapshot.data!.docs[index];
-                            final data = territorio.data() as Map<String, dynamic>;
+                            final data =
+                                territorio.data() as Map<String, dynamic>;
                             final nombre = data['nombre'] ?? 'Territorio';
                             final cantidad = data['cantidad_direcciones'] ?? 0;
                             final descripcion = data['descripcion'] ?? '';
                             final ubicado = data['ubicacion'] ?? '';
 
                             return InkWell(
-                              onTap: () => _abrirTerritorio(territorio.id, nombre, readOnly: true),
+                              onTap: () => _abrirTerritorio(
+                                territorio.id,
+                                nombre,
+                                readOnly: true,
+                              ),
                               borderRadius: BorderRadius.circular(16),
                               child: Card(
                                 elevation: 1,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
                                 child: Padding(
                                   padding: const EdgeInsets.all(14),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
                                           Container(
                                             width: 40,
                                             height: 40,
-                                            decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(12)),
-                                            child: const Icon(Icons.map, color: Color(0xFF4A148C)),
+                                            decoration: BoxDecoration(
+                                              color: Colors.purple.shade50,
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            child: const Icon(
+                                              Icons.map,
+                                              color: Color(0xFF4A148C),
+                                            ),
                                           ),
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
-                                                Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                                Text(
+                                                  nombre,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 15,
+                                                  ),
+                                                ),
                                                 const SizedBox(height: 4),
-                                                Text('$cantidad direcciones', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                                                Text(
+                                                  '$cantidad direcciones',
+                                                  style: const TextStyle(
+                                                    color: Colors.grey,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
                                               ],
                                             ),
                                           ),
                                           IconButton(
                                             icon: Icon(
-                                              data['disponible_para_publicadores'] == true ? Icons.lock_open : Icons.lock,
-                                              color: data['disponible_para_publicadores'] == true ? Colors.green : Colors.grey,
+                                              data['disponible_para_publicadores'] ==
+                                                      true
+                                                  ? Icons.lock_open
+                                                  : Icons.lock,
+                                              color:
+                                                  data['disponible_para_publicadores'] ==
+                                                      true
+                                                  ? Colors.green
+                                                  : Colors.grey,
                                             ),
                                             onPressed: () async {
-                                              await FirebaseFirestore.instance.collection('territorios').doc(territorio.id).set(
-                                                {'disponible_para_publicadores': !(data['disponible_para_publicadores'] ?? false)},
-                                                SetOptions(merge: true),
-                                              );
+                                              await FirebaseFirestore.instance
+                                                  .collection('territorios')
+                                                  .doc(territorio.id)
+                                                  .set({
+                                                    'disponible_para_publicadores':
+                                                        !(data['disponible_para_publicadores'] ??
+                                                            false),
+                                                  }, SetOptions(merge: true));
                                             },
-                                            tooltip: data['disponible_para_publicadores'] == true
+                                            tooltip:
+                                                data['disponible_para_publicadores'] ==
+                                                    true
                                                 ? 'Quitar disponibilidad para publicadores'
                                                 : 'Hacer disponible para publicadores',
                                           ),
                                           IconButton(
-                                            icon: const Icon(Icons.schedule, color: Color(0xFF4A148C)),
-                                            onPressed: () => _mostrarDialogoProgramarEnvio(territorio.id, nombre: nombre, isTarjeta: false),
-                                            tooltip: 'Programar envío de territorio',
+                                            icon: const Icon(
+                                              Icons.schedule,
+                                              color: Color(0xFF4A148C),
+                                            ),
+                                            onPressed: () =>
+                                                _mostrarDialogoProgramarEnvio(
+                                                  territorio.id,
+                                                  nombre: nombre,
+                                                  isTarjeta: false,
+                                                ),
+                                            tooltip:
+                                                'Programar envío de territorio',
                                           ),
-                                          const Icon(Icons.arrow_forward_ios, size: 18, color: Colors.grey),
+                                          const Icon(
+                                            Icons.arrow_forward_ios,
+                                            size: 18,
+                                            color: Colors.grey,
+                                          ),
                                         ],
                                       ),
-                                      if (descripcion.isNotEmpty || ubicado.isNotEmpty) ...[
+                                      if (descripcion.isNotEmpty ||
+                                          ubicado.isNotEmpty) ...[
                                         const SizedBox(height: 12),
-                                        Text(descripcion.isNotEmpty ? descripcion : ubicado, style: const TextStyle(color: Colors.black54, fontSize: 13)),
+                                        Text(
+                                          descripcion.isNotEmpty
+                                              ? descripcion
+                                              : ubicado,
+                                          style: const TextStyle(
+                                            color: Colors.black54,
+                                            fontSize: 13,
+                                          ),
+                                        ),
                                       ],
                                     ],
                                   ),
@@ -3923,13 +5789,24 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   ),
                   Center(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 28,
+                      ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: const [
                           Icon(Icons.timer, size: 58, color: Color(0xFF4A148C)),
                           SizedBox(height: 16),
-                          Text('Tarjetas Temporales', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF263238))),
+                          Text(
+                            'Tarjetas Temporales',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF263238),
+                            ),
+                          ),
                           SizedBox(height: 10),
                           Text(
                             'Revisa aquí las tarjetas temporales pendientes para validación o reasignar.',
@@ -3937,20 +5814,42 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                             style: TextStyle(fontSize: 14, color: Colors.grey),
                           ),
                           SizedBox(height: 20),
-                          Text('Este espacio mostrará tarjetas temporales disponibles.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                          Text(
+                            'Este espacio mostrará tarjetas temporales disponibles.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                   ),
                   Center(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 28,
+                      ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: const [
-                          Icon(Icons.delete_sweep, size: 58, color: Color(0xFF4A148C)),
+                          Icon(
+                            Icons.delete_sweep,
+                            size: 58,
+                            color: Color(0xFF4A148C),
+                          ),
                           SizedBox(height: 16),
-                          Text('Direcciones Removidas', textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF263238))),
+                          Text(
+                            'Direcciones Removidas',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF263238),
+                            ),
+                          ),
                           SizedBox(height: 10),
                           Text(
                             'Aquí se podrán revisar direcciones que fueron removidas para restaurar o revisar.',
@@ -3958,7 +5857,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                             style: TextStyle(fontSize: 14, color: Colors.grey),
                           ),
                           SizedBox(height: 20),
-                          Text('Ninguna dirección removida todavía.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+                          Text(
+                            'Ninguna dirección removida todavía.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -3972,9 +5878,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
       ),
     );
   }
+
   Widget _buildRoleChip(String text, bool enabled) {
     return Chip(
-      label: Text(text, style: TextStyle(color: enabled ? Colors.white : Colors.black54, fontSize: 12)),
+      label: Text(
+        text,
+        style: TextStyle(
+          color: enabled ? Colors.white : Colors.black54,
+          fontSize: 12,
+        ),
+      ),
       backgroundColor: enabled ? const Color(0xFF1B5E20) : Colors.grey.shade200,
       side: enabled ? null : BorderSide(color: Colors.grey.shade400),
     );
@@ -3989,7 +5902,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           const SizedBox(height: 10),
           const Icon(Icons.directions_car, size: 58, color: Color(0xFF1B5E20)),
           const SizedBox(height: 16),
-          const Text('Modo Conductor de Grupo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF263238))),
+          const Text(
+            'Modo Conductor de Grupo',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF263238),
+            ),
+          ),
           const SizedBox(height: 12),
           const Text(
             'Aquí verás territorios y tarjetas programadas para envío. Marca qué vas a recibir y gestiona tu ruta con claridad.',
@@ -3999,10 +5919,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           Expanded(
             child: ListView(
               children: [
-                const Text('Territorios asignados', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                const Text(
+                  'Territorios asignados',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B5E20),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('territorios').where('conductor_email', isEqualTo: _usuarioEmail).snapshots(),
+                  stream: FirebaseFirestore.instance
+                      .collection('territorios')
+                      .where('conductor_email', isEqualTo: _usuarioEmail)
+                      .snapshots(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) {
                       return const Center(child: CircularProgressIndicator());
@@ -4010,21 +5940,36 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     if (snapshot.data!.docs.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.only(bottom: 20),
-                        child: Text('No tienes territorios asignados aún.', style: TextStyle(color: Colors.grey)),
+                        child: Text(
+                          'No tienes territorios asignados aún.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
                       );
                     }
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final data = doc.data() as Map<String, dynamic>;
                         final nombre = data['nombre'] ?? 'Territorio';
-                        final fecha = data['programado_para'] is Timestamp ? (data['programado_para'] as Timestamp).toDate() : null;
+                        final fecha = data['programado_para'] is Timestamp
+                            ? (data['programado_para'] as Timestamp).toDate()
+                            : null;
                         final estatus = data['estatus_envio'] ?? 'pendiente';
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           child: ListTile(
-                            leading: const Icon(Icons.map, color: Color(0xFF1B5E20)),
-                            title: Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('Estado: $estatus${fecha != null ? ' • ${fecha.day}/${fecha.month}/${fecha.year}' : ''}'),
+                            leading: const Icon(
+                              Icons.map,
+                              color: Color(0xFF1B5E20),
+                            ),
+                            title: Text(
+                              nombre,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              'Estado: $estatus${fecha != null ? ' • ${fecha.day}/${fecha.month}/${fecha.year}' : ''}',
+                            ),
                           ),
                         );
                       }).toList(),
@@ -4032,10 +5977,20 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   },
                 ),
                 const SizedBox(height: 20),
-                const Text('Tarjetas asignadas', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                const Text(
+                  'Tarjetas asignadas',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B5E20),
+                  ),
+                ),
                 const SizedBox(height: 12),
                 StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collectionGroup('tarjetas').where('conductor_email', isEqualTo: _usuarioEmail).snapshots(),
+                  stream: FirebaseFirestore.instance
+                      .collectionGroup('tarjetas')
+                      .where('conductor_email', isEqualTo: _usuarioEmail)
+                      .snapshots(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) {
                       return const Center(child: CircularProgressIndicator());
@@ -4043,22 +5998,37 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     if (snapshot.data!.docs.isEmpty) {
                       return const Padding(
                         padding: EdgeInsets.only(bottom: 20),
-                        child: Text('No tienes tarjetas programadas todavía.', style: TextStyle(color: Colors.grey)),
+                        child: Text(
+                          'No tienes tarjetas programadas todavía.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
                       );
                     }
                     return Column(
                       children: snapshot.data!.docs.map((doc) {
                         final data = doc.data() as Map<String, dynamic>;
                         final nombre = data['nombre'] ?? 'Tarjeta';
-                        final fecha = data['programado_para'] is Timestamp ? (data['programado_para'] as Timestamp).toDate() : null;
+                        final fecha = data['programado_para'] is Timestamp
+                            ? (data['programado_para'] as Timestamp).toDate()
+                            : null;
                         final estatus = data['estatus_envio'] ?? 'pendiente';
                         final terId = data['territorio_id'] ?? '';
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
                           child: ListTile(
-                            leading: const Icon(Icons.credit_card, color: Color(0xFF1B5E20)),
-                            title: Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('Territorio: $terId • Estado: $estatus${fecha != null ? ' • ${fecha.day}/${fecha.month}/${fecha.year}' : ''}'),
+                            leading: const Icon(
+                              Icons.credit_card,
+                              color: Color(0xFF1B5E20),
+                            ),
+                            title: Text(
+                              nombre,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              'Territorio: $terId • Estado: $estatus${fecha != null ? ' • ${fecha.day}/${fecha.month}/${fecha.year}' : ''}',
+                            ),
                           ),
                         );
                       }).toList(),
@@ -4087,10 +6057,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFF1B5E20), Color(0xFF2E7D32), Color(0xFF388E3C), Color(0xFF43A047)],
+                colors: [
+                  Color(0xFF1B5E20),
+                  Color(0xFF2E7D32),
+                  Color(0xFF388E3C),
+                  Color(0xFF43A047),
+                ],
               ),
               borderRadius: BorderRadius.circular(24),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 25, offset: Offset(0, 12))],
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 25,
+                  offset: Offset(0, 12),
+                ),
+              ],
             ),
             padding: const EdgeInsets.all(22),
             child: Row(
@@ -4099,8 +6080,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   radius: 30,
                   backgroundColor: Colors.white24,
                   child: Text(
-                    nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'A',
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white),
+                    nombrePublicador.isNotEmpty
+                        ? nombrePublicador[0].toUpperCase()
+                        : 'A',
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -4108,14 +6095,36 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Hola, $nombrePublicador', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                      Text(
+                        'Hola, $nombrePublicador',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 6),
-                      const Text('Tu dashboard Publicador está listo para acción.', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                      const Text(
+                        'Tu dashboard Publicador está listo para acción.',
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                      ),
                       const SizedBox(height: 14),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(14)),
-                        child: const Text('Premium', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Text(
+                          'Premium',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -4139,7 +6148,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0D2818),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -4150,18 +6162,38 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           const SizedBox(height: 20),
           if (_campanaEspecialActiva)
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               color: Colors.orange.shade50,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Campaña especial activa', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFFbf360c))),
+                    const Text(
+                      'Campaña especial activa',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: Color(0xFFbf360c),
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    Text(_nombreCampanaEspecial.isNotEmpty ? _nombreCampanaEspecial : 'Sin nombre de campaña', style: const TextStyle(fontSize: 14, color: Color(0xFF4E342E))),
+                    Text(
+                      _nombreCampanaEspecial.isNotEmpty
+                          ? _nombreCampanaEspecial
+                          : 'Sin nombre de campaña',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF4E342E),
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    const Text('Este mensaje se aplica a tus visitas actuales. Marca invitación y predicación con énfasis especial.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    const Text(
+                      'Este mensaje se aplica a tus visitas actuales. Marca invitación y predicación con énfasis especial.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
                   ],
                 ),
               ),
@@ -4169,16 +6201,31 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           if (_campanaGeneralActiva && _anuncioGeneral.trim().isNotEmpty) ...[
             const SizedBox(height: 12),
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               color: Colors.blue.shade50,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Anuncio general', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1A237E))),
+                    const Text(
+                      'Anuncio general',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: Color(0xFF1A237E),
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    Text(_anuncioGeneral, style: const TextStyle(fontSize: 14, color: Color(0xFF263238))),
+                    Text(
+                      _anuncioGeneral,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF263238),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -4187,7 +6234,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
           const SizedBox(height: 16),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('direcciones_globales').snapshots(),
+              stream: FirebaseFirestore.instance
+                  .collection('direcciones_globales')
+                  .snapshots(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) {
                   return const Center(child: CircularProgressIndicator());
@@ -4195,25 +6244,41 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                 final todasDirecciones = snapshot.data!.docs;
                 final totalGlobal = todasDirecciones.length;
                 final predicadasGlobal = todasDirecciones.where((doc) {
-                  final estado = (doc['estado_predicacion'] ?? '').toString().toLowerCase();
+                  final estado = (doc['estado_predicacion'] ?? '')
+                      .toString()
+                      .toLowerCase();
                   final predicado = doc['predicado'] ?? false;
                   return estado == 'completada' || predicado == true;
                 }).length;
-                final asignadas = todasDirecciones.where((doc) => (doc['publicador_email'] ?? '') == _usuarioEmail).toList();
+                final asignadas = todasDirecciones
+                    .where(
+                      (doc) => (doc['publicador_email'] ?? '') == _usuarioEmail,
+                    )
+                    .toList();
                 final completadas = asignadas.where((doc) {
-                  final estado = (doc['estado_predicacion'] ?? '').toString().toLowerCase();
+                  final estado = (doc['estado_predicacion'] ?? '')
+                      .toString()
+                      .toLowerCase();
                   final predicado = doc['predicado'] ?? false;
                   return estado == 'completada' || predicado == true;
                 }).length;
                 final pendientes = asignadas.length - completadas;
-                final avance = totalGlobal > 0 ? (predicadasGlobal / totalGlobal) * 100 : 0.0;
-                final invitacionesEntregadas = asignadas.where((doc) => doc['entrego_invitacion'] == true).length;
-                final campanaActiva = asignadas.where((doc) => doc['campana_especial'] == true).length;
+                final avance = totalGlobal > 0
+                    ? (predicadasGlobal / totalGlobal) * 100
+                    : 0.0;
+                final invitacionesEntregadas = asignadas
+                    .where((doc) => doc['entrego_invitacion'] == true)
+                    .length;
+                final campanaActiva = asignadas
+                    .where((doc) => doc['campana_especial'] == true)
+                    .length;
 
                 return ListView(
                   children: [
                     Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                       elevation: 3,
                       shadowColor: Colors.black.withOpacity(0.05),
                       child: Padding(
@@ -4221,21 +6286,38 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Progreso global del territorio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                            const Text(
+                              'Progreso global del territorio',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1B5E20),
+                              ),
+                            ),
                             const SizedBox(height: 12),
-                            Text('${predicadasGlobal.toString()} de $totalGlobal direcciones predicadas', style: const TextStyle(color: Colors.grey)),
+                            Text(
+                              '${predicadasGlobal.toString()} de $totalGlobal direcciones predicadas',
+                              style: const TextStyle(color: Colors.grey),
+                            ),
                             const SizedBox(height: 12),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(12),
                               child: LinearProgressIndicator(
-                                value: totalGlobal > 0 ? predicadasGlobal / totalGlobal : 0.0,
+                                value: totalGlobal > 0
+                                    ? predicadasGlobal / totalGlobal
+                                    : 0.0,
                                 minHeight: 16,
                                 backgroundColor: const Color(0xFFF1F8E9),
-                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF1B5E20)),
+                                valueColor: const AlwaysStoppedAnimation<Color>(
+                                  Color(0xFF1B5E20),
+                                ),
                               ),
                             ),
                             const SizedBox(height: 8),
-                            Text('${(totalGlobal > 0 ? (predicadasGlobal / totalGlobal) * 100 : 0).toStringAsFixed(0)}% del directorio global predicado', style: const TextStyle(color: Colors.black87)),
+                            Text(
+                              '${(totalGlobal > 0 ? (predicadasGlobal / totalGlobal) * 100 : 0).toStringAsFixed(0)}% del directorio global predicado',
+                              style: const TextStyle(color: Colors.black87),
+                            ),
                           ],
                         ),
                       ),
@@ -4245,18 +6327,36 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                       children: [
                         Expanded(
                           child: Card(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                             elevation: 2,
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Direcciones asignadas', style: TextStyle(fontSize: 14, color: Colors.black54)),
+                                  const Text(
+                                    'Direcciones asignadas',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
                                   const SizedBox(height: 8),
-                                  Text('${asignadas.length}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                                  Text(
+                                    '${asignadas.length}',
+                                    style: const TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1B5E20),
+                                    ),
+                                  ),
                                   const SizedBox(height: 6),
-                                  Text('Total asignadas', style: const TextStyle(color: Colors.grey)),
+                                  Text(
+                                    'Total asignadas',
+                                    style: const TextStyle(color: Colors.grey),
+                                  ),
                                 ],
                               ),
                             ),
@@ -4265,18 +6365,36 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         const SizedBox(width: 12),
                         Expanded(
                           child: Card(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
                             elevation: 2,
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Completadas', style: TextStyle(fontSize: 14, color: Colors.black54)),
+                                  const Text(
+                                    'Completadas',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
                                   const SizedBox(height: 8),
-                                  Text('$completadas', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                                  Text(
+                                    '$completadas',
+                                    style: const TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF1B5E20),
+                                    ),
+                                  ),
                                   const SizedBox(height: 6),
-                                  Text('$pendientes pendientes', style: const TextStyle(color: Colors.grey)),
+                                  Text(
+                                    '$pendientes pendientes',
+                                    style: const TextStyle(color: Colors.grey),
+                                  ),
                                 ],
                               ),
                             ),
@@ -4286,7 +6404,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     ),
                     const SizedBox(height: 16),
                     Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
                       color: Colors.green.shade50,
                       elevation: 1,
                       child: Padding(
@@ -4294,21 +6414,57 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Progreso mensual', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                            const Text(
+                              'Progreso mensual',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1B5E20),
+                              ),
+                            ),
                             const SizedBox(height: 10),
-                            LinearProgressIndicator(value: avance / 100, color: const Color(0xFF1B5E20), backgroundColor: Colors.green.shade100, minHeight: 10),
+                            LinearProgressIndicator(
+                              value: avance / 100,
+                              color: const Color(0xFF1B5E20),
+                              backgroundColor: Colors.green.shade100,
+                              minHeight: 10,
+                            ),
                             const SizedBox(height: 10),
-                            Text('${avance.toStringAsFixed(0)}% completado', style: const TextStyle(fontSize: 14, color: Colors.black87)),
+                            Text(
+                              '${avance.toStringAsFixed(0)}% completado',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.black87,
+                              ),
+                            ),
                             const SizedBox(height: 10),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Trabajo: $completadas', style: const TextStyle(fontSize: 13, color: Colors.black54)),
-                                Text('Faltan: $pendientes', style: const TextStyle(fontSize: 13, color: Colors.black54)),
+                                Text(
+                                  'Trabajo: $completadas',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                                Text(
+                                  'Faltan: $pendientes',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.black54,
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 8),
-                            const Text('Los datos se actualizan mensualmente.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                            const Text(
+                              'Los datos se actualizan mensualmente.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black54,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -4316,7 +6472,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     if (_campanaEspecialActiva) ...[
                       const SizedBox(height: 20),
                       Card(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                         color: Colors.orange.shade50,
                         elevation: 1,
                         child: Padding(
@@ -4324,39 +6482,92 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Campaña especial', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFbf360c))),
+                              const Text(
+                                'Campaña especial',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFbf360c),
+                                ),
+                              ),
                               const SizedBox(height: 10),
-                              Text('Direcciones en campaña: $campanaActiva', style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                              Text(
+                                'Direcciones en campaña: $campanaActiva',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.black87,
+                                ),
+                              ),
                               const SizedBox(height: 6),
-                              Text('Invitaciones entregadas: $invitacionesEntregadas', style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                              Text(
+                                'Invitaciones entregadas: $invitacionesEntregadas',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.black87,
+                                ),
+                              ),
                               const SizedBox(height: 8),
-                              Text(_nombreCampanaEspecial.isNotEmpty ? _nombreCampanaEspecial : 'Campaña activa', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                              Text(
+                                _nombreCampanaEspecial.isNotEmpty
+                                    ? _nombreCampanaEspecial
+                                    : 'Campaña activa',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black54,
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       ),
                     ],
                     const SizedBox(height: 20),
-                    const Text('Mis direcciones asignadas', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                    const Text(
+                      'Mis direcciones asignadas',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B5E20),
+                      ),
+                    ),
                     const SizedBox(height: 12),
                     if (asignadas.isEmpty)
                       const Padding(
                         padding: EdgeInsets.only(bottom: 12),
-                        child: Text('Aún no tienes direcciones asignadas.', style: TextStyle(color: Colors.grey)),
+                        child: Text(
+                          'Aún no tienes direcciones asignadas.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
                       )
                     else
                       Column(
                         children: asignadas.map((doc) {
                           final data = doc.data() as Map<String, dynamic>;
                           final calle = data['calle'] ?? 'Dirección';
-                          final estado = data['estado_predicacion'] ?? 'pendiente';
-                          final zona = data['territorio_nombre'] ?? data['territorio_id'] ?? '';
-                          final isPredicado = (data['predicado'] ?? false) == true || estado == 'completada';
-                          final statusLabel = isPredicado ? 'Se predicó' : estado == 'no_vive' ? 'No vive' : 'No se predicó';
-                          final statusColor = isPredicado ? const Color(0xFF1B5E20) : estado == 'no_vive' ? const Color(0xFFF57C00) : const Color(0xFF757575);
+                          final estado =
+                              data['estado_predicacion'] ?? 'pendiente';
+                          final zona =
+                              data['territorio_nombre'] ??
+                              data['territorio_id'] ??
+                              '';
+                          final isPredicado =
+                              (data['predicado'] ?? false) == true ||
+                              estado == 'completada';
+                          final statusLabel = isPredicado
+                              ? 'Se predicó'
+                              : estado == 'no_vive'
+                              ? 'No vive'
+                              : 'No se predicó';
+                          final statusColor = isPredicado
+                              ? const Color(0xFF1B5E20)
+                              : estado == 'no_vive'
+                              ? const Color(0xFFF57C00)
+                              : const Color(0xFF757575);
                           return Card(
                             margin: const EdgeInsets.only(bottom: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
                             elevation: 3,
                             shadowColor: Colors.black.withOpacity(0.08),
                             child: Padding(
@@ -4365,22 +6576,52 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
-                                            Text(calle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF212121))),
+                                            Text(
+                                              calle,
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFF212121),
+                                              ),
+                                            ),
                                             const SizedBox(height: 8),
-                                            Text(zona, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                                            Text(
+                                              zona,
+                                              style: const TextStyle(
+                                                color: Colors.grey,
+                                                fontSize: 13,
+                                              ),
+                                            ),
                                           ],
                                         ),
                                       ),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                        decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(14)),
-                                        child: Text(statusLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: statusColor,
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          statusLabel,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -4389,9 +6630,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                                     spacing: 8,
                                     runSpacing: 8,
                                     children: [
-                                      _buildDirectionStatusButton(doc, 'predicado', 'Se predicó'),
-                                      _buildDirectionStatusButton(doc, 'no_predicado', 'No se predicó'),
-                                      _buildDirectionStatusButton(doc, 'no_vive', 'No vive'),
+                                      _buildDirectionStatusButton(
+                                        doc,
+                                        'predicado',
+                                        'Se predicó',
+                                      ),
+                                      _buildDirectionStatusButton(
+                                        doc,
+                                        'no_predicado',
+                                        'No se predicó',
+                                      ),
+                                      _buildDirectionStatusButton(
+                                        doc,
+                                        'no_vive',
+                                        'No vive',
+                                      ),
                                     ],
                                   ),
                                 ],
@@ -4404,7 +6657,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                     StreamBuilder<QuerySnapshot>(
                       stream: FirebaseFirestore.instance
                           .collectionGroup('tarjetas')
-                          .where('solicitado_por_publicador_email', isEqualTo: _usuarioEmail)
+                          .where(
+                            'solicitado_por_publicador_email',
+                            isEqualTo: _usuarioEmail,
+                          )
                           .snapshots(),
                       builder: (context, snapshotSolicitudes) {
                         if (!snapshotSolicitudes.hasData) {
@@ -4417,19 +6673,42 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const SizedBox(height: 16),
-                            const Text('Solicitudes de tarjetas', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                            const Text(
+                              'Solicitudes de tarjetas',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1B5E20),
+                              ),
+                            ),
                             const SizedBox(height: 10),
                             ...snapshotSolicitudes.data!.docs.map((doc) {
                               final data = doc.data() as Map<String, dynamic>;
                               final nombre = data['nombre'] ?? 'Tarjeta';
-                              final territorio = data['territorio_nombre'] ?? data['territorio_id'] ?? 'Territorio';
-                              final fecha = data['solicitado_en'] is Timestamp ? (data['solicitado_en'] as Timestamp).toDate() : null;
+                              final territorio =
+                                  data['territorio_nombre'] ??
+                                  data['territorio_id'] ??
+                                  'Territorio';
+                              final fecha = data['solicitado_en'] is Timestamp
+                                  ? (data['solicitado_en'] as Timestamp)
+                                        .toDate()
+                                  : null;
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 child: ListTile(
-                                  leading: const Icon(Icons.request_page, color: Color(0xFF1B5E20)),
-                                  title: Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  subtitle: Text('Territorio: $territorio${fecha != null ? ' • ${fecha.day}/${fecha.month}/${fecha.year}' : ''}'),
+                                  leading: const Icon(
+                                    Icons.request_page,
+                                    color: Color(0xFF1B5E20),
+                                  ),
+                                  title: Text(
+                                    nombre,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    'Territorio: $territorio${fecha != null ? ' • ${fecha.day}/${fecha.month}/${fecha.year}' : ''}',
+                                  ),
                                 ),
                               );
                             }).toList(),
@@ -4448,4 +6727,4 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy> with SingleTick
   }
 }
 
-// texto de prueba
+// Araucária Sur - Gestión Territorial
