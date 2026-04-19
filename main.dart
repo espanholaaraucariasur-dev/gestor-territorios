@@ -2122,7 +2122,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           onPressed: () => _scaffoldKey.currentState?.openDrawer(),
         ),
         title: const Text(
-          'Araucária Sur',
+          'TEXTO DE PRUEBA - ROJO\nAraucária Sur',
           style: TextStyle(
             color: Color(0xFF1B5E20),
             fontWeight: FontWeight.bold,
@@ -6728,3 +6728,4 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 }
 
 // Araucária Sur - Gestión Territorial
+// TEXTO DE PRUEBA - ROJO
