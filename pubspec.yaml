@@ -1,0 +1,40 @@
+name: araucaria_sur
+description: Gestión Territorial Congregación Araucaria Sur
+
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Firebase
+  firebase_core: ^3.0.0
+  cloud_firestore: ^5.0.0
+  
+  # Auth
+  shared_preferences: ^2.2.0
+  local_auth: ^2.1.0
+  flutter_secure_storage: ^9.0.0
+  
+  # Estado
+  flutter_bloc: ^8.1.0
+  equatable: ^2.0.5
+  
+  # Utils
+  intl: ^0.19.0
+  http: ^1.2.0
+  
+  # CSV
+  file_picker: ^8.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
