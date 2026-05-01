@@ -55,7 +55,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   @override
   void initState() {
     super.initState();
-    _tabControllerAdmin = TabController(length: 4, vsync: this);
+    _tabControllerAdmin = TabController(length: 5, vsync: this);
     _usuarioEmail = widget.usuarioData['email'] ?? '';
     // Initialize with safe defaults to prevent null errors
     _nombreCampanaEspecial = '';

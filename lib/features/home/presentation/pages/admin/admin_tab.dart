@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'admin_territorios_tab.dart';
 import 'comunicacion_tab.dart';
 import 'usuarios_tab.dart';
+import 'mantenimiento_tab.dart';
+import '../../../../../core/services/csv_upload.dart';
 
 class AdminTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -19,321 +20,276 @@ class AdminTab extends StatefulWidget {
 }
 
 class _AdminTabState extends State<AdminTab> {
-  Future<void> _logicaReinicio() async {
-    try {
-      final batch = FirebaseFirestore.instance.batch();
+  bool _mantenimientoDesbloqueado = false;
+  int _tabAnterior = 0;
 
-      // Reiniciar progreso mensual en direcciones_globales
-      final direccionesSnapshot = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .get();
-      for (final doc in direccionesSnapshot.docs) {
-        batch.update(doc.reference, {
-          'visitado': false,
-          'predicado': false,
-          'asignado_a': null,
-          'asignado_en': null,
-          'entregado_a': null,
-          'entregado_en': null,
-          'devuelto': false,
-          'devuelto_por': null,
-          'devuelto_en': null,
-        });
+  String _normalizarDireccion(String direccion) {
+    var texto = direccion.toLowerCase();
+    texto = texto.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
+    texto = texto.replaceAll(RegExp(r'\b\d{5}-?\d{3}\b'), ' ');
+    texto = texto.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
+    texto = texto.replaceAll('apto', 'apartamento');
+    texto = texto.replaceAll('apt', 'apartamento');
+    texto = texto.replaceAll('dpto', 'departamento');
+    texto = texto.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return texto;
+  }
+
+  List<String> _parsearLineaCSV(String linea) {
+    List<String> resultado = [];
+    bool dentroComillas = false;
+    StringBuffer campo = StringBuffer();
+    for (int i = 0; i < linea.length; i++) {
+      final char = linea[i];
+      if (char == '"') {
+        dentroComillas = !dentroComillas;
+      } else if (char == ',' && !dentroComillas) {
+        resultado.add(campo.toString());
+        campo.clear();
+      } else {
+        campo.write(char);
       }
+    }
+    resultado.add(campo.toString());
+    return resultado;
+  }
 
-      // Reiniciar tarjetas de territorios
-      final territoriosSnapshot =
-          await FirebaseFirestore.instance.collection('territorios').get();
-      for (final territorio in territoriosSnapshot.docs) {
-        final tarjetasSnapshot = await FirebaseFirestore.instance
-            .collection('territorios')
-            .doc(territorio.id)
-            .collection('tarjetas')
-            .get();
+  // _logicaReinicio moved to MantenimientoTab
 
-        for (final tarjeta in tarjetasSnapshot.docs) {
-          batch.update(tarjeta.reference, {
-            'disponible_para_publicadores': false,
-            'bloqueado': true,
-            'asignado_a': null,
-            'asignado_en': null,
-            'entregado_a': null,
-            'entregado_en': null,
-            'devuelto': false,
-            'devuelto_por': null,
-            'devuelto_en': null,
-            'estatus_envio': null,
-            'hora_programada': null,
-          });
+  // _limpiarDatosDinamicos moved to MantenimientoTab
+
+  // _limpiarDireccionesHuerfanas moved to MantenimientoTab
+
+  // _restaurarTarjetaIds moved to MantenimientoTab
+
+  Future<bool> _pedirSenaMantenimiento() async {
+    final controller = TextEditingController();
+    final correcto = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.lock, color: Color(0xFF1B5E20)),
+            SizedBox(width: 8),
+            Text('Acceso a Mantenimiento'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Ingrese la contraseña para acceder a Mantenimiento:'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Contraseña',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF1B5E20), width: 2),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final password = controller.text.trim();
+              Navigator.pop(context, password == '272700');
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1B5E20),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Acceder'),
+          ),
+        ],
+      ),
+    );
+    return correcto ?? false;
+  }
+
+  void _levantarArchivoCSV() {
+    startCsvUpload(
+      (String contenidoDelArchivo) {
+        List<String> lineas = contenidoDelArchivo.split('\n');
+        if (lineas.isNotEmpty) lineas.removeAt(0);
+        Map<String, List<Map<String, String>>> tarjetasMap = {};
+        for (var linea in lineas) {
+          if (linea.trim().isEmpty) continue;
+          List<String> columnas = linea.split(',');
+          if (columnas.length < 3) continue;
+          final tarjeta = columnas[0].trim();
+          final calle = columnas[2].trim();
+          final complemento = columnas.length > 3 ? columnas[3].trim() : '';
+          if (tarjeta.isEmpty || calle.isEmpty) continue;
+          tarjetasMap.putIfAbsent(tarjeta, () => []);
+          tarjetasMap[tarjeta]!
+              .add({'calle': calle, 'complemento': complemento});
         }
+        if (tarjetasMap.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('No se pudieron extraer datos del CSV')),
+          );
+          return;
+        }
+        _mostrarSelectorTerritorioParaCSV(tarjetasMap);
+      },
+    );
+  }
 
-        // Reiniciar estado del territorio
-        batch.update(territorio.reference, {
+  void _mostrarSelectorTerritorioParaCSV(
+    Map<String, List<Map<String, String>>> tarjetasMap,
+  ) async {
+    final territoriosSnap =
+        await FirebaseFirestore.instance.collection('territorios').get();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿A qué territorio pertenece este CSV?'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 300,
+          child: ListView(
+            children: territoriosSnap.docs.map((doc) {
+              final nombre = (doc.data())['nombre'] ?? doc.id;
+              return ListTile(
+                leading: const Icon(Icons.folder, color: Color(0xFF1B5E20)),
+                title: Text(nombre),
+                onTap: () {
+                  Navigator.pop(context);
+                  _procesarCSVEnTerritorio(doc.id, tarjetasMap);
+                },
+              );
+            }).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _procesarCSVEnTerritorio(
+    String territorioId,
+    Map<String, List<Map<String, String>>> tarjetasMap,
+  ) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Row(children: [
+          CircularProgressIndicator(),
+          SizedBox(width: 20),
+          Expanded(child: Text('Creando tarjetas y direcciones...')),
+        ]),
+      ),
+    );
+    try {
+      int totalTarjetas = 0;
+      int totalDirecciones = 0;
+      for (final entry in tarjetasMap.entries) {
+        final nombreTarjeta = entry.key;
+        final direcciones = entry.value;
+        await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(territorioId)
+            .collection('tarjetas')
+            .doc(nombreTarjeta)
+            .set({
+          'nombre': nombreTarjeta,
+          'territorio_id': territorioId,
+          'estado': 'disponible',
+          'cantidad_direcciones': direcciones.length,
+          'barrio': '',
+          'created_at': FieldValue.serverTimestamp(),
+          'bloqueado': true,
           'disponible_para_publicadores': false,
-          'asignado_a': null,
+          'asignado_a': '',
           'asignado_en': null,
-          'enviado_a': null,
-          'enviado_en': null,
-        });
+        }, SetOptions(merge: true));
+        final batch = FirebaseFirestore.instance.batch();
+        for (final dir in direcciones) {
+          final calle = dir['calle'] ?? '';
+          final complemento = dir['complemento'] ?? '';
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          final complementoSlug = complemento.isNotEmpty
+              ? '_${complemento.replaceAll(' ', '_')}'
+              : '';
+          final docId =
+              '${territorioId}_${nombreTarjeta}_${calle.replaceAll(' ', '_')}${complementoSlug}_$timestamp';
+          batch.set(
+            FirebaseFirestore.instance
+                .collection('direcciones_globales')
+                .doc(docId),
+            {
+              'calle': calle,
+              'complemento': complemento,
+              'direccion_normalizada':
+                  _normalizarDireccion('$calle $complemento'),
+              'informacion': '',
+              'barrio': territorioId,
+              'lat': '0',
+              'lon': '0',
+              'estado': 'activa',
+              'territorio_id': territorioId,
+              'tarjeta_id': nombreTarjeta,
+              'created_at': FieldValue.serverTimestamp(),
+              'tipo': 'csv',
+              'estado_predicacion': 'pendiente',
+              'predicado': false,
+              'no_predicado': false,
+              'es_hispano': true,
+              'entrego_invitacion': false,
+              'campana_especial': false,
+              'asignado_a': null,
+            },
+          );
+          totalDirecciones++;
+        }
+        await batch.commit();
+        totalTarjetas++;
       }
-
-      await batch.commit();
-
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Sistema reiniciado correctamente'),
-            backgroundColor: Colors.green,
+        Navigator.pop(context);
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('✅ CSV importado'),
+            content: Text(
+                '$totalTarjetas tarjetas creadas\n$totalDirecciones direcciones agregadas\n\nTerritorio: $territorioId'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Entendido'))
+            ],
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Error reiniciando sistema: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _limpiarDatosDinamicos() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('🔄 Limpiar datos dinámicos'),
-        content: const Text(
-          'Esto reiniciará en todas las direcciones:\n\n'
-          '• visitado → false\n'
-          '• predicado → false\n'
-          '• estado_predicacion → pendiente\n'
-          '• asignado_a → null\n'
-          '• tarjeta_id → null\n\n'
-          'Las direcciones y territorios NO se eliminarán.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-            child: const Text('Limpiar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmar != true) return;
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .get();
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in snap.docs) {
-        batch.update(doc.reference, {
-          'visitado': false,
-          'predicado': false,
-          'estado_predicacion': 'pendiente',
-          'asignado_a': null,
-          'asignado_en': null,
-          'tarjeta_id': null,
-          'entregado_a': null,
-          'entregado_en': null,
-          'devuelto': false,
-          'devuelto_por': null,
-          'devuelto_en': null,
-        });
-      }
-      await batch.commit();
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('✅ Datos dinámicos limpiados'),
-              backgroundColor: Colors.green),
-        );
-    } catch (e) {
-      if (mounted)
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
         );
+      }
     }
-  }
-
-  Future<void> _limpiarDireccionesHuerfanas() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('🗑️ Limpiar direcciones huérfanas'),
-        content: const Text(
-          'Esto eliminará todas las direcciones en direcciones_globales '
-          'cuya tarjeta_id apunte a una tarjeta que ya no existe.\n\n'
-          '⚠️ Esta acción no se puede deshacer.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Eliminar huérfanas'),
-          ),
-        ],
-      ),
-    );
-    if (confirmar != true) return;
-    try {
-      // Get all existing tarjeta IDs from all territories
-      final territoriosSnap =
-          await FirebaseFirestore.instance.collection('territorios').get();
-      final tarjetaIdsExistentes = <String>{};
-      for (final territorio in territoriosSnap.docs) {
-        final tarjetasSnap = await FirebaseFirestore.instance
-            .collection('territorios')
-            .doc(territorio.id)
-            .collection('tarjetas')
-            .get();
-        for (final t in tarjetasSnap.docs) {
-          tarjetaIdsExistentes.add(t.id);
-        }
-      }
-      // Find orphaned direcciones
-      final direccionesSnap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .where('tarjeta_id', isNotEqualTo: null)
-          .get();
-      final batch = FirebaseFirestore.instance.batch();
-      int count = 0;
-      for (final dir in direccionesSnap.docs) {
-        final tarjetaId = dir.data()['tarjeta_id'] as String?;
-        if (tarjetaId != null && !tarjetaIdsExistentes.contains(tarjetaId)) {
-          batch.update(
-              dir.reference, {'tarjeta_id': null, 'estado': 'disponible'});
-          count++;
-        }
-      }
-      await batch.commit();
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('✅ $count direcciones huérfanas limpiadas'),
-              backgroundColor: Colors.green),
-        );
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-        );
-    }
-  }
-
-  Future<void> _restaurarTarjetaIds() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('🔧 Restaurar tarjeta_id'),
-        content: const Text(
-          'Esto restaurará el campo tarjeta_id en todas las direcciones '
-          'basándose en el ID del documento.\n\n'
-          'Ejemplo: "Costeira_D02_Rua_..." → tarjeta_id = "D02"\n\n'
-          '¿Continuar?',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            child: const Text('Restaurar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmar != true) return;
-    try {
-      final direccionesSnap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .get();
-
-      int batchCount = 0;
-      WriteBatch currentBatch = FirebaseFirestore.instance.batch();
-      int actualizadas = 0;
-      int noEncontradas = 0;
-
-      for (final doc in direccionesSnap.docs) {
-        final data = doc.data();
-        final territorioId = data['territorio_id'] as String?;
-        if (territorioId == null) continue;
-
-        // Extract tarjeta name from doc ID - second segment
-        final docId = doc.id;
-        final parts = docId.split('_');
-        if (parts.length < 2) continue;
-
-        // Try parts[1] first (e.g. "D02"), then parts[1]+parts[2] for compound names (e.g. "F01-São")
-        String? tarjetaId;
-
-        debugPrint(
-            'DocId: $docId, parts: $parts, tarjetaNombre: ${parts.length >= 2 ? parts[1] : "N/A"}');
-
-        if (tarjetaId != null) {
-          currentBatch.update(doc.reference, {
-            'tarjeta_id': tarjetaId,
-            'estado': 'asignada',
-          });
-          actualizadas++;
-          batchCount++;
-
-          // Commit every 400 operations for performance
-          if (batchCount >= 400) {
-            await currentBatch.commit();
-            currentBatch = FirebaseFirestore.instance.batch();
-            batchCount = 0;
-          }
-        } else {
-          // Mark as orphan - territory or tarjeta no longer exists
-          noEncontradas++;
-          debugPrint(
-              'Huérfana: ${doc.id} - territorioId: $territorioId - parte: ${parts[1]}');
-        }
-      }
-
-      // Commit any remaining operations
-      if (batchCount > 0) {
-        await currentBatch.commit();
-      }
-
-      if (mounted) {
-        String mensaje = actualizadas > 0
-            ? '✅ $actualizadas direcciones actualizadas con tarjeta_id'
-            : '⚠️ $noEncontradas direcciones no pudieron asociarse (no se encontró tarjeta coincidente)';
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(mensaje),
-            backgroundColor: actualizadas > 0 ? Colors.green : Colors.orange,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-        );
-    }
-  }
-
-  Future<void> _levantarArchivoCSV() async {
-    // Implementación simulada - en el código original habría lógica para subir archivos
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Función de subir CSV no implementada en esta versión'),
-        backgroundColor: Colors.orange,
-      ),
-    );
   }
 
   void _verDirectorioGlobal() {
@@ -623,8 +579,171 @@ class _AdminTabState extends State<AdminTab> {
     );
   }
 
-  Future<void> _mostrarDialogoCrearTarjeta(
-      BuildContext context, String terId) async {}
+  void _mostrarDialogoCrearTarjeta(BuildContext parentContext, String terId) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: parentContext,
+      builder: (context) {
+        return Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.folder_open, size: 40, color: Colors.blue),
+                    const SizedBox(height: 16),
+                    const Text('Crear Nueva Tarjeta',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: ctrl,
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        hintText: 'Ej: A01 - CENTRO 1',
+                        filled: true,
+                        fillColor: const Color(0xFFF5F5F5),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1B5E20), width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 45,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          if (ctrl.text.trim().isEmpty) return;
+                          try {
+                            String nombreTarjeta = ctrl.text.trim();
+                            await FirebaseFirestore.instance
+                                .collection('territorios')
+                                .doc(terId)
+                                .collection('tarjetas')
+                                .doc(nombreTarjeta)
+                                .set({
+                              'nombre': nombreTarjeta,
+                              'territorio_id': terId,
+                              'estado': 'disponible',
+                              'cantidad_direcciones': 0,
+                              'barrio': '',
+                              'created_at': FieldValue.serverTimestamp(),
+                              'bloqueado': true,
+                              'disponible_para_publicadores': false,
+                              'asignado_a': '',
+                              'asignado_en': null,
+                            });
+                            if (context.mounted) Navigator.pop(context);
+                            if (parentContext.mounted) {
+                              await Future.delayed(
+                                  const Duration(milliseconds: 500));
+                              ScaffoldMessenger.of(parentContext).showSnackBar(
+                                const SnackBar(
+                                    content:
+                                        Text('✅ ¡Tarjeta creada con éxito!'),
+                                    backgroundColor: Colors.green),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                    content: Text('❌ Error: $e'),
+                                    backgroundColor: Colors.red),
+                              );
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: const Text('Crear Tarjeta',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 0,
+                right: 0,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _eliminarDireccion(
+      String docId, String territorioId, String tarjetaId) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.delete_forever, color: Colors.red),
+          SizedBox(width: 8),
+          Text('Eliminar Dirección'),
+        ]),
+        content: const Text(
+          '¿Eliminar esta dirección? Se eliminará del directorio global inmediatamente.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      // Delete directly from direcciones_globales — removes from everywhere instantly
+      await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .doc(docId)
+          .delete();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Dirección eliminada del directorio global'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _agregarDireccionesATarjeta(BuildContext context, String terId,
       String tarjetaId, String nombre) async {}
   Future<void> _editarNombreTarjeta(
@@ -728,103 +847,6 @@ class _AdminTabState extends State<AdminTab> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      final confirmar = await showDialog<bool>(
-                        context: context,
-                        builder: (c) => AlertDialog(
-                          title: const Text('⚠️ Reiniciar Sistema Completo'),
-                          content: const Text(
-                            '¿Estás seguro? Esto reiniciará:\n\n• Progreso mensual (visitado, predicado)\n• Asignaciones de tarjetas y direcciones\n• Estados de envío y entrega\n\nLas estadísticas y direcciones removidas se mantendrán.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(c, false),
-                              child: const Text('Cancelar'),
-                            ),
-                            ElevatedButton(
-                              onPressed: () => Navigator.pop(c, true),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                              ),
-                              child: const Text('Reiniciar'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (confirmar == true) {
-                        await _logicaReinicio();
-                      }
-                    },
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text(
-                      'Reiniciar Sistema',
-                      style: TextStyle(fontSize: 13),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _limpiarDatosDinamicos,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Limpiar datos dinámicos',
-                        style: TextStyle(fontSize: 13)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _limpiarDireccionesHuerfanas,
-                    icon: const Icon(Icons.delete_sweep, size: 18),
-                    label: const Text('Limpiar direcciones huérfanas',
-                        style: TextStyle(fontSize: 13)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade700,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _restaurarTarjetaIds,
-                    icon: const Icon(Icons.find_replace, size: 18),
-                    label: const Text('Restaurar tarjeta_id',
-                        style: TextStyle(fontSize: 13)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -840,6 +862,19 @@ class _AdminTabState extends State<AdminTab> {
                 fontWeight: FontWeight.bold,
                 fontSize: 12,
               ),
+              onTap: (index) {
+                if (index == 4 && !_mantenimientoDesbloqueado) {
+                  widget.tabController.animateTo(_tabAnterior);
+                  _pedirSenaMantenimiento().then((correcto) {
+                    if (correcto && mounted) {
+                      setState(() => _mantenimientoDesbloqueado = true);
+                      widget.tabController.animateTo(4);
+                    }
+                  });
+                } else if (index != 4) {
+                  setState(() => _tabAnterior = index);
+                }
+              },
               tabs: const [
                 Tab(
                   icon: Icon(Icons.folder_copy, color: Color(0xFF1B5E20)),
@@ -856,6 +891,10 @@ class _AdminTabState extends State<AdminTab> {
                 Tab(
                   icon: Icon(Icons.people_outline, color: Color(0xFF1B5E20)),
                   text: 'Usuarios',
+                ),
+                Tab(
+                  icon: Icon(Icons.build, color: Color(0xFF1B5E20)),
+                  text: 'Mantenimiento',
                 ),
               ],
             ),
@@ -1222,6 +1261,7 @@ class _AdminTabState extends State<AdminTab> {
                 ),
                 ComunicacionTab(usuarioData: widget.usuarioData),
                 UsuariosTab(usuarioData: widget.usuarioData),
+                const MantenimientoTab(),
               ],
             ),
           ),
