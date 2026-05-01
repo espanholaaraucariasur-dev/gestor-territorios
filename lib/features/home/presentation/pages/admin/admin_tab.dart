@@ -744,8 +744,220 @@ class _AdminTabState extends State<AdminTab> {
     }
   }
 
-  Future<void> _agregarDireccionesATarjeta(BuildContext context, String terId,
-      String tarjetaId, String nombre) async {}
+  Future<void> _agregarDireccionesATarjeta(
+    BuildContext parentContext,
+    String terId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
+    final calleCtrl = TextEditingController();
+    final complementoCtrl = TextEditingController();
+    final detallesCtrl = TextEditingController();
+
+    await showDialog(
+      context: parentContext,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> guardarDireccion() async {
+              final calle = calleCtrl.text.trim();
+              if (calle.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('La dirección es obligatoria')),
+                );
+                return;
+              }
+              try {
+                final complemento = complementoCtrl.text.trim();
+                final ts = DateTime.now().millisecondsSinceEpoch;
+                final slug = complemento.isNotEmpty
+                    ? '_${complemento.replaceAll(' ', '_')}'
+                    : '';
+                final docId =
+                    '${terId}_${tarjetaId}_${calle.replaceAll(' ', '_').replaceAll(',', '')}${slug}_$ts';
+
+                await FirebaseFirestore.instance
+                    .collection('direcciones_globales')
+                    .doc(docId)
+                    .set({
+                  'calle': calle,
+                  'complemento': complemento,
+                  'informacion': detallesCtrl.text.trim(),
+                  'direccion_normalizada':
+                      _normalizarDireccion('$calle $complemento'),
+                  'barrio': terId,
+                  'territorio_id': terId,
+                  'tarjeta_id': tarjetaId,
+                  'estado': 'activa',
+                  'estado_predicacion': 'pendiente',
+                  'predicado': false,
+                  'visitado': false,
+                  'asignado_a': null,
+                  'tipo': 'manual',
+                  'created_at': FieldValue.serverTimestamp(),
+                });
+
+                // Limpiar campos para siguiente dirección
+                calleCtrl.clear();
+                complementoCtrl.clear();
+                detallesCtrl.clear();
+
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('✅ Dirección guardada — agrega otra'),
+                      backgroundColor: Colors.green,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('❌ Error: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            }
+
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              child: Container(
+                width: double.maxFinite,
+                constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.85),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Agregar direcciones\n$tarjetaNombre',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1B5E20),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                    const Divider(),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: calleCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: InputDecoration(
+                        labelText: 'Dirección *',
+                        hintText: 'Ej: R. Pedro Budziak, 49',
+                        prefixIcon: const Icon(Icons.location_on,
+                            color: Color(0xFF1B5E20)),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1B5E20), width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: complementoCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: InputDecoration(
+                        labelText: 'Complemento',
+                        hintText: 'Ej: Apto 12, Casa fondo',
+                        prefixIcon:
+                            const Icon(Icons.home, color: Color(0xFF1B5E20)),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1B5E20), width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: detallesCtrl,
+                      textCapitalization: TextCapitalization.sentences,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        labelText: 'Detalles',
+                        hintText: 'Notas adicionales...',
+                        prefixIcon:
+                            const Icon(Icons.notes, color: Color(0xFF1B5E20)),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF1B5E20), width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.check_circle,
+                                color: Colors.grey),
+                            label: const Text('Terminar',
+                                style: TextStyle(color: Colors.grey)),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton.icon(
+                            onPressed: guardarDireccion,
+                            icon: const Icon(Icons.add),
+                            label: const Text(
+                              'Guardar y agregar otra',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1B5E20),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _editarNombreTarjeta(
       String terId, String tarjetaId, String nombre) async {}
   void _editarNombreTerritorio(DocumentSnapshot doc) {
