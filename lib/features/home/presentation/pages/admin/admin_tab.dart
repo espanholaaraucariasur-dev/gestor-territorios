@@ -99,6 +99,233 @@ class _AdminTabState extends State<AdminTab> {
     }
   }
 
+  Future<void> _limpiarDatosDinamicos() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🔄 Limpiar datos dinámicos'),
+        content: const Text(
+          'Esto reiniciará en todas las direcciones:\n\n'
+          '• visitado → false\n'
+          '• predicado → false\n'
+          '• estado_predicacion → pendiente\n'
+          '• asignado_a → null\n'
+          '• tarjeta_id → null\n\n'
+          'Las direcciones y territorios NO se eliminarán.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Limpiar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snap.docs) {
+        batch.update(doc.reference, {
+          'visitado': false,
+          'predicado': false,
+          'estado_predicacion': 'pendiente',
+          'asignado_a': null,
+          'asignado_en': null,
+          'tarjeta_id': null,
+          'entregado_a': null,
+          'entregado_en': null,
+          'devuelto': false,
+          'devuelto_por': null,
+          'devuelto_en': null,
+        });
+      }
+      await batch.commit();
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('✅ Datos dinámicos limpiados'),
+              backgroundColor: Colors.green),
+        );
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+    }
+  }
+
+  Future<void> _limpiarDireccionesHuerfanas() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🗑️ Limpiar direcciones huérfanas'),
+        content: const Text(
+          'Esto eliminará todas las direcciones en direcciones_globales '
+          'cuya tarjeta_id apunte a una tarjeta que ya no existe.\n\n'
+          '⚠️ Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Eliminar huérfanas'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      // Get all existing tarjeta IDs from all territories
+      final territoriosSnap =
+          await FirebaseFirestore.instance.collection('territorios').get();
+      final tarjetaIdsExistentes = <String>{};
+      for (final territorio in territoriosSnap.docs) {
+        final tarjetasSnap = await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(territorio.id)
+            .collection('tarjetas')
+            .get();
+        for (final t in tarjetasSnap.docs) {
+          tarjetaIdsExistentes.add(t.id);
+        }
+      }
+      // Find orphaned direcciones
+      final direccionesSnap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('tarjeta_id', isNotEqualTo: null)
+          .get();
+      final batch = FirebaseFirestore.instance.batch();
+      int count = 0;
+      for (final dir in direccionesSnap.docs) {
+        final tarjetaId = dir.data()['tarjeta_id'] as String?;
+        if (tarjetaId != null && !tarjetaIdsExistentes.contains(tarjetaId)) {
+          batch.update(
+              dir.reference, {'tarjeta_id': null, 'estado': 'disponible'});
+          count++;
+        }
+      }
+      await batch.commit();
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('✅ $count direcciones huérfanas limpiadas'),
+              backgroundColor: Colors.green),
+        );
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+    }
+  }
+
+  Future<void> _restaurarTarjetaIds() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🔧 Restaurar tarjeta_id'),
+        content: const Text(
+          'Esto restaurará el campo tarjeta_id en todas las direcciones '
+          'basándose en el ID del documento.\n\n'
+          'Ejemplo: "Costeira_D02_Rua_..." → tarjeta_id = "D02"\n\n'
+          '¿Continuar?',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+            child: const Text('Restaurar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      final direccionesSnap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
+
+      int batchCount = 0;
+      WriteBatch currentBatch = FirebaseFirestore.instance.batch();
+      int actualizadas = 0;
+      int noEncontradas = 0;
+
+      for (final doc in direccionesSnap.docs) {
+        final data = doc.data();
+        final territorioId = data['territorio_id'] as String?;
+        if (territorioId == null) continue;
+
+        // Extract tarjeta name from doc ID - second segment
+        final docId = doc.id;
+        final parts = docId.split('_');
+        if (parts.length < 2) continue;
+
+        // Try parts[1] first (e.g. "D02"), then parts[1]+parts[2] for compound names (e.g. "F01-São")
+        String? tarjetaId;
+
+        debugPrint(
+            'DocId: $docId, parts: $parts, tarjetaNombre: ${parts.length >= 2 ? parts[1] : "N/A"}');
+
+        if (tarjetaId != null) {
+          currentBatch.update(doc.reference, {
+            'tarjeta_id': tarjetaId,
+            'estado': 'asignada',
+          });
+          actualizadas++;
+          batchCount++;
+
+          // Commit every 400 operations for performance
+          if (batchCount >= 400) {
+            await currentBatch.commit();
+            currentBatch = FirebaseFirestore.instance.batch();
+            batchCount = 0;
+          }
+        } else {
+          // Mark as orphan - territory or tarjeta no longer exists
+          noEncontradas++;
+          debugPrint(
+              'Huérfana: ${doc.id} - territorioId: $territorioId - parte: ${parts[1]}');
+        }
+      }
+
+      // Commit any remaining operations
+      if (batchCount > 0) {
+        await currentBatch.commit();
+      }
+
+      if (mounted) {
+        String mensaje = actualizadas > 0
+            ? '✅ $actualizadas direcciones actualizadas con tarjeta_id'
+            : '⚠️ $noEncontradas direcciones no pudieron asociarse (no se encontró tarjeta coincidente)';
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(mensaje),
+            backgroundColor: actualizadas > 0 ? Colors.green : Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+    }
+  }
+
   Future<void> _levantarArchivoCSV() async {
     // Implementación simulada - en el código original habría lógica para subir archivos
     ScaffoldMessenger.of(context).showSnackBar(
@@ -544,6 +771,57 @@ class _AdminTabState extends State<AdminTab> {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _limpiarDatosDinamicos,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Limpiar datos dinámicos',
+                        style: TextStyle(fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _limpiarDireccionesHuerfanas,
+                    icon: const Icon(Icons.delete_sweep, size: 18),
+                    label: const Text('Limpiar direcciones huérfanas',
+                        style: TextStyle(fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _restaurarTarjetaIds,
+                    icon: const Icon(Icons.find_replace, size: 18),
+                    label: const Text('Restaurar tarjeta_id',
+                        style: TextStyle(fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
                     ),
                   ),
                 ),

@@ -836,7 +836,8 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                               .snapshots(),
                                           builder: (context, t) {
                                             final numTarjetas =
-                                                t.data?.docs.length ?? 0;
+                                                (t.data?.docs.length ?? 0)
+                                                    .toInt();
                                             final numDirs = dirSnap.data ?? 0;
                                             return Text(
                                               '$numTarjetas tarjetas · $numDirs direcciones',

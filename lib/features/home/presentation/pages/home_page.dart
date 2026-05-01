@@ -3299,33 +3299,49 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                           as Map<String, dynamic>;
                                       final tarjetaNombre =
                                           data['nombre'] ?? tarjetaDoc.id;
-                                      final cantDir =
-                                          data['cantidad_direcciones'] ?? 0;
 
-                                      return ListTile(
-                                        leading: const Icon(
-                                          Icons.credit_card,
-                                          color: Colors.blue,
-                                        ),
-                                        title: Text(tarjetaNombre),
-                                        subtitle: Text('$cantDir direcciones'),
-                                        trailing: ElevatedButton(
-                                          onPressed: () async {
-                                            Navigator.pop(context);
-                                            await _asignarTarjetaAPublicador(
-                                              terDoc.id,
-                                              tarjetaDoc.id,
-                                              tarjetaNombre,
-                                            );
-                                          },
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(
-                                              0xFF1B5E20,
+                                      // ✅ NUEVO: StreamBuilder para contar direcciones reales en tiempo real
+                                      return StreamBuilder<QuerySnapshot>(
+                                        stream: FirebaseFirestore.instance
+                                            .collection('direcciones_globales')
+                                            .where('tarjeta_id',
+                                                isEqualTo: tarjetaDoc.id)
+                                            .snapshots(),
+                                        builder: (context, dirSnapshot) {
+                                          final cantDirReal =
+                                              dirSnapshot.data?.docs.length ??
+                                                  0;
+
+                                          return ListTile(
+                                            leading: const Icon(
+                                              Icons.credit_card,
+                                              color: Colors.blue,
                                             ),
-                                            foregroundColor: Colors.white,
-                                          ),
-                                          child: const Text('Tomar'),
-                                        ),
+                                            title: Text(tarjetaNombre),
+                                            subtitle: Text(
+                                                '$cantDirReal direcciones'), // ✅ Ahora muestra el conteo real
+                                            trailing: ElevatedButton(
+                                              onPressed: cantDirReal >
+                                                      0 // ✅ Solo permite tomar si hay direcciones
+                                                  ? () async {
+                                                      Navigator.pop(context);
+                                                      await _asignarTarjetaAPublicador(
+                                                        terDoc.id,
+                                                        tarjetaDoc.id,
+                                                        tarjetaNombre,
+                                                      );
+                                                    }
+                                                  : null,
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: cantDirReal > 0
+                                                    ? const Color(0xFF1B5E20)
+                                                    : Colors.grey.shade400,
+                                                foregroundColor: Colors.white,
+                                              ),
+                                              child: const Text('Tomar'),
+                                            ),
+                                          );
+                                        },
                                       );
                                     }).toList(),
                                   );
