@@ -304,12 +304,69 @@ class _AdminTabState extends State<AdminTab> {
   }
 
   void _mostrarDialogoCrearTerritorio() {
-    // Implementación simulada - en el código original habría diálogo
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content:
-            Text('Crear Territorio - Función no implementada en esta versión'),
-        backgroundColor: Colors.green,
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.create_new_folder, color: Color(0xFF1B5E20)),
+          SizedBox(width: 8),
+          Text('Crear Nuevo Territorio'),
+        ]),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: InputDecoration(
+            labelText: 'Nombre del territorio',
+            hintText: 'Ej: Norte, Centro, Barrio Sur',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF1B5E20), width: 2),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white),
+            onPressed: () async {
+              final nombre = ctrl.text.trim();
+              if (nombre.isEmpty) return;
+              Navigator.pop(dialogCtx);
+              try {
+                await FirebaseFirestore.instance.collection('territorios').add({
+                  'nombre': nombre,
+                  'created_at': FieldValue.serverTimestamp(),
+                });
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Territorio "$nombre" creado'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                debugPrint('❌ Error creando territorio: $e');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content: Text('❌ Error: $e'),
+                        backgroundColor: Colors.red),
+                  );
+                }
+              }
+            },
+            child: const Text('Crear'),
+          ),
+        ],
       ),
     );
   }
@@ -400,8 +457,6 @@ class _AdminTabState extends State<AdminTab> {
                               final tarjetaNombre =
                                   tarjetaMap['nombre'] as String? ??
                                       'Sin nombre';
-                              final cantidadDir =
-                                  tarjetaMap['cantidad_direcciones'] ?? 0;
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 color: Colors.blue.shade50,
@@ -489,17 +544,18 @@ class _AdminTabState extends State<AdminTab> {
                                     ],
                                   ),
                                   children: [
-                                    FutureBuilder<QuerySnapshot>(
-                                      future: FirebaseFirestore.instance
+                                    StreamBuilder<QuerySnapshot>(
+                                      stream: FirebaseFirestore.instance
                                           .collection('direcciones_globales')
                                           .where('tarjeta_id',
                                               isEqualTo: tarjetaId)
-                                          .get(),
+                                          .snapshots(),
                                       builder: (context, dirSnap) {
-                                        if (!dirSnap.hasData)
+                                        if (!dirSnap.hasData) {
                                           return const LinearProgressIndicator();
+                                        }
                                         final dirs = dirSnap.data!.docs;
-                                        if (dirs.isEmpty)
+                                        if (dirs.isEmpty) {
                                           return const Padding(
                                             padding: EdgeInsets.all(12),
                                             child: Text(
@@ -507,6 +563,7 @@ class _AdminTabState extends State<AdminTab> {
                                                 style: TextStyle(
                                                     color: Colors.grey)),
                                           );
+                                        }
                                         return Column(
                                           children: dirs.map((dir) {
                                             final d = dir.data()
@@ -534,27 +591,63 @@ class _AdminTabState extends State<AdminTab> {
                                                       style: const TextStyle(
                                                           fontSize: 11))
                                                   : null,
-                                              trailing: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 6,
+                                              trailing: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                        horizontal: 5,
                                                         vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: estado == 'completada'
-                                                      ? Colors.green.shade100
-                                                      : Colors.grey.shade100,
-                                                  borderRadius:
-                                                      BorderRadius.circular(6),
-                                                ),
-                                                child: Text(estado,
-                                                    style: TextStyle(
-                                                        fontSize: 10,
-                                                        color: estado ==
-                                                                'completada'
-                                                            ? Colors
-                                                                .green.shade800
-                                                            : Colors.grey
-                                                                .shade700)),
+                                                    decoration: BoxDecoration(
+                                                      color:
+                                                          estado == 'completada'
+                                                              ? Colors.green
+                                                                  .shade100
+                                                              : Colors.grey
+                                                                  .shade100,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              5),
+                                                    ),
+                                                    child: Text(estado,
+                                                        style: TextStyle(
+                                                            fontSize: 9,
+                                                            color: estado ==
+                                                                    'completada'
+                                                                ? Colors.green
+                                                                    .shade800
+                                                                : Colors.grey
+                                                                    .shade700)),
+                                                  ),
+                                                  IconButton(
+                                                    icon: const Icon(Icons.edit,
+                                                        color: Colors.orange,
+                                                        size: 16),
+                                                    padding: EdgeInsets.zero,
+                                                    constraints:
+                                                        const BoxConstraints(),
+                                                    onPressed: () =>
+                                                        _editarDireccion(
+                                                            dir.id, d),
+                                                    tooltip: 'Editar',
+                                                  ),
+                                                  IconButton(
+                                                    icon: const Icon(
+                                                        Icons.delete_forever,
+                                                        color: Colors.redAccent,
+                                                        size: 16),
+                                                    padding: EdgeInsets.zero,
+                                                    constraints:
+                                                        const BoxConstraints(),
+                                                    onPressed: () =>
+                                                        _eliminarDireccion(
+                                                            dir.id,
+                                                            territorioId,
+                                                            tarjetaId),
+                                                    tooltip: 'Eliminar',
+                                                  ),
+                                                ],
                                               ),
                                             );
                                           }).toList(),
@@ -583,7 +676,7 @@ class _AdminTabState extends State<AdminTab> {
     final ctrl = TextEditingController();
     showDialog(
       context: parentContext,
-      builder: (context) {
+      builder: (dialogCtx) {
         return Dialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -627,7 +720,7 @@ class _AdminTabState extends State<AdminTab> {
                         onPressed: () async {
                           if (ctrl.text.trim().isEmpty) return;
                           try {
-                            String nombreTarjeta = ctrl.text.trim();
+                            final nombreTarjeta = ctrl.text.trim();
                             await FirebaseFirestore.instance
                                 .collection('territorios')
                                 .doc(terId)
@@ -645,11 +738,9 @@ class _AdminTabState extends State<AdminTab> {
                               'asignado_a': '',
                               'asignado_en': null,
                             });
-                            if (context.mounted) Navigator.pop(context);
-                            if (parentContext.mounted) {
-                              await Future.delayed(
-                                  const Duration(milliseconds: 500));
-                              ScaffoldMessenger.of(parentContext).showSnackBar(
+                            if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                     content:
                                         Text('✅ ¡Tarjeta creada con éxito!'),
@@ -657,7 +748,8 @@ class _AdminTabState extends State<AdminTab> {
                               );
                             }
                           } catch (e) {
-                            if (context.mounted) {
+                            debugPrint('❌ Error creando tarjeta: $e');
+                            if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                     content: Text('❌ Error: $e'),
@@ -684,7 +776,7 @@ class _AdminTabState extends State<AdminTab> {
                 right: 0,
                 child: IconButton(
                   icon: const Icon(Icons.close, color: Colors.grey),
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => Navigator.pop(dialogCtx),
                 ),
               ),
             ],
@@ -692,6 +784,117 @@ class _AdminTabState extends State<AdminTab> {
         );
       },
     );
+  }
+
+  Future<void> _editarDireccion(String docId, Map<String, dynamic> data) async {
+    final calleCtrl =
+        TextEditingController(text: data['calle'] as String? ?? '');
+    final complementoCtrl =
+        TextEditingController(text: data['complemento'] as String? ?? '');
+    final informacionCtrl =
+        TextEditingController(text: data['informacion'] as String? ?? '');
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.edit_location_alt, color: Color(0xFF1B5E20)),
+          SizedBox(width: 8),
+          Text('Editar dirección'),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: calleCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: 'Calle *',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF1B5E20), width: 2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: complementoCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: 'Complemento',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF1B5E20), width: 2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: informacionCtrl,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                labelText: 'Información',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: Color(0xFF1B5E20), width: 2),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+    final calle = calleCtrl.text.trim();
+    if (calle.isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .doc(docId)
+          .update({
+        'calle': calle,
+        'complemento': complementoCtrl.text.trim(),
+        'informacion': informacionCtrl.text.trim(),
+        'direccion_normalizada':
+            _normalizarDireccion('$calle ${complementoCtrl.text.trim()}'),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('✅ Dirección actualizada'),
+              backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error editando dirección: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Future<void> _eliminarDireccion(
@@ -856,6 +1059,26 @@ class _AdminTabState extends State<AdminTab> {
                     ),
                     const Divider(),
                     const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _subirCSVATarjeta(
+                            context, terId, tarjetaId, tarjetaNombre),
+                        icon: const Icon(Icons.cloud_upload,
+                            color: Color(0xFF1B5E20)),
+                        label: const Text('SUBIR CSV',
+                            style: TextStyle(
+                                color: Color(0xFF1B5E20),
+                                fontWeight: FontWeight.bold)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Color(0xFF1B5E20)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     TextField(
                       controller: calleCtrl,
                       textCapitalization: TextCapitalization.words,
@@ -959,7 +1182,64 @@ class _AdminTabState extends State<AdminTab> {
   }
 
   Future<void> _editarNombreTarjeta(
-      String terId, String tarjetaId, String nombre) async {}
+      String terId, String tarjetaId, String nombre) async {
+    final ctrl = TextEditingController(text: nombre);
+    final nuevoNombre = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Editar nombre de tarjeta'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: InputDecoration(
+            labelText: 'Nombre',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF1B5E20), width: 2),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    if (nuevoNombre == null || nuevoNombre.isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(terId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .update({'nombre': nuevoNombre});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('✅ Nombre actualizado'),
+              backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error editando tarjeta: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   void _editarNombreTerritorio(DocumentSnapshot doc) {
     // Implementación simulada - en el código original habría diálogo
     final nombre =
@@ -1029,6 +1309,119 @@ class _AdminTabState extends State<AdminTab> {
         content: Text('Enviar Territorio: $nombre'),
         backgroundColor: Colors.green,
       ),
+    );
+  }
+
+  void _subirCSVATarjeta(
+    BuildContext context,
+    String terId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) {
+    startCsvUpload(
+      (String contenido) async {
+        List<String> lineas = contenido.split('\n');
+        // Quitar header si existe
+        if (lineas.isNotEmpty && lineas[0].toUpperCase().contains('CALLE')) {
+          lineas.removeAt(0);
+        }
+
+        List<Map<String, String>> direcciones = [];
+        for (var linea in lineas) {
+          linea = linea.trim().replaceAll('\r', '');
+          if (linea.isEmpty) continue;
+
+          // Parser CSV que respeta comillas
+          final partes = _parsearLineaCSV(linea);
+          if (partes.length < 3) continue;
+
+          // Columna 2 = CALLE, columna 3 = COMPLEMENTO, columna 4 = INFO
+          final calle = partes[2].trim();
+          final complemento = partes.length > 3 ? partes[3].trim() : '';
+          final informacion = partes.length > 4 ? partes[4].trim() : '';
+
+          if (calle.isEmpty) continue;
+          direcciones.add({
+            'calle': calle,
+            'complemento': complemento,
+            'informacion': informacion,
+          });
+        }
+
+        if (direcciones.isEmpty) {
+          if (context.mounted)
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('No se encontraron direcciones')),
+            );
+          return;
+        }
+        if (context.mounted)
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (c) => const AlertDialog(
+              content: Row(children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 20),
+                Expanded(child: Text('Importando direcciones...')),
+              ]),
+            ),
+          );
+        try {
+          final batch = FirebaseFirestore.instance.batch();
+          for (final dir in direcciones) {
+            final calle = dir['calle'] ?? '';
+            final complemento = dir['complemento'] ?? '';
+            final ts = DateTime.now().millisecondsSinceEpoch;
+            final slug = complemento.isNotEmpty
+                ? '_${complemento.replaceAll(' ', '_')}'
+                : '';
+            final docId =
+                '${terId}_${tarjetaId}_${calle.replaceAll(' ', '_').replaceAll(',', '')}${slug}_$ts';
+            batch.set(
+              FirebaseFirestore.instance
+                  .collection('direcciones_globales')
+                  .doc(docId),
+              {
+                'calle': calle,
+                'complemento': complemento,
+                'informacion': dir['informacion'] ?? '',
+                'direccion_normalizada':
+                    _normalizarDireccion('$calle $complemento'),
+                'barrio': terId,
+                'territorio_id': terId,
+                'tarjeta_id': tarjetaId,
+                'estado': 'activa',
+                'estado_predicacion': 'pendiente',
+                'predicado': false,
+                'visitado': false,
+                'asignado_a': null,
+                'tipo': 'csv',
+                'created_at': FieldValue.serverTimestamp(),
+              },
+            );
+          }
+          await batch.commit();
+          if (context.mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    '✅ ${direcciones.length} direcciones importadas a $tarjetaNombre'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+            );
+          }
+        }
+      },
     );
   }
 
@@ -1145,20 +1538,6 @@ class _AdminTabState extends State<AdminTab> {
                           ),
                         ),
                       ),
-                      TextButton.icon(
-                        onPressed: _verDirectorioGlobal,
-                        icon: const Icon(
-                          Icons.list_alt,
-                          color: Color(0xFF1B5E20),
-                        ),
-                        label: const Text(
-                          'Ver contenido del Directorio Global',
-                          style: TextStyle(
-                            color: Color(0xFF1B5E20),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
                       const SizedBox(height: 30),
                       const Divider(),
                       const SizedBox(height: 10),
@@ -1203,6 +1582,26 @@ class _AdminTabState extends State<AdminTab> {
                             .collection('territorios')
                             .snapshots(),
                         builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Padding(
+                              padding: EdgeInsets.only(top: 20),
+                              child: Center(
+                                  child: CircularProgressIndicator(
+                                      color: Color(0xFF1B5E20))),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            debugPrint(
+                                'Error cargando territorios: ${snapshot.error}');
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 20),
+                              child: Center(
+                                  child: Text('Error: ${snapshot.error}',
+                                      style:
+                                          const TextStyle(color: Colors.red))),
+                            );
+                          }
                           if (!snapshot.hasData ||
                               snapshot.data!.docs.isEmpty) {
                             return const Padding(
@@ -1319,6 +1718,26 @@ class _AdminTabState extends State<AdminTab> {
                             .collection('territorios')
                             .snapshots(),
                         builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Padding(
+                              padding: EdgeInsets.only(top: 20),
+                              child: Center(
+                                  child: CircularProgressIndicator(
+                                      color: Color(0xFF1B5E20))),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            debugPrint(
+                                'Error cargando territorios (tab2): ${snapshot.error}');
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 20),
+                              child: Center(
+                                  child: Text('Error: ${snapshot.error}',
+                                      style:
+                                          const TextStyle(color: Colors.red))),
+                            );
+                          }
                           if (!snapshot.hasData ||
                               snapshot.data!.docs.isEmpty) {
                             return const Padding(

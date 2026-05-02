@@ -9,6 +9,121 @@ class MantenimientoTab extends StatefulWidget {
 }
 
 class _MantenimientoTabState extends State<MantenimientoTab> {
+//borrra datos globales
+  Future<void> _borrarTodasDirecciones() async {
+    final confirmar1 = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('⚠️ Borrar TODAS las direcciones'),
+        content: const Text(
+          'Esto eliminará PERMANENTEMENTE todas las direcciones del directorio global.\n\n'
+          '⚠️ Esta acción NO se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar1 != true) return;
+
+    final TextEditingController ctrl = TextEditingController();
+    final confirmar2 = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Confirmación final'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Escribe CONFIRMAR para continuar:'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'CONFIRMAR',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, ctrl.text.trim() == 'CONFIRMAR'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('ELIMINAR TODO'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar2 != true) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cancelado — texto incorrecto'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      return;
+    }
+
+    try {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🗑️ Eliminando direcciones...'),
+            duration: Duration(seconds: 10),
+          ),
+        );
+
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
+
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+      int count = 0;
+      int total = 0;
+
+      for (final doc in snap.docs) {
+        batch.delete(doc.reference);
+        count++;
+        total++;
+        if (count >= 400) {
+          await batch.commit();
+          batch = FirebaseFirestore.instance.batch();
+          count = 0;
+        }
+      }
+      if (count > 0) await batch.commit();
+
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ $total direcciones eliminadas'),
+            backgroundColor: Colors.green,
+          ),
+        );
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+    }
+  }
+// termina aqui borra datos globales
 
   Future<void> _restaurarTarjetaIds() async {
     final confirmar = await showDialog<bool>(
@@ -22,7 +137,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           '¿Continuar?',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
           ElevatedButton(
             onPressed: () => Navigator.pop(c, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
@@ -35,10 +152,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     try {
       // Get all territorios and their tarjetas to build a lookup map
       // Map: tarjetaNombre -> tarjetaId (Firestore doc id)
-      final territoriosSnap = await FirebaseFirestore.instance
-          .collection('territorios')
-          .get();
-    
+      final territoriosSnap =
+          await FirebaseFirestore.instance.collection('territorios').get();
+
       // Build map of tarjetaNombre -> tarjetaDocId
       // e.g. {'D02': 'abc123firebaseid', 'D03': 'def456...'}
       final Map<String, String> nombreToId = {};
@@ -62,33 +178,37 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       final direccionesSnap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .get();
-    
+
       int batchCount = 0;
       WriteBatch currentBatch = FirebaseFirestore.instance.batch();
       int actualizadas = 0;
       int noEncontradas = 0;
-    
+
       for (final doc in direccionesSnap.docs) {
         final data = doc.data();
         final territorioId = data['territorio_id'] as String?;
         if (territorioId == null) continue;
-  
+
         // Extract tarjeta name from doc ID - second segment
         final docId = doc.id;
         final parts = docId.split('_');
         if (parts.length < 2) continue;
-  
+
         // Try parts[1] first (e.g. "D02"), then parts[1]+parts[2] for compound names (e.g. "F01-São")
         String? tarjetaId;
         for (final entry in nombreToId.entries) {
-          if ((doc.data() as Map<String, dynamic>)['calle'].toString().toLowerCase().contains(entry.key.toLowerCase())) {
+          if ((doc.data() as Map<String, dynamic>)['calle']
+              .toString()
+              .toLowerCase()
+              .contains(entry.key.toLowerCase())) {
             tarjetaId = entry.value;
             break;
           }
         }
-      
-        debugPrint('DocId: ${doc.id}, parts: $parts, tarjetaNombre: ${parts.length >= 2 ? parts[1] : "N/A"}');
-      
+
+        debugPrint(
+            'DocId: ${doc.id}, parts: $parts, tarjetaNombre: ${parts.length >= 2 ? parts[1] : "N/A"}');
+
         if (tarjetaId != null) {
           currentBatch.update(doc.reference, {
             'tarjeta_id': tarjetaId,
@@ -96,7 +216,7 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           });
           actualizadas++;
           batchCount++;
-        
+
           // Commit every 400 operations for performance
           if (batchCount >= 400) {
             await currentBatch.commit();
@@ -106,20 +226,21 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         } else {
           // Mark as orphan - territory or tarjeta no longer exists
           noEncontradas++;
-          debugPrint('Huérfana: ${doc.id} - territorioId: $territorioId - parte: ${parts[1]}');
+          debugPrint(
+              'Huérfana: ${doc.id} - territorioId: $territorioId - parte: ${parts[1]}');
         }
       }
-    
+
       // Commit any remaining operations
       if (batchCount > 0) {
         await currentBatch.commit();
       }
-    
+
       if (mounted) {
-        String mensaje = actualizadas > 0 
+        String mensaje = actualizadas > 0
             ? '✅ $actualizadas direcciones actualizadas con tarjeta_id'
             : '⚠️ $noEncontradas direcciones no pudieron asociarse (no se encontró tarjeta coincidente)';
-      
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(mensaje),
@@ -128,9 +249,10 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
     }
   }
 
@@ -149,7 +271,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           'Las direcciones y territorios NO se eliminarán.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
           ElevatedButton(
             onPressed: () => Navigator.pop(c, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
@@ -160,7 +284,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     );
     if (confirmar != true) return;
     try {
-      final snap = await FirebaseFirestore.instance.collection('direcciones_globales').get();
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in snap.docs) {
         batch.update(doc.reference, {
@@ -178,13 +304,17 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         });
       }
       await batch.commit();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ Datos dinámicos limpiados'), backgroundColor: Colors.green),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('✅ Datos dinámicos limpiados'),
+              backgroundColor: Colors.green),
+        );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
     }
   }
 
@@ -199,7 +329,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           '⚠️ Esta acción no se puede deshacer.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
           ElevatedButton(
             onPressed: () => Navigator.pop(c, true),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -211,7 +343,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     if (confirmar != true) return;
     try {
       // Get all existing tarjeta IDs from all territories
-      final territoriosSnap = await FirebaseFirestore.instance.collection('territorios').get();
+      final territoriosSnap =
+          await FirebaseFirestore.instance.collection('territorios').get();
       final tarjetaIdsExistentes = <String>{};
       for (final territorio in territoriosSnap.docs) {
         final tarjetasSnap = await FirebaseFirestore.instance
@@ -233,18 +366,23 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       for (final dir in direccionesSnap.docs) {
         final tarjetaId = dir.data()['tarjeta_id'] as String?;
         if (tarjetaId != null && !tarjetaIdsExistentes.contains(tarjetaId)) {
-          batch.update(dir.reference, {'tarjeta_id': null, 'estado': 'disponible'});
+          batch.update(
+              dir.reference, {'tarjeta_id': null, 'estado': 'disponible'});
           count++;
         }
       }
       await batch.commit();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ $count direcciones huérfanas limpiadas'), backgroundColor: Colors.green),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('✅ $count direcciones huérfanas limpiadas'),
+              backgroundColor: Colors.green),
+        );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
     }
   }
 
@@ -318,7 +456,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                   backgroundColor: color,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
                 child: Text(titulo),
               ),
@@ -338,7 +477,10 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         children: [
           const Text(
             '🔧 Mantenimiento del Sistema',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1B5E20)),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -349,7 +491,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           _buildBotonMantenimiento(
             icono: Icons.find_replace,
             titulo: 'Restaurar tarjeta_id',
-            descripcion: 'Vincula las direcciones a sus tarjetas basándose en el ID del documento.',
+            descripcion:
+                'Vincula las direcciones a sus tarjetas basándose en el ID del documento.',
             color: Colors.blue,
             onPressed: _restaurarTarjetaIds,
           ),
@@ -357,7 +500,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           _buildBotonMantenimiento(
             icono: Icons.refresh,
             titulo: 'Limpiar datos dinámicos',
-            descripcion: 'Reinicia visitado, predicado, asignaciones. NO elimina direcciones.',
+            descripcion:
+                'Reinicia visitado, predicado, asignaciones. NO elimina direcciones.',
             color: Colors.orange,
             onPressed: _limpiarDatosDinamicos,
           ),
@@ -365,9 +509,19 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           _buildBotonMantenimiento(
             icono: Icons.delete_sweep,
             titulo: 'Limpiar direcciones huérfanas',
-            descripcion: 'Elimina direcciones que apuntan a tarjetas que ya no existen.',
+            descripcion:
+                'Elimina direcciones que apuntan a tarjetas que ya no existen.',
             color: Colors.red,
             onPressed: _limpiarDireccionesHuerfanas,
+          ),
+          const SizedBox(height: 12),
+          _buildBotonMantenimiento(
+            icono: Icons.delete_outline,
+            titulo: 'Borrar todas las direcciones',
+            descripcion:
+                'Elimina TODAS las direcciones del directorio global permanentemente.',
+            color: Colors.red.shade900,
+            onPressed: _borrarTodasDirecciones,
           ),
         ],
       ),
