@@ -538,6 +538,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
     final estados = _estadosPorTarjeta[tarjetaId] ?? {};
     final textos = _textosPorTarjeta[tarjetaId] ?? {};
 
+    // Validar que todas tengan estado
     for (final dir in direcciones) {
       final estado = estados[dir.id];
       if (estado == null || estado == 'pendiente' || estado.isEmpty) {
@@ -586,15 +587,22 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
     try {
       final db = FirebaseFirestore.instance;
+      final ahora = DateTime.now();
+      final mesActual =
+          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+
+      // Verificar si existe el folder temporal para este territorio
       final folderRef = db
           .collection('territorios')
           .doc('temporales')
           .collection('tarjetas')
           .doc(territorioId);
+
+      bool folderYaExiste = false;
+      final folderSnap = await folderRef.get();
+      folderYaExiste = folderSnap.exists;
+
       final batch = db.batch();
-      final ahora = DateTime.now();
-      final mesActual =
-          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
 
       for (final dir in direcciones) {
         final estado = estados[dir.id] ?? 'pendiente';
@@ -602,81 +610,79 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final data = _safeData(dir);
         final calle = (data['calle'] as String?) ?? '';
         final complemento = (data['complemento'] as String?) ?? '';
+        final territorioNombre =
+            (data['territorio_nombre'] as String?) ?? territorioId;
+        final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
 
         if (estado == 'completada') {
+          // Se predicó — completar en direcciones_globales
+          // tarjeta_id se MANTIENE para que admin vea progreso por tarjeta
           batch.update(dir.reference, {
+            'estado': 'activa',
             'estado_predicacion': 'completada',
             'predicado': true,
             'fecha_predicacion': FieldValue.serverTimestamp(),
             'mes_predicacion': mesActual,
-            'tarjeta_id': null,
           });
-        } else if (estado == 'no_predicado') {
-          final folderSnap = await folderRef.get();
-          if (!folderSnap.exists) {
+        } else if (estado == 'no_predicado' || estado == 'otro') {
+          // No se predicó / Otro — va a temporales
+          // Crear folder si no existe (sin duplicar)
+          if (!folderYaExiste) {
             batch.set(folderRef, {
-              'nombre_grupo': territorioId,
+              'nombre_grupo': territorioNombre,
+              'territorio_id': territorioId,
               'tipo': 'folder_temporal',
               'created_at': FieldValue.serverTimestamp(),
-              'ids_direcciones': [],
             });
+            folderYaExiste = true; // evitar duplicar en el mismo batch
           }
-          batch.set(folderRef.collection('direcciones').doc(), {
+
+          // Guardar dirección en el folder temporal
+          batch.set(folderRef.collection('direcciones').doc(dir.id), {
             'calle': calle,
             'complemento': complemento,
             'direccion_normalizada':
                 _normalizarDireccion('$calle $complemento'),
-            'territorio_origen': territorioId,
-            'tarjeta_origen': tarjetaId,
-            'motivo': 'no_predicado',
-            'estado': 'temporal',
+            'territorio_id': territorioId,
+            'territorio_nombre': territorioNombre,
+            'tarjeta_id_origen': tarjetaIdOriginal,
+            'motivo': estado == 'otro' ? motivo : 'no_predicado',
             'created_at': FieldValue.serverTimestamp(),
           });
+
+          // Actualizar en direcciones_globales — estado temporal
+          // tarjeta_id se MANTIENE apuntando a tarjeta original
           batch.update(dir.reference, {
+            'estado': 'temporal',
             'estado_predicacion': 'temporal',
-            'motivo_temporal': 'no_predicado',
+            'motivo_temporal': estado == 'otro' ? motivo : 'no_predicado',
             'fecha_temporal': FieldValue.serverTimestamp(),
-            'tarjeta_id': null,
           });
         } else if (estado == 'no_hispano') {
-          batch.update(dir.reference, {
-            'estado': 'removida',
-            'estado_predicacion': 'removida',
-            'motivo_remocion': 'no_hispano',
-            'removida_en': FieldValue.serverTimestamp(),
-            'removida_por': widget.usuarioData['nombre'] ?? '',
-            'tarjeta_id': null,
-          });
-        } else if (estado == 'otro') {
-          final folderSnap = await folderRef.get();
-          if (!folderSnap.exists) {
-            batch.set(folderRef, {
-              'nombre_grupo': territorioId,
-              'tipo': 'folder_temporal',
-              'created_at': FieldValue.serverTimestamp(),
-              'ids_direcciones': [],
-            });
-          }
-          batch.set(folderRef.collection('direcciones').doc(), {
+          // No vive hispanohablante — ELIMINAR de direcciones_globales
+          // y CREAR en direcciones_removidas
+
+          // 1. Crear en direcciones_removidas
+          batch.set(db.collection('direcciones_removidas').doc(dir.id), {
             'calle': calle,
             'complemento': complemento,
             'direccion_normalizada':
                 _normalizarDireccion('$calle $complemento'),
-            'territorio_origen': territorioId,
-            'tarjeta_origen': tarjetaId,
-            'motivo': motivo,
-            'estado': 'temporal',
-            'created_at': FieldValue.serverTimestamp(),
+            'territorio_id': territorioId,
+            'territorio_nombre': territorioNombre,
+            'tarjeta_id_origen': tarjetaIdOriginal,
+            'motivo': 'no_hispano',
+            'removida_por': widget.usuarioData['nombre'] ?? '',
+            'removida_en': FieldValue.serverTimestamp(),
+            'doc_id_original': dir.id,
           });
-          batch.update(dir.reference, {
-            'estado_predicacion': 'temporal',
-            'motivo_temporal': motivo,
-            'fecha_temporal': FieldValue.serverTimestamp(),
-            'tarjeta_id': null,
-          });
+
+          // 2. ELIMINAR de direcciones_globales
+          batch.delete(dir.reference);
         }
       }
 
+      // Marcar tarjeta como completada
       batch.update(
         db
             .collection('territorios')
@@ -692,7 +698,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
       await batch.commit();
 
       if (mounted) {
-        // FIX 3: Quitar tarjeta de la lista inmediatamente
         setState(() {
           _tarjetasCompletadas.add(tarjetaId);
         });
@@ -704,10 +709,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 const Icon(Icons.check_circle, color: Colors.white, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    '¡Tarjeta "$tarjetaNombre" completada!',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
+                  child: Text('¡Tarjeta "$tarjetaNombre" completada!',
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                 ),
               ],
             ),
@@ -743,38 +746,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .snapshots(),
-        builder: (context, snapshot) {
-          final todasDirecciones = snapshot.data?.docs ?? [];
-
-          final direccionesUsuario = todasDirecciones.where((doc) {
-            final data = _safeData(doc);
-            return data['publicador_email'] == widget.usuarioEmail;
-          }).toList();
-
-          final tarjetasUsuario = direccionesUsuario.map((doc) {
-            final data = _safeData(doc);
-            return (data['tarjeta_id'] as String?) ?? '';
-          }).toSet();
-
-          final direccionesEnTarjetasUsuario = todasDirecciones.where((doc) {
-            final data = _safeData(doc);
-            return tarjetasUsuario
-                .contains((data['tarjeta_id'] as String?) ?? '');
-          }).toList();
-
-          final total = direccionesEnTarjetasUsuario.length;
-          final completadas = direccionesEnTarjetasUsuario.where((doc) {
-            final data = _safeData(doc);
-            return data['estado_predicacion'] == 'completada' ||
-                data['predicado'] == true;
-          }).length;
-          final pendientes = total - completadas;
-
-          return CustomScrollView(
+      body: CustomScrollView(
             slivers: [
               // ── HEADER ─────────────────────────────────────
               SliverToBoxAdapter(
@@ -812,7 +784,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              '$completadas de $total completadas ($pendientes pendientes)',
+                              'Tus tarjetas asignadas este mes',
                               style: TextStyle(
                                 color: Colors.white.withOpacity(0.8),
                                 fontSize: 13,
@@ -1261,225 +1233,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 ),
               ),
 
-              // ── MIS DIRECCIONES ────────────────────────────
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'MIS DIRECCIONES',
-                        style: TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 1.5,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF9E9E9E),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (direccionesUsuario.isEmpty)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(32),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.04),
-                                blurRadius: 10,
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(Icons.location_off_outlined,
-                                  size: 48, color: Colors.grey[400]),
-                              const SizedBox(height: 12),
-                              Text(
-                                'Sin direcciones asignadas',
-                                style: TextStyle(
-                                    color: Colors.grey[500], fontSize: 15),
-                              ),
-                            ],
-                          ),
-                        )
-                      else
-                        ...direccionesUsuario.map((doc) {
-                          final data = _safeData(doc);
-                          final calle =
-                              (data['calle'] as String?) ?? 'Dirección';
-                          final predicado =
-                              (data['predicado'] as bool?) ?? false;
-                          final notas = (data['notas'] as String?) ?? '';
-
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.04),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Checkbox(
-                                        value: predicado,
-                                        onChanged: (value) async {
-                                          await FirebaseFirestore.instance
-                                              .collection(
-                                                  'direcciones_globales')
-                                              .doc(doc.id)
-                                              .update({
-                                            'predicado': value ?? false,
-                                            'estado_predicacion':
-                                                (value ?? false)
-                                                    ? 'completada'
-                                                    : 'pendiente',
-                                            'fecha_predicacion': (value ??
-                                                    false)
-                                                ? FieldValue.serverTimestamp()
-                                                : null,
-                                          });
-                                        },
-                                        activeColor: const Color(0xFF1B5E20),
-                                      ),
-                                      Expanded(
-                                        child: Text(
-                                          calle,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 14),
-                                        ),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: predicado
-                                              ? const Color(0xFFE8F5E9)
-                                              : const Color(0xFFFFF8E1),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                        ),
-                                        child: Text(
-                                          predicado
-                                              ? 'Completada'
-                                              : 'Pendiente',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: predicado
-                                                ? const Color(0xFF1B5E20)
-                                                : const Color(0xFFE65100),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  if (widget.campanaEspecialActiva) ...[
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFE65100)
-                                            .withOpacity(0.1),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          const Text(
-                                            'Campaña especial:',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w600,
-                                              color: Color(0xFFE65100),
-                                            ),
-                                          ),
-                                          TextField(
-                                            controller: TextEditingController(
-                                              text: (data['campo_extra']
-                                                      as String?) ??
-                                                  '',
-                                            ),
-                                            decoration: InputDecoration(
-                                              hintText:
-                                                  'Ingresa dato de campaña...',
-                                              hintStyle:
-                                                  const TextStyle(fontSize: 11),
-                                              border: OutlineInputBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                              ),
-                                              contentPadding:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4),
-                                            ),
-                                            style:
-                                                const TextStyle(fontSize: 11),
-                                            onChanged: (value) async {
-                                              await FirebaseFirestore.instance
-                                                  .collection(
-                                                      'direcciones_globales')
-                                                  .doc(doc.id)
-                                                  .update(
-                                                      {'campo_extra': value});
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 8),
-                                  TextField(
-                                    controller:
-                                        TextEditingController(text: notas),
-                                    decoration: InputDecoration(
-                                      hintText: 'Agregar notas...',
-                                      hintStyle: const TextStyle(fontSize: 11),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 4),
-                                    ),
-                                    style: const TextStyle(fontSize: 11),
-                                    maxLines: 2,
-                                    onChanged: (value) async {
-                                      await FirebaseFirestore.instance
-                                          .collection('direcciones_globales')
-                                          .doc(doc.id)
-                                          .update({'notas': value});
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }),
-                    ],
-                  ),
-                ),
-              ),
             ],
-          );
-        },
-      ),
-    );
+          ),
+      );
   }
 }
