@@ -218,16 +218,79 @@ class _ConductorTabState extends State<ConductorTab> {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _statCard('Recibidos', 0, Icons.download),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(child: _statCard('Enviados', 0, Icons.upload)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _statCard('Devueltos', 0, Icons.undo)),
-                    ],
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collectionGroup('tarjetas')
+                        .snapshots(),
+                    builder: (context, snap) {
+                      final todas = snap.data?.docs ?? [];
+
+                      // Tarjetas enviadas directamente al conductor
+                      final tarjetasDirectas = todas.where((d) {
+                        final data = d.data() as Map<String, dynamic>;
+                        return data['conductor_email'] == widget.usuarioEmail ||
+                            data['enviado_a'] == widget.usuarioEmail;
+                      }).length;
+
+                      // Tarjetas dentro de territorios recibidos por el conductor
+                      // (se cuentan por separado via StreamBuilder de territorios)
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('territorios')
+                            .snapshots(),
+                        builder: (context, terSnap) {
+                          int tarjetasEnTerritorios = 0;
+                          if (terSnap.hasData) {
+                            for (final ter in terSnap.data!.docs) {
+                              final td =
+                                  (ter.data() as Map<String, dynamic>?) ?? {};
+                              final esDelConductor = td['enviado_a'] ==
+                                      widget.usuarioEmail ||
+                                  td['conductor_email'] == widget.usuarioEmail;
+                              if (!esDelConductor) continue;
+                              // Contar tarjetas de este territorio desde collectionGroup
+                              tarjetasEnTerritorios += todas
+                                  .where((t) =>
+                                      t.reference.parent.parent?.id == ter.id)
+                                  .length;
+                            }
+                          }
+
+                          final recibidas =
+                              tarjetasDirectas + tarjetasEnTerritorios;
+                          final enviadas = todas.where((d) {
+                            final data = d.data() as Map<String, dynamic>;
+                            return (data['conductor_email'] ==
+                                        widget.usuarioEmail ||
+                                    data['enviado_a'] == widget.usuarioEmail) &&
+                                (data['asignado_a'] as String?)?.isNotEmpty ==
+                                    true;
+                          }).length;
+                          final devueltas = todas.where((d) {
+                            final data = d.data() as Map<String, dynamic>;
+                            return data['devuelto_por'] ==
+                                (widget.usuarioData['nombre'] ??
+                                    widget.usuarioEmail);
+                          }).length;
+
+                          return Row(
+                            children: [
+                              Expanded(
+                                  child: _statCard(
+                                      'Recibidas', recibidas, Icons.download)),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                  child: _statCard(
+                                      'Enviadas', enviadas, Icons.upload)),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                  child: _statCard(
+                                      'Devueltas', devueltas, Icons.undo)),
+                            ],
+                          );
+                        },
+                      );
+                    },
                   ),
                   const SizedBox(height: 20),
                   // Simple bar chart simulation
@@ -301,7 +364,6 @@ class _ConductorTabState extends State<ConductorTab> {
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 12)),
 
-          // Territories Received
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -311,15 +373,20 @@ class _ConductorTabState extends State<ConductorTab> {
                     .snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
-                    return const Text(
-                      'Cargando...',
-                      style: TextStyle(color: Colors.grey),
-                    );
+                    return const Text('Cargando...',
+                        style: TextStyle(color: Colors.grey));
                   }
-                  final docs = snapshot.data!.docs.where((doc) {
+                  // Territorios donde el conductor recibió el envío
+                  // Solo territorios que aún tienen tarjetas pendientes de enviar
+                  final todosTerritorios = snapshot.data!.docs.where((doc) {
                     final d = doc.data() as Map<String, dynamic>;
-                    return d['enviado_a'] == widget.usuarioEmail;
+                    return d['enviado_a'] == widget.usuarioEmail ||
+                        d['conductor_email'] == widget.usuarioEmail;
                   }).toList();
+
+// Usamos FutureBuilder por territorio para verificar tarjetas pendientes
+// pero para mantener el stream reactivo, filtramos con un set local
+                  final docs = todosTerritorios; // Se filtra visualmente abajo
 
                   if (docs.isEmpty) {
                     return Container(
@@ -329,17 +396,12 @@ class _ConductorTabState extends State<ConductorTab> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(20),
                         border: Border(
-                          left: BorderSide(
-                            color: const Color(0xFF1B5E20),
-                            width: 4,
-                          ),
-                        ),
+                            left: BorderSide(
+                                color: const Color(0xFF1B5E20), width: 4)),
                       ),
                       child: const Center(
-                        child: Text(
-                          'No hay territorios recibidos',
-                          style: TextStyle(color: Colors.grey),
-                        ),
+                        child: Text('No hay territorios recibidos',
+                            style: TextStyle(color: Colors.grey)),
                       ),
                     );
                   }
@@ -347,135 +409,206 @@ class _ConductorTabState extends State<ConductorTab> {
                   return Column(
                     children: docs.map((doc) {
                       final data = doc.data() as Map<String, dynamic>;
-                      final nombre = data['nombre'] ?? 'Territorio';
-                      final enviadoA = data['enviado_a'] ?? '';
+                      final nombre =
+                          (data['nombre'] as String?) ?? 'Territorio';
+                      final enviadoNombre =
+                          (data['enviado_nombre'] as String?) ?? '';
+                      final enviadoEn = data['enviado_en'] as Timestamp?;
+                      String fechaHora = '';
+                      if (enviadoEn != null) {
+                        final dt = enviadoEn.toDate();
+                        fechaHora =
+                            '${dt.day}/${dt.month} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+                      }
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.circular(16),
                           border: Border(
-                            left: BorderSide(
-                              color: const Color(0xFF1B5E20),
-                              width: 4,
-                            ),
-                          ),
+                              left: BorderSide(
+                                  color: const Color(0xFF1B5E20), width: 4)),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
+                              color: Colors.black.withOpacity(0.05),
                               blurRadius: 10,
                               offset: const Offset(0, 2),
                             ),
                           ],
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(
-                                    Icons.map,
-                                    color: Color(0xFF1B5E20),
-                                    size: 24,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          nombre,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                          ),
+                        child: ExpansionTile(
+                          leading:
+                              const Icon(Icons.map, color: Color(0xFF1B5E20)),
+                          title: Text(nombre,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 15)),
+                          subtitle: enviadoNombre.isNotEmpty
+                              ? Text(
+                                  'Enviado por: $enviadoNombre${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
+                                  style: const TextStyle(fontSize: 11),
+                                )
+                              : null,
+                          children: [
+                            // Lista de tarjetas del territorio
+                            StreamBuilder<QuerySnapshot>(
+                              stream: FirebaseFirestore.instance
+                                  .collection('territorios')
+                                  .doc(doc.id)
+                                  .collection('tarjetas')
+                                  .snapshots(),
+                              builder: (context, tarjSnap) {
+                                if (!tarjSnap.hasData) {
+                                  return const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: CircularProgressIndicator(),
+                                  );
+                                }
+                                final todasTarjetas = tarjSnap.data!.docs;
+                                final pendientes = todasTarjetas.where((t) {
+                                  final td =
+                                      (t.data() as Map<String, dynamic>?) ?? {};
+                                  // Tarjeta pendiente = no tiene asignado_a NI enviado_nombre
+                                  final asignadoA =
+                                      (td['asignado_a'] as String?) ?? '';
+                                  final enviadoNombre =
+                                      (td['enviado_nombre'] as String?) ?? '';
+                                  return asignadoA.isEmpty &&
+                                      enviadoNombre.isEmpty;
+                                }).toList();
+
+                                // Si todas las tarjetas están enviadas, ocultar el territorio
+                                if (todasTarjetas.isNotEmpty &&
+                                    pendientes.isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                if (todasTarjetas.isEmpty) {
+                                  return const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: Text('Sin tarjetas',
+                                        style: TextStyle(color: Colors.grey)),
+                                  );
+                                }
+
+                                return Column(
+                                  children: pendientes.map((tarjDoc) {
+                                    final td =
+                                        tarjDoc.data() as Map<String, dynamic>;
+                                    final tarjNombre =
+                                        (td['nombre'] as String?) ?? tarjDoc.id;
+                                    final yaEnviada =
+                                        (td['asignado_a'] as String?)
+                                                ?.isNotEmpty ==
+                                            true;
+                                    final asignadoA =
+                                        (td['asignado_a'] as String?) ?? '';
+
+                                    return Container(
+                                      margin: const EdgeInsets.fromLTRB(
+                                          12, 4, 12, 4),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 10),
+                                      decoration: BoxDecoration(
+                                        color: yaEnviada
+                                            ? Colors.green.shade50
+                                            : Colors.grey.shade50,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: yaEnviada
+                                              ? Colors.green.shade200
+                                              : Colors.grey.shade200,
                                         ),
-                                        if (enviadoA.isNotEmpty)
-                                          Container(
-                                            margin: const EdgeInsets.only(
-                                              top: 4,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.credit_card,
+                                              color: yaEnviada
+                                                  ? Colors.green
+                                                  : Colors.blue,
+                                              size: 18),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(tarjNombre,
+                                                    style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        fontSize: 13)),
+                                                StreamBuilder<QuerySnapshot>(
+                                                  stream: FirebaseFirestore
+                                                      .instance
+                                                      .collection(
+                                                          'direcciones_globales')
+                                                      .where('tarjeta_id',
+                                                          isEqualTo: tarjDoc.id)
+                                                      .where('estado',
+                                                          isNotEqualTo:
+                                                              'removida')
+                                                      .snapshots(),
+                                                  builder: (context, dirSnap) {
+                                                    final count = dirSnap.data
+                                                            ?.docs.length ??
+                                                        0;
+                                                    return Text(
+                                                      '$count direcciones',
+                                                      style: const TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors.grey),
+                                                    );
+                                                  },
+                                                ),
+                                                if (yaEnviada)
+                                                  Text(
+                                                    'Enviada a: $asignadoA',
+                                                    style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: Colors
+                                                            .green.shade700),
+                                                  ),
+                                              ],
                                             ),
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 3,
+                                          ),
+                                          // Botón enviar tarjeta individual
+                                          ElevatedButton(
+                                            onPressed: () =>
+                                                _enviarTarjetaConductorAPublicador(
+                                              doc.id,
+                                              tarjDoc.id,
+                                              tarjNombre,
                                             ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.orange.shade100,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: yaEnviada
+                                                  ? Colors.orange
+                                                  : const Color(0xFF1B5E20),
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6),
+                                              minimumSize: Size.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
                                             ),
                                             child: Text(
-                                              'Enviado a: $enviadoA',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.orange.shade900,
-                                                fontWeight: FontWeight.w500,
-                                              ),
+                                              yaEnviada ? 'Reenviar' : 'Enviar',
+                                              style:
+                                                  const TextStyle(fontSize: 11),
                                             ),
                                           ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-
-                              const SizedBox(height: 12),
-
-                              // Botones de acción
-                              if (enviadoA.isEmpty)
-                                Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Text(
-                                    'Territorio recibido — envía las tarjetas individualmente',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-
-                              if (enviadoA.isNotEmpty) ...[
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: () =>
-                                            _devolverTerritorio(doc.id),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.orange,
-                                          side: const BorderSide(
-                                            color: Colors.orange,
-                                          ),
-                                        ),
-                                        child: const Text('Devolver'),
+                                        ],
                                       ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: ElevatedButton(
-                                        onPressed:
-                                            null, // Deshabilitado ya que está enviado
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.grey,
-                                          foregroundColor: Colors.white,
-                                        ),
-                                        child: const Text('Ya enviado'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
+                                    );
+                                  }).toList(),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                         ),
                       );
                     }).toList(),
@@ -518,9 +651,21 @@ class _ConductorTabState extends State<ConductorTab> {
                   }
                   final docs = snapshot.data!.docs.where((doc) {
                     final d = doc.data() as Map<String, dynamic>;
-                    // Recibe por email O por nombre
-                    return d['enviado_a'] == widget.usuarioEmail ||
+                    final esParaEste = d['enviado_a'] == widget.usuarioEmail ||
                         d['enviado_a'] == (widget.usuarioData['nombre'] ?? '');
+                    if (!esParaEste) return false;
+                    // Excluir tarjetas que vienen dentro de un territorio
+                    // (esas se ven en la sección TERRITORIOS)
+                    final terId = doc.reference.parent.parent?.id ?? '';
+                    // Si el territorio también fue enviado a este conductor, no mostrar aquí
+                    final territorioEnviado = snapshot.data!.docs.any((t) =>
+                        t.id == terId &&
+                        ((t.data() as Map<String, dynamic>)['enviado_a'] ==
+                                widget.usuarioEmail ||
+                            (t.data() as Map<String, dynamic>)[
+                                    'conductor_email'] ==
+                                widget.usuarioEmail));
+                    return !territorioEnviado;
                   }).toList();
 
                   if (docs.isEmpty) {
@@ -566,190 +711,179 @@ class _ConductorTabState extends State<ConductorTab> {
                             ),
                           ],
                         ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.all(16),
-                          leading: const Icon(
-                            Icons.credit_card,
-                            color: Colors.blue,
-                          ),
-                          title: Text(
-                            nombre,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Column(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Territorio: $terId'),
-                              if (enviadoA.isNotEmpty)
-                                Container(
-                                  margin: const EdgeInsets.only(top: 4),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.shade100,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Builder(
-                                    builder: (context) {
-                                      final enviadoEn = data['enviado_en'];
-                                      String fechaHora = '';
-                                      if (enviadoEn != null) {
-                                        final dt =
-                                            (enviadoEn as Timestamp).toDate();
-                                        fechaHora =
-                                            ' · ${dt.day}/${dt.month} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-                                      }
-                                      return Text(
-                                        'Enviado por: ${data['enviado_nombre'] ?? enviadoA}$fechaHora',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.red.shade900,
+                              // Cabecera
+                              Row(
+                                children: [
+                                  const Icon(Icons.credit_card,
+                                      color: Colors.blue),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          nombre,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 15),
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                            ],
-                          ),
-                          trailing: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Botón de enviar rápido - IconButton azul
-                              IconButton(
-                                icon: const Icon(Icons.send),
-                                color: Colors.blue,
-                                onPressed: () =>
-                                    _enviarTarjetaConductorAPublicador(
-                                  terId,
-                                  doc.id,
-                                  nombre,
-                                ),
-                                tooltip: 'Enviar a publicador',
-                              ),
-                              // Botón Enviar — siempre visible con estado apropiado
-                              if ((data['enviado_nombre'] ?? '')
-                                  .toString()
-                                  .isEmpty)
-                                ElevatedButton.icon(
-                                  icon: const Icon(Icons.send, size: 14),
-                                  label: const Text(
-                                    'Enviar',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                  onPressed: () =>
-                                      _enviarTarjetaConductorAPublicador(
-                                    terId,
-                                    doc.id,
-                                    nombre,
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: const Color(0xFF1B5E20),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 4,
-                                    ),
-                                    minimumSize: Size.zero,
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                )
-                              else
-                                ElevatedButton.icon(
-                                  icon: const Icon(Icons.refresh, size: 14),
-                                  label: const Text(
-                                    'Reenviar',
-                                    style: TextStyle(fontSize: 11),
-                                  ),
-                                  onPressed: () =>
-                                      _enviarTarjetaConductorAPublicador(
-                                    terId,
-                                    doc.id,
-                                    nombre,
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.orange,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 4,
-                                    ),
-                                    minimumSize: Size.zero,
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                ),
-                              const SizedBox(height: 4),
-                              // Botón Devolver — siempre visible
-                              OutlinedButton.icon(
-                                icon: const Icon(Icons.undo, size: 14),
-                                label: const Text(
-                                  'Devolver',
-                                  style: TextStyle(fontSize: 11),
-                                ),
-                                onPressed: () async {
-                                  final confirmar = await showDialog<bool>(
-                                    context: context,
-                                    builder: (c) => AlertDialog(
-                                      title: const Text('Confirmar devolución'),
-                                      content: Text(
-                                        '¿Devolver la tarjeta "$nombre"? Volverá a estar disponible en el territorio.',
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(c, false),
-                                          child: const Text(
-                                            'Cancelar',
-                                            style: TextStyle(
-                                              color: Colors.grey,
-                                            ),
-                                          ),
+                                        Text(
+                                          'Territorio: ${(data['territorio_nombre'] as String?)?.isNotEmpty == true ? data['territorio_nombre'] : terId}',
+                                          style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.black54),
                                         ),
-                                        ElevatedButton(
-                                          onPressed: () =>
-                                              Navigator.pop(c, true),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.orange,
-                                          ),
-                                          child: const Text('Devolver'),
+                                        StreamBuilder<QuerySnapshot>(
+                                          stream: FirebaseFirestore.instance
+                                              .collection(
+                                                  'direcciones_globales')
+                                              .where('tarjeta_id',
+                                                  isEqualTo: doc.id)
+                                              .where('estado',
+                                                  isNotEqualTo: 'removida')
+                                              .snapshots(),
+                                          builder: (context, dirSnap) {
+                                            final count =
+                                                dirSnap.data?.docs.length ?? 0;
+                                            return Text(
+                                              '$count direcciones',
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey),
+                                            );
+                                          },
                                         ),
                                       ],
                                     ),
-                                  );
-                                  if (confirmar == true) {
-                                    await FirebaseFirestore.instance
-                                        .collection('territorios')
-                                        .doc(terId)
-                                        .collection('tarjetas')
-                                        .doc(doc.id)
-                                        .update({
-                                      'enviado_a': null,
-                                      'enviado_nombre': null,
-                                      'enviado_en': null,
-                                      'estatus_envio': 'devuelto',
-                                      'devuelto_en':
-                                          FieldValue.serverTimestamp(),
-                                      'devuelto_por':
-                                          widget.usuarioData['nombre'] ??
-                                              widget.usuarioEmail,
-                                    });
-                                  }
-                                },
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.orange,
-                                  side: const BorderSide(color: Colors.orange),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
                                   ),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
+                                ],
+                              ),
+                              // Badge enviado por
+                              if (enviadoA.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Builder(builder: (context) {
+                                  final enviadoEn = data['enviado_en'];
+                                  String fechaHora = '';
+                                  if (enviadoEn != null) {
+                                    final dt =
+                                        (enviadoEn as Timestamp).toDate();
+                                    fechaHora =
+                                        ' · ${dt.day}/${dt.month} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+                                  }
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade100,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      'Enviado por: ${data['enviado_nombre'] ?? enviadoA}$fechaHora',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.red.shade900),
+                                    ),
+                                  );
+                                }),
+                              ],
+                              const SizedBox(height: 12),
+                              // Botones en fila
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      icon: const Icon(Icons.send, size: 14),
+                                      label: Text(
+                                        (data['enviado_nombre'] ?? '')
+                                                .toString()
+                                                .isEmpty
+                                            ? 'Enviar'
+                                            : 'Reenviar',
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                      onPressed: () =>
+                                          _enviarTarjetaConductorAPublicador(
+                                              terId, doc.id, nombre),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor:
+                                            (data['enviado_nombre'] ?? '')
+                                                    .toString()
+                                                    .isEmpty
+                                                ? const Color(0xFF1B5E20)
+                                                : Colors.orange,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 10),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      icon: const Icon(Icons.undo, size: 14),
+                                      label: const Text('Devolver',
+                                          style: TextStyle(fontSize: 12)),
+                                      onPressed: () async {
+                                        final confirmar =
+                                            await showDialog<bool>(
+                                          context: context,
+                                          builder: (c) => AlertDialog(
+                                            title: const Text(
+                                                'Confirmar devolución'),
+                                            content: Text(
+                                                '¿Devolver la tarjeta "$nombre"? Volverá a estar disponible.'),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, false),
+                                                child: const Text('Cancelar'),
+                                              ),
+                                              ElevatedButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, true),
+                                                style: ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.orange),
+                                                child: const Text('Devolver'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                        if (confirmar == true) {
+                                          await FirebaseFirestore.instance
+                                              .collection('territorios')
+                                              .doc(terId)
+                                              .collection('tarjetas')
+                                              .doc(doc.id)
+                                              .update({
+                                            'enviado_a': null,
+                                            'enviado_nombre': null,
+                                            'enviado_en': null,
+                                            'estatus_envio': 'devuelto',
+                                            'devuelto_en':
+                                                FieldValue.serverTimestamp(),
+                                            'devuelto_por':
+                                                widget.usuarioData['nombre'] ??
+                                                    widget.usuarioEmail,
+                                          });
+                                        }
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.orange,
+                                        side: const BorderSide(
+                                            color: Colors.orange),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 10),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

@@ -24,6 +24,52 @@ class PublicadorTab extends StatefulWidget {
 }
 
 class _PublicadorTabState extends State<PublicadorTab> {
+  static const List<Color> _tarjetaColores = [
+    Color(0xFF1565C0), // azul
+    Color(0xFF2E7D32), // verde
+    Color(0xFF6A1B9A), // morado
+    Color(0xFFE65100), // naranja
+    Color(0xFF00695C), // teal
+    Color(0xFFC62828), // rojo
+    Color(0xFF4527A0), // violeta
+    Color(0xFF558B2F), // verde oliva
+    Color(0xFF00838F), // cyan
+    Color(0xFF4E342E), // café
+  ];
+
+  final Map<String, Map<String, String>> _estadosPorTarjeta = {};
+  final Map<String, Map<String, String>> _textosPorTarjeta = {};
+  final Map<String, Map<String, bool>> _modificadosPorTarjeta = {};
+  final Set<String> _tarjetasCompletadas = {};
+
+  // ───────────────────────────────────────────────────────────
+  // HELPERS
+  // ───────────────────────────────────────────────────────────
+
+  String _normalizarDireccion(String direccion) {
+    var texto = direccion.toLowerCase();
+    texto = texto.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
+    texto = texto.replaceAll(RegExp(r'\b\d{5}-?\d{3}\b'), ' ');
+    texto = texto.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
+    texto = texto.replaceAll('apto', 'apartamento');
+    texto = texto.replaceAll('apt', 'apartamento');
+    texto = texto.replaceAll('dpto', 'departamento');
+    texto = texto.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return texto;
+  }
+
+  Map<String, dynamic> _safeData(QueryDocumentSnapshot doc) {
+    try {
+      return (doc.data() as Map<String, dynamic>?) ?? {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // WIDGETS REUTILIZABLES
+  // ───────────────────────────────────────────────────────────
+
   Widget _statCard(String title, int value, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -32,7 +78,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -56,6 +102,35 @@ class _PublicadorTabState extends State<PublicadorTab> {
     );
   }
 
+  Widget _miniStat(String title, int value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w600, color: color),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value.toString(),
+            style: TextStyle(
+                fontSize: 16, fontWeight: FontWeight.bold, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _alertaBanner({
     required IconData icon,
     required Color color,
@@ -68,7 +143,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Row(
         children: [
@@ -78,22 +153,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                    fontSize: 14,
-                  ),
-                ),
+                Text(title,
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                        fontSize: 14)),
                 const SizedBox(height: 4),
-                Text(
-                  body,
-                  style: TextStyle(
-                    color: color.withValues(alpha: 0.8),
-                    fontSize: 13,
-                  ),
-                ),
+                Text(body,
+                    style:
+                        TextStyle(color: color.withOpacity(0.8), fontSize: 13)),
               ],
             ),
           ),
@@ -102,36 +170,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
     );
   }
 
-  Widget _miniStat(String title, int value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 4),
-          Text(
-            value.toString(),
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 10,
-              color: color.withValues(alpha: 0.7),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // ───────────────────────────────────────────────────────────
+  // DEVOLVER TARJETA
+  // ───────────────────────────────────────────────────────────
 
   Future<void> _devolverTarjeta(String territorioId, String tarjetaId) async {
     try {
@@ -145,7 +186,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
         'asignado_en': null,
         'estatus_envio': 'disponible',
       });
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -164,104 +204,536 @@ class _PublicadorTabState extends State<PublicadorTab> {
     }
   }
 
-  Widget _buildDireccionesTarjeta(String tarjetaId) {
-    return FutureBuilder<QuerySnapshot>(
-      future: FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .where('tarjeta_id', isEqualTo: tarjetaId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text(
-              'Sin direcciones.',
-              style: TextStyle(color: Colors.grey),
-            ),
-          );
-        }
-        return Column(
-          children: [
-            ...snapshot.data!.docs.map((dirDoc) {
-              final data = dirDoc.data() as Map<String, dynamic>;
-              final fullAddress =
-                  '${data['calle'] ?? ''}${(data['complemento'] ?? '').isNotEmpty ? ' · ${data['complemento']}' : ''}';
-              final selectedValue = data['estado_predicacion'] ?? 'pendiente';
+  // ───────────────────────────────────────────────────────────
+  // WIDGET DIRECCIONES POR TARJETA
+  // ───────────────────────────────────────────────────────────
 
-              return StatefulBuilder(
-                builder: (context, setState) {
-                  return Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Card(
-                      elevation: 2,
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              fullAddress,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            RadioGroup<String>(
-                              groupValue: selectedValue,
-                              onChanged: (value) async {
-                                if (value != null) {
-                                  setState(() {
-                                    // Update local state immediately
-                                  });
-                                  await FirebaseFirestore.instance
-                                      .collection('direcciones_globales')
-                                      .doc(dirDoc.id)
-                                      .update({
-                                    'estado_predicacion': value,
-                                    'predicado': value == 'completada',
-                                    'fecha_predicacion': value == 'completada'
-                                        ? FieldValue.serverTimestamp()
-                                        : null,
-                                  });
-                                }
-                              },
-                              child: Column(
-                                children: [
-                                  RadioListTile<String>(
-                                    title: const Text('Se predicó'),
-                                    value: 'completada',
-                                  ),
-                                  RadioListTile<String>(
-                                    title: const Text('No se predicó'),
-                                    value: 'no_predicado',
-                                  ),
-                                  RadioListTile<String>(
-                                    title:
-                                        const Text('No vive hispanohablante'),
-                                    value: 'no_hispano',
-                                  ),
-                                  RadioListTile<String>(
-                                    title: const Text('Otro'),
-                                    value: 'otro',
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
+  Widget _buildDireccionesTarjeta(
+      String tarjetaId, String territorioId, String tarjetaNombre) {
+    return StatefulBuilder(
+      builder: (context, setLocalState) {
+        if (!_estadosPorTarjeta.containsKey(tarjetaId)) {
+          _estadosPorTarjeta[tarjetaId] = {};
+          _textosPorTarjeta[tarjetaId] = {};
+          _modificadosPorTarjeta[tarjetaId] = {};
+        }
+
+        return FutureBuilder<QuerySnapshot>(
+          future: FirebaseFirestore.instance
+              .collection('direcciones_globales')
+              .where('tarjeta_id', isEqualTo: tarjetaId)
+              .where('estado', isNotEqualTo: 'removida')
+              .get(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('Sin direcciones pendientes.',
+                    style: TextStyle(color: Colors.grey)),
+              );
+            }
+
+            final direcciones = snapshot.data!.docs;
+
+            if (_estadosPorTarjeta[tarjetaId]!.isEmpty) {
+              for (final dir in direcciones) {
+                final data = _safeData(dir);
+                _estadosPorTarjeta[tarjetaId]![dir.id] =
+                    (data['estado_predicacion'] as String?) ?? 'pendiente';
+                _textosPorTarjeta[tarjetaId]![dir.id] =
+                    (data['motivo_temporal'] as String?) ?? '';
+                _modificadosPorTarjeta[tarjetaId]![dir.id] = false;
+              }
+            }
+
+            return Column(
+              children: [
+                // ── Lista de direcciones ──────────────────────
+                ...direcciones.map((dirDoc) {
+                  final data = _safeData(dirDoc);
+                  final estadoLocal =
+                      _estadosPorTarjeta[tarjetaId]![dirDoc.id] ?? 'pendiente';
+                  final otroTexto =
+                      _textosPorTarjeta[tarjetaId]![dirDoc.id] ?? '';
+                  final calle = (data['calle'] as String?) ?? '';
+                  final complemento = (data['complemento'] as String?) ?? '';
+                  final direccionCompleta =
+                      '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}';
+
+                  // FIX 1: Color de acento según estado
+                  Color accentColor = const Color(0xFFB0BEC5);
+                  IconData estadoIcon = Icons.radio_button_unchecked;
+                  if (estadoLocal == 'completada') {
+                    accentColor = const Color(0xFF2E7D32);
+                    estadoIcon = Icons.check_circle;
+                  } else if (estadoLocal == 'no_predicado') {
+                    accentColor = const Color(0xFFE65100);
+                    estadoIcon = Icons.hourglass_empty;
+                  } else if (estadoLocal == 'no_hispano') {
+                    accentColor = const Color(0xFF1565C0);
+                    estadoIcon = Icons.public_off;
+                  } else if (estadoLocal == 'otro') {
+                    accentColor = const Color(0xFF6A1B9A);
+                    estadoIcon = Icons.edit_note;
+                  }
+
+                  return Container(
+                    margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border(
+                        left: BorderSide(color: accentColor, width: 5),
+                        top: BorderSide(
+                            color: accentColor.withOpacity(0.25), width: 1),
+                        right: BorderSide(
+                            color: accentColor.withOpacity(0.25), width: 1),
+                        bottom: BorderSide(
+                            color: accentColor.withOpacity(0.25), width: 1),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: accentColor.withOpacity(0.15),
+                          blurRadius: 12,
+                          spreadRadius: 1,
+                          offset: const Offset(0, 4),
                         ),
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Cabecera
+                          Row(
+                            children: [
+                              Icon(Icons.location_on,
+                                  color: accentColor, size: 18),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  direccionCompleta,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                    color: Color(0xFF263238),
+                                  ),
+                                ),
+                              ),
+                              if (estadoLocal != 'pendiente')
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: accentColor.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Icon(estadoIcon,
+                                      size: 16, color: accentColor),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: Colors.grey.shade100),
+                          const SizedBox(height: 6),
+
+                          // FIX 2: Opciones limpias sin flechas
+                          ...[
+                            {
+                              'label': 'Se predicó',
+                              'value': 'completada',
+                              'color': const Color(0xFF2E7D32),
+                              'icon': Icons.check_circle_outline,
+                            },
+                            {
+                              'label': 'No se predicó',
+                              'value': 'no_predicado',
+                              'color': const Color(0xFFE65100),
+                              'icon': Icons.hourglass_empty,
+                            },
+                            {
+                              'label': 'No vive hispanohablante',
+                              'value': 'no_hispano',
+                              'color': const Color(0xFF1565C0),
+                              'icon': Icons.public_off,
+                            },
+                            {
+                              'label': 'Otro (escribir nota)',
+                              'value': 'otro',
+                              'color': const Color(0xFF6A1B9A),
+                              'icon': Icons.edit_note,
+                            },
+                          ].map((opcion) {
+                            final val = opcion['value'] as String;
+                            final color = opcion['color'] as Color;
+                            final isSelected = estadoLocal == val;
+
+                            return InkWell(
+                              onTap: () => setLocalState(() {
+                                _estadosPorTarjeta[tarjetaId]![dirDoc.id] = val;
+                                _modificadosPorTarjeta[tarjetaId]![dirDoc.id] =
+                                    true;
+                              }),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 3),
+                                child: Row(
+                                  children: [
+                                    Radio<String>(
+                                      value: val,
+                                      groupValue: estadoLocal,
+                                      onChanged: (v) => setLocalState(() {
+                                        _estadosPorTarjeta[tarjetaId]![
+                                            dirDoc.id] = v!;
+                                        _modificadosPorTarjeta[tarjetaId]![
+                                            dirDoc.id] = true;
+                                      }),
+                                      activeColor: color,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    Icon(
+                                      opcion['icon'] as IconData,
+                                      size: 16,
+                                      color: isSelected
+                                          ? color
+                                          : Colors.grey.shade400,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      opcion['label'] as String,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: isSelected
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
+                                        color: isSelected
+                                            ? color
+                                            : const Color(0xFF546E7A),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+
+                          // Campo texto para "Otro"
+                          if (estadoLocal == 'otro')
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 36, top: 6, bottom: 4),
+                              child: TextField(
+                                controller:
+                                    TextEditingController(text: otroTexto)
+                                      ..selection = TextSelection.fromPosition(
+                                        TextPosition(offset: otroTexto.length),
+                                      ),
+                                decoration: InputDecoration(
+                                  hintText: 'Escribe el motivo o nota...',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: BorderSide(
+                                        color: Colors.purple.shade200),
+                                  ),
+                                  isDense: true,
+                                  filled: true,
+                                  fillColor: Colors.purple.shade50,
+                                ),
+                                maxLines: 2,
+                                onChanged: (value) => setLocalState(() {
+                                  _textosPorTarjeta[tarjetaId]![dirDoc.id] =
+                                      value;
+                                }),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   );
-                },
-              );
-            }),
-          ],
+                }).toList(),
+
+                // ── Botones ──────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => setLocalState(() {
+                            for (final dir in direcciones) {
+                              final data = _safeData(dir);
+                              _estadosPorTarjeta[tarjetaId]![dir.id] =
+                                  (data['estado_predicacion'] as String?) ??
+                                      'pendiente';
+                              _textosPorTarjeta[tarjetaId]![dir.id] =
+                                  (data['motivo_temporal'] as String?) ?? '';
+                              _modificadosPorTarjeta[tarjetaId]![dir.id] =
+                                  false;
+                            }
+                          }),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.black54,
+                            side: const BorderSide(color: Colors.black26),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: const Text('Cancelar'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton.icon(
+                          onPressed: () async => _confirmarProcesamientoTarjeta(
+                            tarjetaId,
+                            territorioId,
+                            tarjetaNombre,
+                            direcciones,
+                            context,
+                          ),
+                          icon:
+                              const Icon(Icons.check_circle_outline, size: 18),
+                          label: const Text('Confirmar',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1B5E20),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
   }
+
+  // ───────────────────────────────────────────────────────────
+  // CONFIRMAR PROCESAMIENTO
+  // ───────────────────────────────────────────────────────────
+
+  Future<void> _confirmarProcesamientoTarjeta(
+    String tarjetaId,
+    String territorioId,
+    String tarjetaNombre,
+    List<QueryDocumentSnapshot> direcciones,
+    BuildContext context,
+  ) async {
+    final estados = _estadosPorTarjeta[tarjetaId] ?? {};
+    final textos = _textosPorTarjeta[tarjetaId] ?? {};
+
+    for (final dir in direcciones) {
+      final estado = estados[dir.id];
+      if (estado == null || estado == 'pendiente' || estado.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Debes seleccionar un estado para todas las direcciones'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+      if (estado == 'otro' && (textos[dir.id]?.trim().isEmpty ?? true)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Para "Otro" debes escribir un motivo'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    }
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Confirmar procesamiento'),
+        content: Text(
+            '¿Procesar las ${direcciones.length} direcciones de "$tarjetaNombre"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20)),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final folderRef = db
+          .collection('territorios')
+          .doc('temporales')
+          .collection('tarjetas')
+          .doc(territorioId);
+      final batch = db.batch();
+      final ahora = DateTime.now();
+      final mesActual =
+          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+
+      for (final dir in direcciones) {
+        final estado = estados[dir.id] ?? 'pendiente';
+        final motivo = textos[dir.id]?.trim() ?? '';
+        final data = _safeData(dir);
+        final calle = (data['calle'] as String?) ?? '';
+        final complemento = (data['complemento'] as String?) ?? '';
+
+        if (estado == 'completada') {
+          batch.update(dir.reference, {
+            'estado_predicacion': 'completada',
+            'predicado': true,
+            'fecha_predicacion': FieldValue.serverTimestamp(),
+            'mes_predicacion': mesActual,
+            'tarjeta_id': null,
+          });
+        } else if (estado == 'no_predicado') {
+          final folderSnap = await folderRef.get();
+          if (!folderSnap.exists) {
+            batch.set(folderRef, {
+              'nombre_grupo': territorioId,
+              'tipo': 'folder_temporal',
+              'created_at': FieldValue.serverTimestamp(),
+              'ids_direcciones': [],
+            });
+          }
+          batch.set(folderRef.collection('direcciones').doc(), {
+            'calle': calle,
+            'complemento': complemento,
+            'direccion_normalizada':
+                _normalizarDireccion('$calle $complemento'),
+            'territorio_origen': territorioId,
+            'tarjeta_origen': tarjetaId,
+            'motivo': 'no_predicado',
+            'estado': 'temporal',
+            'created_at': FieldValue.serverTimestamp(),
+          });
+          batch.update(dir.reference, {
+            'estado_predicacion': 'temporal',
+            'motivo_temporal': 'no_predicado',
+            'fecha_temporal': FieldValue.serverTimestamp(),
+            'tarjeta_id': null,
+          });
+        } else if (estado == 'no_hispano') {
+          batch.update(dir.reference, {
+            'estado': 'removida',
+            'estado_predicacion': 'removida',
+            'motivo_remocion': 'no_hispano',
+            'removida_en': FieldValue.serverTimestamp(),
+            'removida_por': widget.usuarioData['nombre'] ?? '',
+            'tarjeta_id': null,
+          });
+        } else if (estado == 'otro') {
+          final folderSnap = await folderRef.get();
+          if (!folderSnap.exists) {
+            batch.set(folderRef, {
+              'nombre_grupo': territorioId,
+              'tipo': 'folder_temporal',
+              'created_at': FieldValue.serverTimestamp(),
+              'ids_direcciones': [],
+            });
+          }
+          batch.set(folderRef.collection('direcciones').doc(), {
+            'calle': calle,
+            'complemento': complemento,
+            'direccion_normalizada':
+                _normalizarDireccion('$calle $complemento'),
+            'territorio_origen': territorioId,
+            'tarjeta_origen': tarjetaId,
+            'motivo': motivo,
+            'estado': 'temporal',
+            'created_at': FieldValue.serverTimestamp(),
+          });
+          batch.update(dir.reference, {
+            'estado_predicacion': 'temporal',
+            'motivo_temporal': motivo,
+            'fecha_temporal': FieldValue.serverTimestamp(),
+            'tarjeta_id': null,
+          });
+        }
+      }
+
+      batch.update(
+        db
+            .collection('territorios')
+            .doc(territorioId)
+            .collection('tarjetas')
+            .doc(tarjetaId),
+        {
+          'completada': true,
+          'fecha_completada': FieldValue.serverTimestamp(),
+        },
+      );
+
+      await batch.commit();
+
+      if (mounted) {
+        // FIX 3: Quitar tarjeta de la lista inmediatamente
+        setState(() {
+          _tarjetasCompletadas.add(tarjetaId);
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '¡Tarjeta "$tarjetaNombre" completada!',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF1B5E20),
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al procesar: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // BUILD
+  // ───────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -278,27 +750,25 @@ class _PublicadorTabState extends State<PublicadorTab> {
         builder: (context, snapshot) {
           final todasDirecciones = snapshot.data?.docs ?? [];
 
-          // Obtener direcciones del usuario
           final direccionesUsuario = todasDirecciones.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
+            final data = _safeData(doc);
             return data['publicador_email'] == widget.usuarioEmail;
           }).toList();
 
-          // Obtener tarjetas asignadas al usuario
-          final tarjetasUsuario = direccionesUsuario
-              .map((doc) => doc['tarjeta_id'] as String? ?? '')
-              .toSet();
+          final tarjetasUsuario = direccionesUsuario.map((doc) {
+            final data = _safeData(doc);
+            return (data['tarjeta_id'] as String?) ?? '';
+          }).toSet();
 
-          // Contar todas las direcciones dentro de las tarjetas asignadas
           final direccionesEnTarjetasUsuario = todasDirecciones.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
+            final data = _safeData(doc);
             return tarjetasUsuario
-                .contains(data['tarjeta_id'] as String? ?? '');
+                .contains((data['tarjeta_id'] as String?) ?? '');
           }).toList();
 
           final total = direccionesEnTarjetasUsuario.length;
           final completadas = direccionesEnTarjetasUsuario.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
+            final data = _safeData(doc);
             return data['estado_predicacion'] == 'completada' ||
                 data['predicado'] == true;
           }).length;
@@ -306,18 +776,18 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
           return CustomScrollView(
             slivers: [
-              // ── HEADER ──────────────────────────────────────────
+              // ── HEADER ─────────────────────────────────────
               SliverToBoxAdapter(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1B5E20).withValues(alpha: 0.85),
+                    color: const Color(0xFF1B5E20).withOpacity(0.85),
                   ),
                   padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
                   child: Row(
                     children: [
                       CircleAvatar(
                         radius: 28,
-                        backgroundColor: Colors.white.withValues(alpha: 0.2),
+                        backgroundColor: Colors.white.withOpacity(0.2),
                         child: Text(
                           iniciales,
                           style: const TextStyle(
@@ -342,9 +812,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              '$completadas de $total direcciones completadas ($pendientes pendientes)',
+                              '$completadas de $total completadas ($pendientes pendientes)',
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.8),
+                                color: Colors.white.withOpacity(0.8),
                                 fontSize: 13,
                               ),
                             ),
@@ -356,7 +826,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 ),
               ),
 
-              // ── ALERTAS ─────────────────────────────────────────
+              // ── ALERTAS ────────────────────────────────────
               if (widget.campanaEspecialActiva ||
                   (widget.campanaGeneralActiva &&
                       widget.anuncioGeneral.trim().isNotEmpty))
@@ -387,26 +857,23 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   ),
                 ),
 
-              // ── STATS ────────────────────────────────────────────
+              // ── STATS ──────────────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                 sliver: SliverToBoxAdapter(
                   child: StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collectionGroup('tarjetas')
-                        .where(
-                          'asignado_a',
-                          isEqualTo: widget.usuarioData['nombre'] ?? '',
-                        )
+                        .where('asignado_a',
+                            isEqualTo: widget.usuarioData['nombre'] ?? '')
                         .snapshots(),
                     builder: (context, tarjetasSnap) {
-                      // Total direcciones en tarjetas asignadas al usuario
                       int totalDirAsignadas = 0;
-                      List<String> tarjetaIds = [];
+                      final List<String> tarjetaIds = [];
 
                       if (tarjetasSnap.hasData) {
                         for (final t in tarjetasSnap.data!.docs) {
-                          final d = t.data() as Map<String, dynamic>;
+                          final d = _safeData(t);
                           totalDirAsignadas +=
                               ((d['cantidad_direcciones'] ?? 0) as int);
                           tarjetaIds.add(t.id);
@@ -418,20 +885,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             ? Future.value(null)
                             : FirebaseFirestore.instance
                                 .collection('direcciones_globales')
-                                .where(
-                                  'tarjeta_id',
-                                  whereIn: tarjetaIds.take(10).toList(),
-                                )
+                                .where('tarjeta_id',
+                                    whereIn: tarjetaIds.take(10).toList())
                                 .get(),
                         builder: (context, dirsSnap) {
-                          // Filtrar por mes actual usando mes_predicacion
                           final mesActual =
                               '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
 
                           final completadas = dirsSnap.data?.docs.where((doc) {
-                                final data = doc.data() as Map<String, dynamic>;
-                                return data['predicado'] == true &&
-                                    data['mes_predicacion'] == mesActual;
+                                final d = _safeData(doc);
+                                return d['predicado'] == true &&
+                                    d['mes_predicacion'] == mesActual;
                               }).length ??
                               0;
 
@@ -441,26 +905,21 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             children: [
                               Expanded(
                                 child: _statCard(
-                                  'Dir Asignadas',
-                                  totalDirAsignadas,
-                                  Icons.home_work_outlined,
-                                ),
+                                    'Dir Asignadas',
+                                    totalDirAsignadas,
+                                    Icons.home_work_outlined),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _statCard('Dir Completadas', completadas,
+                                    Icons.check_circle_outline),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: _statCard(
-                                  'Dir Completadas',
-                                  completadas,
-                                  Icons.check_circle_outline,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _statCard(
-                                  'Dir Pendientes',
-                                  pendientes < 0 ? 0 : pendientes,
-                                  Icons.schedule_outlined,
-                                ),
+                                    'Dir Pendientes',
+                                    pendientes < 0 ? 0 : pendientes,
+                                    Icons.schedule_outlined),
                               ),
                             ],
                           );
@@ -471,7 +930,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 ),
               ),
 
-              // ── PROGRESO ─────────────────────────────────────────
+              // ── PROGRESO ───────────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 sliver: SliverToBoxAdapter(
@@ -483,7 +942,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       final totalExistentes = snapTotal.data?.docs.length ?? 0;
                       final completadasGlobal =
                           snapTotal.data?.docs.where((doc) {
-                                final d = doc.data() as Map<String, dynamic>;
+                                final d = _safeData(doc);
                                 return d['predicado'] == true;
                               }).length ??
                               0;
@@ -500,7 +959,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           borderRadius: BorderRadius.circular(20),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.05),
+                              color: Colors.black.withOpacity(0.05),
                               blurRadius: 10,
                               offset: const Offset(0, 4),
                             ),
@@ -538,39 +997,34 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                 minHeight: 10,
                                 backgroundColor: const Color(0xFFE8F5E9),
                                 valueColor: const AlwaysStoppedAnimation<Color>(
-                                  Color(0xFF1B5E20),
-                                ),
+                                    Color(0xFF1B5E20)),
                               ),
                             ),
                             const SizedBox(height: 16),
-                            // Tres contadores
                             Row(
                               children: [
                                 Expanded(
                                   child: _miniStat(
-                                    'Existentes',
-                                    totalExistentes,
-                                    Icons.home_work_outlined,
-                                    Colors.blue,
-                                  ),
+                                      'Existentes',
+                                      totalExistentes,
+                                      Icons.home_work_outlined,
+                                      Colors.blue),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: _miniStat(
-                                    'Completadas',
-                                    completadasGlobal,
-                                    Icons.check_circle_outline,
-                                    const Color(0xFF1B5E20),
-                                  ),
+                                      'Completadas',
+                                      completadasGlobal,
+                                      Icons.check_circle_outline,
+                                      const Color(0xFF1B5E20)),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: _miniStat(
-                                    'Pendientes',
-                                    pendientesGlobal,
-                                    Icons.schedule_outlined,
-                                    Colors.orange,
-                                  ),
+                                      'Pendientes',
+                                      pendientesGlobal,
+                                      Icons.schedule_outlined,
+                                      Colors.orange),
                                 ),
                               ],
                             ),
@@ -582,7 +1036,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 ),
               ),
 
-              // ── MIS TARJETAS ──────────────────────────────
+              // ── MIS TARJETAS ───────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                 sliver: SliverToBoxAdapter(
@@ -602,18 +1056,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
                             .collectionGroup('tarjetas')
-                            .where(
-                              'asignado_a',
-                              isEqualTo: widget.usuarioData['nombre'] ??
-                                  '', // Usar nombre para búsqueda
-                            )
+                            .where('asignado_a',
+                                isEqualTo: widget.usuarioData['nombre'] ?? '')
                             .snapshots(),
                         builder: (context, snapshot) {
                           if (snapshot.connectionState ==
                               ConnectionState.waiting) {
                             return const Center(
-                              child: CircularProgressIndicator(),
-                            );
+                                child: CircularProgressIndicator());
                           }
                           if (!snapshot.hasData ||
                               snapshot.data!.docs.isEmpty) {
@@ -632,39 +1082,135 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             );
                           }
 
-                          return Column(
-                            children: snapshot.data!.docs.map((tarjetaDoc) {
-                              final data =
-                                  tarjetaDoc.data() as Map<String, dynamic>;
-                              final nombre = data['nombre'] ?? tarjetaDoc.id;
-                              final cantDir = data['cantidad_direcciones'] ?? 0;
-                              final territorioId =
-                                  tarjetaDoc.reference.parent.parent?.id ?? '';
-                              final asignadoEn =
-                                  data['asignado_en'] as Timestamp?;
-                              final fecha = asignadoEn != null
-                                  ? '${asignadoEn.toDate().day}/${asignadoEn.toDate().month}/${asignadoEn.toDate().year}'
-                                  : '';
+                          // FIX 3: Ocultar completadas al instante
+                          final tarjetasVisibles =
+                              snapshot.data!.docs.where((doc) {
+                            if (_tarjetasCompletadas.contains(doc.id)) {
+                              return false;
+                            }
+                            final d = _safeData(doc);
+                            return d['completada'] != true;
+                          }).toList();
 
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: ExpansionTile(
-                                  leading: const Icon(
-                                    Icons.credit_card,
-                                    color: Colors.blue,
-                                  ),
-                                  title: Text(
-                                    nombre,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
+                          if (tarjetasVisibles.isEmpty) {
+                            return Container(
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE8F5E9),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: const Color(0xFF1B5E20)
+                                        .withOpacity(0.3)),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.check_circle,
+                                      color: Color(0xFF1B5E20)),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    '¡Todas las tarjetas completadas!',
+                                    style: TextStyle(
+                                      color: Color(0xFF1B5E20),
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
-                                  subtitle: Text(
-                                    '$cantDir direcciones · $territorioId${fecha.isNotEmpty ? ' · $fecha' : ''}',
-                                    style: const TextStyle(fontSize: 11),
+                                ],
+                              ),
+                            );
+                          }
+
+                          return Column(
+                            children:
+                                List.generate(tarjetasVisibles.length, (index) {
+                              final tarjetaDoc = tarjetasVisibles[index];
+                              final data = _safeData(tarjetaDoc);
+                              final nombre =
+                                  (data['nombre'] as String?) ?? tarjetaDoc.id;
+                              final territorioId =
+                                  tarjetaDoc.reference.parent.parent?.id ?? '';
+
+                              // Color aleatorio pero estable por índice
+                              final color = _tarjetaColores[
+                                  index % _tarjetaColores.length];
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 14),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border(
+                                    left: BorderSide(color: color, width: 5),
+                                    top: BorderSide(
+                                        color: color.withOpacity(0.2),
+                                        width: 1),
+                                    right: BorderSide(
+                                        color: color.withOpacity(0.2),
+                                        width: 1),
+                                    bottom: BorderSide(
+                                        color: color.withOpacity(0.2),
+                                        width: 1),
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: color.withOpacity(0.12),
+                                      blurRadius: 12,
+                                      spreadRadius: 1,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: ExpansionTile(
+                                  leading: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: color.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Icon(Icons.credit_card,
+                                        color: color, size: 20),
+                                  ),
+                                  title: Text(nombre,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
+                                  subtitle: FutureBuilder<QuerySnapshot>(
+                                    future: FirebaseFirestore.instance
+                                        .collection('direcciones_globales')
+                                        .where('tarjeta_id',
+                                            isEqualTo: tarjetaDoc.id)
+                                        .where('estado',
+                                            isNotEqualTo: 'removida')
+                                        .get(),
+                                    builder: (context, dirSnap) {
+                                      final cantReal =
+                                          dirSnap.data?.docs.length ?? 0;
+                                      final enviadoNombre =
+                                          (data['enviado_nombre'] as String?) ??
+                                              '';
+                                      final enviadoEn =
+                                          data['enviado_en'] as Timestamp?;
+                                      String fechaHora = '';
+                                      if (enviadoEn != null) {
+                                        final dt = enviadoEn.toDate();
+                                        final h =
+                                            dt.hour.toString().padLeft(2, '0');
+                                        final m = dt.minute
+                                            .toString()
+                                            .padLeft(2, '0');
+                                        fechaHora =
+                                            '${dt.day}/${dt.month}/${dt.year} $h:$m';
+                                      }
+                                      return Text(
+                                        '$cantReal dir${enviadoNombre.isNotEmpty ? ' · $enviadoNombre' : ''}${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
+                                        style: const TextStyle(fontSize: 11),
+                                      );
+                                    },
                                   ),
                                   trailing: TextButton(
                                     onPressed: () async {
@@ -685,8 +1231,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                               onPressed: () =>
                                                   Navigator.pop(c, true),
                                               style: ElevatedButton.styleFrom(
-                                                backgroundColor: Colors.orange,
-                                              ),
+                                                  backgroundColor:
+                                                      Colors.orange),
                                               child: const Text('Devolver'),
                                             ),
                                           ],
@@ -694,22 +1240,19 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                       );
                                       if (confirmar == true) {
                                         await _devolverTarjeta(
-                                          territorioId,
-                                          tarjetaDoc.id,
-                                        );
+                                            territorioId, tarjetaDoc.id);
                                       }
                                     },
-                                    child: const Text(
-                                      'Devolver',
-                                      style: TextStyle(color: Colors.orange),
-                                    ),
+                                    child: const Text('Devolver',
+                                        style: TextStyle(color: Colors.orange)),
                                   ),
                                   children: [
-                                    _buildDireccionesTarjeta(tarjetaDoc.id),
+                                    _buildDireccionesTarjeta(
+                                        tarjetaDoc.id, territorioId, nombre),
                                   ],
                                 ),
                               );
-                            }).toList(),
+                            }),
                           );
                         },
                       ),
@@ -718,7 +1261,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 ),
               ),
 
-              // ── DIRECCIONES ──────────────────────────────────────
+              // ── MIS DIRECCIONES ────────────────────────────
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
                 sliver: SliverToBoxAdapter(
@@ -744,35 +1287,32 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             borderRadius: BorderRadius.circular(20),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.04),
+                                color: Colors.black.withOpacity(0.04),
                                 blurRadius: 10,
                               ),
                             ],
                           ),
                           child: Column(
                             children: [
-                              Icon(
-                                Icons.location_off_outlined,
-                                size: 48,
-                                color: Colors.grey[400],
-                              ),
+                              Icon(Icons.location_off_outlined,
+                                  size: 48, color: Colors.grey[400]),
                               const SizedBox(height: 12),
                               Text(
                                 'Sin direcciones asignadas',
                                 style: TextStyle(
-                                  color: Colors.grey[500],
-                                  fontSize: 15,
-                                ),
+                                    color: Colors.grey[500], fontSize: 15),
                               ),
                             ],
                           ),
                         )
                       else
                         ...direccionesUsuario.map((doc) {
-                          final data = doc.data() as Map<String, dynamic>;
-                          final calle = data['calle'] ?? 'Dirección';
-                          final predicado = data['predicado'] ?? false;
-                          final notas = data['notas'] ?? '';
+                          final data = _safeData(doc);
+                          final calle =
+                              (data['calle'] as String?) ?? 'Dirección';
+                          final predicado =
+                              (data['predicado'] as bool?) ?? false;
+                          final notas = (data['notas'] as String?) ?? '';
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
@@ -781,7 +1321,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.04),
+                                  color: Colors.black.withOpacity(0.04),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -799,8 +1339,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         onChanged: (value) async {
                                           await FirebaseFirestore.instance
                                               .collection(
-                                                'direcciones_globales',
-                                              )
+                                                  'direcciones_globales')
                                               .doc(doc.id)
                                               .update({
                                             'predicado': value ?? false,
@@ -820,23 +1359,19 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         child: Text(
                                           calle,
                                           style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 14,
-                                          ),
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14),
                                         ),
                                       ),
                                       Container(
                                         padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
+                                            horizontal: 8, vertical: 4),
                                         decoration: BoxDecoration(
                                           color: predicado
                                               ? const Color(0xFFE8F5E9)
                                               : const Color(0xFFFFF8E1),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
                                         ),
                                         child: Text(
                                           predicado
@@ -858,9 +1393,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     Container(
                                       padding: const EdgeInsets.all(8),
                                       decoration: BoxDecoration(
-                                        color: const Color(
-                                          0xFFE65100,
-                                        ).withValues(alpha: 0.1),
+                                        color: const Color(0xFFE65100)
+                                            .withOpacity(0.1),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Column(
@@ -877,36 +1411,33 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                           ),
                                           TextField(
                                             controller: TextEditingController(
-                                              text: data['campo_extra'] ?? '',
+                                              text: (data['campo_extra']
+                                                      as String?) ??
+                                                  '',
                                             ),
                                             decoration: InputDecoration(
                                               hintText:
                                                   'Ingresa dato de campaña...',
-                                              hintStyle: const TextStyle(
-                                                fontSize: 11,
-                                              ),
+                                              hintStyle:
+                                                  const TextStyle(fontSize: 11),
                                               border: OutlineInputBorder(
                                                 borderRadius:
                                                     BorderRadius.circular(6),
                                               ),
                                               contentPadding:
                                                   const EdgeInsets.symmetric(
-                                                horizontal: 8,
-                                                vertical: 4,
-                                              ),
+                                                      horizontal: 8,
+                                                      vertical: 4),
                                             ),
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                            ),
+                                            style:
+                                                const TextStyle(fontSize: 11),
                                             onChanged: (value) async {
                                               await FirebaseFirestore.instance
                                                   .collection(
-                                                    'direcciones_globales',
-                                                  )
+                                                      'direcciones_globales')
                                                   .doc(doc.id)
-                                                  .update({
-                                                'campo_extra': value,
-                                              });
+                                                  .update(
+                                                      {'campo_extra': value});
                                             },
                                           ),
                                         ],
@@ -915,9 +1446,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                   ],
                                   const SizedBox(height: 8),
                                   TextField(
-                                    controller: TextEditingController(
-                                      text: notas,
-                                    ),
+                                    controller:
+                                        TextEditingController(text: notas),
                                     decoration: InputDecoration(
                                       hintText: 'Agregar notas...',
                                       hintStyle: const TextStyle(fontSize: 11),
@@ -926,9 +1456,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                       ),
                                       contentPadding:
                                           const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
+                                              horizontal: 8, vertical: 4),
                                     ),
                                     style: const TextStyle(fontSize: 11),
                                     maxLines: 2,

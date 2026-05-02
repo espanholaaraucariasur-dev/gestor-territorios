@@ -293,12 +293,122 @@ class _AdminTabState extends State<AdminTab> {
   }
 
   void _verDirectorioGlobal() {
-    // Implementación simulada - en el código original habría navegación
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            'Ver Directorio Global - Función no implementada en esta versión'),
-        backgroundColor: Colors.blue,
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          width: double.maxFinite,
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.85),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Directorio Global',
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B5E20))),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const Divider(),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('direcciones_globales')
+                      .orderBy('created_at', descending: true)
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final docs = snap.data!.docs;
+                    if (docs.isEmpty) {
+                      return const Center(
+                          child: Text('No hay direcciones.',
+                              style: TextStyle(color: Colors.grey)));
+                    }
+                    return Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            '${docs.length} direcciones en total',
+                            style: const TextStyle(
+                                color: Colors.grey, fontSize: 12),
+                          ),
+                        ),
+                        Expanded(
+                          child: ListView.builder(
+                            itemCount: docs.length,
+                            itemBuilder: (context, i) {
+                              final d =
+                                  (docs[i].data() as Map<String, dynamic>?) ??
+                                      {};
+                              final calle = (d['calle'] as String?) ?? '';
+                              final complemento =
+                                  (d['complemento'] as String?) ?? '';
+                              final tarjetaId =
+                                  (d['tarjeta_id'] as String?) ?? '-';
+                              final estado =
+                                  (d['estado_predicacion'] as String?) ??
+                                      'pendiente';
+                              final predicado =
+                                  (d['predicado'] as bool?) ?? false;
+
+                              return ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  Icons.location_on,
+                                  color: predicado ? Colors.green : Colors.grey,
+                                  size: 18,
+                                ),
+                                title: Text(
+                                  '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                subtitle: Text(
+                                  'Tarjeta: $tarjetaId · $estado',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                trailing: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: predicado
+                                        ? Colors.green.shade100
+                                        : Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    predicado ? 'Predicada' : 'Pendiente',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: predicado
+                                          ? Colors.green.shade800
+                                          : Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1538,7 +1648,26 @@ class _AdminTabState extends State<AdminTab> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 45,
+                        child: ElevatedButton.icon(
+                          onPressed: _verDirectorioGlobal,
+                          icon: const Icon(Icons.list_alt,
+                              color: Color(0xFF1B5E20)),
+                          label: const Text(
+                            'Ver Directorio Global',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.grey.shade100,
+                            foregroundColor: const Color(0xFF1B5E20),
+                            side: const BorderSide(color: Color(0xFF1B5E20)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       const Divider(),
                       const SizedBox(height: 10),
                       const Text(

@@ -501,6 +501,16 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
       final nombreDestinatario = usuarioSnap.docs.isNotEmpty
           ? (usuarioSnap.docs.first.data()['nombre'] ?? destinatarioEmail)
           : destinatarioEmail;
+      // Obtener nombre del territorio
+      String territoryNombre = nombre;
+      try {
+        final terDoc = await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(terId)
+            .get();
+        territoryNombre = (terDoc.data()?['nombre'] as String?) ?? nombre;
+      } catch (_) {}
+
       final payload = {
         'conductor_email': tipo == 'conductor' ? destinatarioEmail : null,
         'publicador_email': tipo == 'publicador' ? destinatarioEmail : null,
@@ -509,6 +519,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         'enviado_nombre': nombreDestinatario,
         'enviado_tipo': tipo,
         'enviado_en': FieldValue.serverTimestamp(),
+        'territorio_nombre': territoryNombre, // ✅ Nombre legible guardado
       };
       if (tarjetaId != null) {
         await FirebaseFirestore.instance
@@ -581,11 +592,198 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
   }
 
   Future<void> _mostrarDialogoCrearTarjeta(
-      BuildContext context, String terId) async {}
+      BuildContext context, String terId) async {
+    final ctrl = TextEditingController();
+    await showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Nueva Tarjeta'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            labelText: 'Nombre de la tarjeta',
+            hintText: 'Ej: A01-CENTRO',
+            border: OutlineInputBorder(),
+          ),
+          textCapitalization: TextCapitalization.characters,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final nombre = ctrl.text.trim();
+              if (nombre.isEmpty) return;
+              // Obtener nombre del territorio
+              final terDoc = await FirebaseFirestore.instance
+                  .collection('territorios')
+                  .doc(terId)
+                  .get();
+              final terNombre = (terDoc.data()?['nombre'] as String?) ?? '';
+              await FirebaseFirestore.instance
+                  .collection('territorios')
+                  .doc(terId)
+                  .collection('tarjetas')
+                  .doc(nombre) // ✅ ID = nombre de la tarjeta
+                  .set({
+                'nombre': nombre,
+                'territorio_id': terId,
+                'territorio_nombre': terNombre,
+                'created_at': FieldValue.serverTimestamp(),
+                'completada': false,
+                'bloqueado': false,
+                'disponible_para_publicadores': false,
+                'estatus_envio': 'disponible',
+                'cantidad_direcciones': 0,
+              });
+              if (context.mounted) Navigator.pop(c);
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20)),
+            child: const Text('Crear'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _agregarDireccionesATarjeta(BuildContext context, String terId,
-      String tarjetaId, String nombre) async {}
+      String tarjetaId, String tarjetaNombre) async {
+    final calleCtrl = TextEditingController();
+    final complementoCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          title: Text('Agregar dirección\n$tarjetaNombre',
+              style: const TextStyle(fontSize: 15)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: calleCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Calle / Dirección',
+                  border: OutlineInputBorder(),
+                ),
+                textCapitalization: TextCapitalization.words,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: complementoCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Complemento (apto, casa, etc.)',
+                  border: OutlineInputBorder(),
+                ),
+                textCapitalization: TextCapitalization.words,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final calle = calleCtrl.text.trim();
+                if (calle.isEmpty) return;
+                final complemento = complementoCtrl.text.trim();
+
+                // Obtener datos del territorio
+                final terDoc = await FirebaseFirestore.instance
+                    .collection('territorios')
+                    .doc(terId)
+                    .get();
+                final terNombre = (terDoc.data()?['nombre'] as String?) ?? '';
+
+                // ✅ Guardar en direcciones_globales con vínculo a tarjeta
+                await FirebaseFirestore.instance
+                    .collection('direcciones_globales')
+                    .add({
+                  'calle': calle,
+                  'complemento': complemento,
+                  'tarjeta_id': tarjetaId, // ✅ vínculo tarjeta
+                  'territorio_id': terId, // ✅ vínculo territorio
+                  'territorio_nombre': terNombre,
+                  'barrio': terNombre,
+                  'estado': 'asignada',
+                  'estado_predicacion': 'pendiente',
+                  'predicado': false,
+                  'visitado': false,
+                  'created_at': FieldValue.serverTimestamp(),
+                });
+
+                // Actualizar contador en la tarjeta
+                final count = await FirebaseFirestore.instance
+                    .collection('direcciones_globales')
+                    .where('tarjeta_id', isEqualTo: tarjetaId)
+                    .count()
+                    .get();
+                await FirebaseFirestore.instance
+                    .collection('territorios')
+                    .doc(terId)
+                    .collection('tarjetas')
+                    .doc(tarjetaId)
+                    .update({'cantidad_direcciones': count.count ?? 0});
+
+                calleCtrl.clear();
+                complementoCtrl.clear();
+                if (context.mounted) Navigator.pop(c);
+              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20)),
+              child: const Text('Agregar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _editarNombreTarjeta(
-      String terId, String tarjetaId, String nombre) async {}
+      String terId, String tarjetaId, String nombreActual) async {
+    final ctrl = TextEditingController(text: nombreActual);
+    await showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Editar nombre'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+          ),
+          textCapitalization: TextCapitalization.characters,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final nuevo = ctrl.text.trim();
+              if (nuevo.isEmpty) return;
+              await FirebaseFirestore.instance
+                  .collection('territorios')
+                  .doc(terId)
+                  .collection('tarjetas')
+                  .doc(tarjetaId)
+                  .update({'nombre': nuevo});
+              if (context.mounted) Navigator.pop(c);
+            },
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20)),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _mostrarDialogoProgramarEnvio(String terId,
       {String? tarjetaId,
       required String nombre,
@@ -820,31 +1018,46 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                       ],
                                     ),
                                     const SizedBox(height: 4),
-                                    FutureBuilder<int>(
-                                      future: FirebaseFirestore.instance
-                                          .collection('direcciones_globales')
-                                          .where('barrio', isEqualTo: nombre)
-                                          .count()
-                                          .get()
-                                          .then((v) => v.count ?? 0),
-                                      builder: (context, dirSnap) {
-                                        return StreamBuilder<QuerySnapshot>(
-                                          stream: FirebaseFirestore.instance
-                                              .collection('territorios')
-                                              .doc(territorio.id)
-                                              .collection('tarjetas')
-                                              .snapshots(),
-                                          builder: (context, t) {
-                                            final numTarjetas =
-                                                (t.data?.docs.length ?? 0)
-                                                    .toInt();
-                                            final numDirs = dirSnap.data ?? 0;
+                                    StreamBuilder<QuerySnapshot>(
+                                      stream: FirebaseFirestore.instance
+                                          .collection('territorios')
+                                          .doc(territorio.id)
+                                          .collection('tarjetas')
+                                          .snapshots(),
+                                      builder: (context, t) {
+                                        final numTarjetas =
+                                            t.data?.docs.length ?? 0;
+                                        final tarjetaIds = t.data?.docs
+                                                .map((d) => d.id)
+                                                .toList() ??
+                                            [];
+
+                                        if (tarjetaIds.isEmpty) {
+                                          return Text(
+                                            '$numTarjetas tarjetas · 0 direcciones',
+                                            style: const TextStyle(
+                                                color: Colors.grey,
+                                                fontSize: 13),
+                                          );
+                                        }
+
+                                        return FutureBuilder<QuerySnapshot>(
+                                          future: FirebaseFirestore.instance
+                                              .collection(
+                                                  'direcciones_globales')
+                                              .where('tarjeta_id',
+                                                  whereIn: tarjetaIds
+                                                      .take(10)
+                                                      .toList())
+                                              .get(),
+                                          builder: (context, dirSnap) {
+                                            final numDirs =
+                                                dirSnap.data?.docs.length ?? 0;
                                             return Text(
                                               '$numTarjetas tarjetas · $numDirs direcciones',
                                               style: const TextStyle(
-                                                color: Colors.grey,
-                                                fontSize: 13,
-                                              ),
+                                                  color: Colors.grey,
+                                                  fontSize: 13),
                                             );
                                           },
                                         );

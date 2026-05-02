@@ -90,21 +90,18 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           .collection('direcciones_globales')
           .get();
 
-      WriteBatch batch = FirebaseFirestore.instance.batch();
-      int count = 0;
       int total = 0;
-
-      for (final doc in snap.docs) {
-        batch.delete(doc.reference);
-        count++;
-        total++;
-        if (count >= 400) {
-          await batch.commit();
-          batch = FirebaseFirestore.instance.batch();
-          count = 0;
+      final docs = snap.docs;
+      for (int i = 0; i < docs.length; i += 100) {
+        final chunk = docs.skip(i).take(100).toList();
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+        for (final doc in chunk) {
+          batch.delete(doc.reference);
+          total++;
         }
+        await batch.commit();
+        await Future.delayed(const Duration(milliseconds: 300));
       }
-      if (count > 0) await batch.commit();
 
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
@@ -287,23 +284,28 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .get();
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in snap.docs) {
-        batch.update(doc.reference, {
-          'visitado': false,
-          'predicado': false,
-          'estado_predicacion': 'pendiente',
-          'asignado_a': null,
-          'asignado_en': null,
-          'tarjeta_id': null,
-          'entregado_a': null,
-          'entregado_en': null,
-          'devuelto': false,
-          'devuelto_por': null,
-          'devuelto_en': null,
-        });
+      final docs = snap.docs;
+      for (int i = 0; i < docs.length; i += 100) {
+        final chunk = docs.skip(i).take(100).toList();
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+        for (final doc in chunk) {
+          batch.update(doc.reference, {
+            'visitado': false,
+            'predicado': false,
+            'estado_predicacion': 'pendiente',
+            'asignado_a': null,
+            'asignado_en': null,
+            'tarjeta_id': null,
+            'entregado_a': null,
+            'entregado_en': null,
+            'devuelto': false,
+            'devuelto_por': null,
+            'devuelto_en': null,
+          });
+        }
+        await batch.commit();
+        await Future.delayed(const Duration(milliseconds: 300));
       }
-      await batch.commit();
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -361,17 +363,22 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           .collection('direcciones_globales')
           .where('tarjeta_id', isNotEqualTo: null)
           .get();
-      final batch = FirebaseFirestore.instance.batch();
-      int count = 0;
-      for (final dir in direccionesSnap.docs) {
+      final huerfanas = direccionesSnap.docs.where((dir) {
         final tarjetaId = dir.data()['tarjeta_id'] as String?;
-        if (tarjetaId != null && !tarjetaIdsExistentes.contains(tarjetaId)) {
+        return tarjetaId != null && !tarjetaIdsExistentes.contains(tarjetaId);
+      }).toList();
+
+      int count = huerfanas.length;
+      for (int i = 0; i < huerfanas.length; i += 100) {
+        final chunk = huerfanas.skip(i).take(100).toList();
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+        for (final dir in chunk) {
           batch.update(
               dir.reference, {'tarjeta_id': null, 'estado': 'disponible'});
-          count++;
         }
+        await batch.commit();
+        await Future.delayed(const Duration(milliseconds: 300));
       }
-      await batch.commit();
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -468,6 +475,165 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     );
   }
 
+  Future<void> _iniciarNuevoMes() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🗓️ Iniciar nuevo mes'),
+        content: const Text(
+          'Esto realizará:\n\n'
+          '• Liberar todas las tarjetas (quitar asignaciones)\n'
+          '• Marcar tarjetas como no completadas\n'
+          '• Dejar todo listo para el nuevo ciclo\n\n'
+          '⚠️ Las direcciones NO se modifican ni eliminan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20)),
+            child: const Text('Iniciar nuevo mes'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+
+    try {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🔄 Iniciando nuevo mes...'),
+            duration: Duration(seconds: 10),
+          ),
+        );
+
+      // SOLO resetear tarjetas — direcciones intactas
+      final territoriosSnap =
+          await FirebaseFirestore.instance.collection('territorios').get();
+
+      for (final territorio in territoriosSnap.docs) {
+        final tarjetasSnap = await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(territorio.id)
+            .collection('tarjetas')
+            .get();
+
+        final tarjetaDocs = tarjetasSnap.docs;
+        for (int i = 0; i < tarjetaDocs.length; i += 100) {
+          final chunk = tarjetaDocs.skip(i).take(100).toList();
+          WriteBatch batch = FirebaseFirestore.instance.batch();
+          for (final tarjeta in chunk) {
+            batch.update(tarjeta.reference, {
+              'asignado_a': null,
+              'asignado_en': null,
+              'completada': false,
+              'fecha_completada': null,
+              'enviado_a': null,
+              'enviado_nombre': null,
+              'enviado_en': null,
+              'enviado_tipo': null,
+              'estatus_envio': 'disponible',
+              'bloqueado': true, // ✅ cerrado por defecto
+              'disponible_para_publicadores':
+                  false, // ✅ no visible para publicadores
+              'conductor_email': null,
+              'publicador_email': null,
+            });
+          }
+          await batch.commit();
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
+      }
+
+      // PASO 3: Limpiar enviado_a de territorios
+      final territoriosSnap2 =
+          await FirebaseFirestore.instance.collection('territorios').get();
+
+      for (final ter in territoriosSnap2.docs) {
+        // Skip colecciones especiales
+        if (['temporales', 'removidas', 'estadisticas'].contains(ter.id))
+          continue;
+
+        await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(ter.id)
+            .update({
+          'enviado_a': null,
+          'enviado_nombre': null,
+          'enviado_en': null,
+          'conductor_email': null,
+          'estatus_envio': 'disponible',
+        });
+      }
+
+// PASO 4: Resetear asignado_a en direcciones_globales
+      final dirs = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
+
+      for (int i = 0; i < dirs.docs.length; i += 100) {
+        final chunk = dirs.docs.skip(i).take(100).toList();
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+        for (final doc in chunk) {
+          batch.update(doc.reference, {
+            'asignado_a': null,
+            'predicado': false,
+            'estado_predicacion': 'pendiente',
+            'fecha_predicacion': null,
+            'mes_predicacion': null,
+          });
+        }
+        await batch.commit();
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+
+// PASO 5: Guardar snapshot en estadisticas antes de limpiar
+      final mesAnterior =
+          '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
+      await FirebaseFirestore.instance
+          .collection('estadisticas')
+          .doc(mesAnterior)
+          .set({
+        'mes': mesAnterior,
+        'total_direcciones': dirs.docs.length,
+        'predicadas': dirs.docs.where((d) {
+          final data = (d.data() as Map<String, dynamic>?) ?? {};
+          return data['predicado'] == true;
+        }).length,
+        'creado_en': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text('✅ Nuevo mes iniciado correctamente'),
+              ],
+            ),
+            backgroundColor: Color(0xFF1B5E20),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -488,6 +654,15 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
             style: TextStyle(fontSize: 12, color: Colors.grey),
           ),
           const SizedBox(height: 20),
+          _buildBotonMantenimiento(
+            icono: Icons.calendar_month,
+            titulo: 'Iniciar nuevo mes',
+            descripcion:
+                'Resetea predicaciones, libera todas las tarjetas y deja el sistema listo para el nuevo ciclo mensual.',
+            color: const Color(0xFF1B5E20),
+            onPressed: _iniciarNuevoMes,
+          ),
+          const SizedBox(height: 12),
           _buildBotonMantenimiento(
             icono: Icons.find_replace,
             titulo: 'Restaurar tarjeta_id',
