@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'territorios_tab.dart';
 import 'temporales_tab.dart';
-import 'devueltas_tab.dart';
+import 'devueltas_tab_original.dart';
 import 'estadisticas_tab.dart';
 
 class AdminTerritoriosTab extends StatefulWidget {

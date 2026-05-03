@@ -1,324 +1,640 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class DevueltasTab extends StatefulWidget {
+class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
 
-  const DevueltasTab({
+  const ComunicacionTab({
     super.key,
     required this.usuarioData,
   });
 
   @override
-  State<DevueltasTab> createState() => _DevueltasTabState();
+  State<ComunicacionTab> createState() => _ComunicacionTabState();
 }
 
-class _DevueltasTabState extends State<DevueltasTab> {
-  // ─────────────────────────────────────────────────────────
-  // HELPERS
-  // ─────────────────────────────────────────────────────────
+class _ComunicacionTabState extends State<ComunicacionTab> {
+  final TextEditingController _anuncioCtrl = TextEditingController();
+  bool _enviandoAnuncio = false;
 
-  int _diasDesdeRemocion(Timestamp? removidaEn) {
-    if (removidaEn == null) return 0;
-    return DateTime.now().difference(removidaEn.toDate()).inDays;
+  static const Color _verde = Color(0xFF1B5E20);
+  static const Color _naranja = Color(0xFFE65100);
+
+  @override
+  void initState() {
+    super.initState();
+    _verificarCampanasVencidas();
   }
 
-  Color _colorPorDias(int dias) {
-    if (dias >= 60) return Colors.red;
-    if (dias >= 30) return Colors.orange;
-    return const Color(0xFF1B5E20);
-  }
-
-  String _labelPorDias(int dias) {
-    if (dias >= 60) return '⚠️ Eliminar';
-    if (dias >= 30) return '🔍 Verificar';
-    return '${dias}d';
+  @override
+  void dispose() {
+    _anuncioCtrl.dispose();
+    super.dispose();
   }
 
   // ─────────────────────────────────────────────────────────
-  // VERIFICAR DIRECCIÓN
+  // VERIFICAR CAMPAÑAS VENCIDAS
   // ─────────────────────────────────────────────────────────
 
-  Future<void> _verificarDireccion(DocumentSnapshot doc) async {
-    final data = (doc.data() as Map<String, dynamic>?) ?? {};
-    final calle = (data['calle'] as String?) ?? '';
-    final notaCtrl = TextEditingController();
+  Future<void> _verificarCampanasVencidas() async {
+    final db = FirebaseFirestore.instance;
+    final ahora = DateTime.now();
 
-    final resultado = await showDialog<String>(
-      context: context,
-      builder: (c) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Verificar dirección'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                calle,
-                style:
-                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text('¿Resultado de la verificación?',
-                style: TextStyle(fontSize: 13)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: notaCtrl,
-              decoration: InputDecoration(
-                hintText: 'Ej: Se verificó, sigue sin hispanos...',
-                border:
-                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                isDense: true,
-              ),
-              maxLines: 2,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c),
-            child: const Text('Cancelar'),
-          ),
-          OutlinedButton(
-            onPressed: () => Navigator.pop(c, 'sin_cambio'),
-            style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.orange,
-                side: const BorderSide(color: Colors.orange)),
-            child: const Text('Sin cambio'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(c, 'restaurar'),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5E20)),
-            child: const Text('Restaurar'),
-          ),
-        ],
-      ),
-    );
+    for (final slot in ['campana_1', 'campana_2']) {
+      final doc = await db.collection('configuracion').doc(slot).get();
+      if (!doc.exists) continue;
+      final data = doc.data() ?? {};
+      final activa = (data['activa'] as bool?) ?? false;
+      if (!activa) continue;
 
-    if (resultado == null) return;
-
-    try {
-      final verificadoPor = widget.usuarioData['nombre'] ?? 'Admin';
-
-      await doc.reference.update({
-        'verificaciones': FieldValue.arrayUnion([
-          {
-            'fecha': Timestamp.now(),
-            'verificado_por': verificadoPor,
-            'resultado': resultado,
-            'nota': notaCtrl.text.trim(),
-          }
-        ]),
-        'ultima_verificacion': FieldValue.serverTimestamp(),
-        'estado_revision':
-            resultado == 'restaurar' ? 'restaurada' : 'verificada',
-      });
-
-      if (resultado == 'restaurar') {
-        await _restaurarDireccion(doc, nota: notaCtrl.text.trim());
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Verificación registrada — sin cambios'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
+      final fechaFin = (data['fecha_fin'] as Timestamp?)?.toDate();
+      if (fechaFin != null && ahora.isAfter(fechaFin)) {
+        await _cerrarCampana(slot, data, autoCierre: true);
       }
     }
   }
 
   // ─────────────────────────────────────────────────────────
-  // RESTAURAR DIRECCIÓN
+  // CERRAR CAMPAÑA (manual o automática)
   // ─────────────────────────────────────────────────────────
 
-  Future<void> _restaurarDireccion(DocumentSnapshot doc,
-      {String nota = ''}) async {
-    try {
-      final data = (doc.data() as Map<String, dynamic>?) ?? {};
-      final docIdOriginal = (data['doc_id_original'] as String?) ?? doc.id;
-      final tarjetaIdOrigen = (data['tarjeta_id_origen'] as String?) ?? '';
-      final territorioId = (data['territorio_id'] as String?) ?? '';
-      final territorioNombre = (data['territorio_nombre'] as String?) ?? '';
-      final mes =
-          '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
-
-      final db = FirebaseFirestore.instance;
-      final batch = db.batch();
-
-      // 1. Recrear en direcciones_globales
-      batch.set(
-        db.collection('direcciones_globales').doc(docIdOriginal),
-        {
-          'calle': data['calle'] ?? '',
-          'complemento': data['complemento'] ?? '',
-          'direccion_normalizada': data['direccion_normalizada'] ?? '',
-          'territorio_id': territorioId,
-          'territorio_nombre': territorioNombre,
-          'tarjeta_id': tarjetaIdOrigen,
-          'barrio':
-              territorioNombre.isNotEmpty ? territorioNombre : territorioId,
-          'estado': 'activa',
-          'estado_predicacion': 'pendiente',
-          'predicado': false,
-          'visitado': false,
-          'es_hispano': true,
-          'asignado_a': null,
-          'created_at': FieldValue.serverTimestamp(),
-          'restaurada_en': FieldValue.serverTimestamp(),
-          'restaurada_por': widget.usuarioData['nombre'] ?? '',
-          'nota_restauracion': nota,
-        },
-      );
-
-      // 2. Guardar en estadísticas
-      batch.set(
-        db.collection('estadisticas').doc('removidas_$mes'),
-        {
-          'mes': mes,
-          'restauradas': FieldValue.increment(1),
-          'ultima_actualizacion': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
-
-      // 3. Guardar notificación en Firestore para admins
-      batch.set(
-        db.collection('notificaciones').doc(),
-        {
-          'titulo': '✅ Dirección restaurada',
-          'cuerpo':
-              '${data['calle']} fue restaurada al territorio $territorioNombre',
-          'tipo': 'restauracion',
-          'leida': false,
-          'created_at': FieldValue.serverTimestamp(),
-          'para_roles': ['es_admin', 'es_admin_territorios'],
-        },
-      );
-
-      // 4. Eliminar de direcciones_removidas
-      batch.delete(doc.reference);
-
-      await batch.commit();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('Dirección restaurada a $tarjetaIdOrigen'),
-                ),
-              ],
-            ),
-            backgroundColor: const Color(0xFF1B5E20),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Error al restaurar: $e'),
-              backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // ELIMINAR PERMANENTE
-  // ─────────────────────────────────────────────────────────
-
-  Future<void> _eliminarPermanente(DocumentSnapshot doc) async {
-    final data = (doc.data() as Map<String, dynamic>?) ?? {};
-    final calle = (data['calle'] as String?) ?? 'esta dirección';
+  Future<void> _cerrarCampana(
+    String slot,
+    Map<String, dynamic> campanaData, {
+    bool autoCierre = false,
+  }) async {
+    final db = FirebaseFirestore.instance;
+    final nombre = (campanaData['nombre'] as String?) ?? slot;
+    final mensajePendiente = (campanaData['mensaje_pendiente'] as String?) ??
+        'Falta entregar invitación';
     final mes =
         '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
 
-    final confirmar = await showDialog<bool>(
+    try {
+      // 1. Obtener direcciones de la carpeta de campaña
+      final carpetaSnap = await db
+          .collection('territorios')
+          .doc('campanas')
+          .collection(nombre)
+          .get();
+
+      int totalDejadas = 0;
+      int totalFaltantes = 0;
+      final Map<String, int> porTerritorio = {};
+
+      // 2. Mover faltantes a temporales y contar
+      for (final dirDoc in carpetaSnap.docs) {
+        final data = (dirDoc.data() as Map<String, dynamic>?) ?? {};
+        final estadoCampana =
+            (data['estado_campana'] as String?) ?? 'pendiente';
+        final territorioOrigen = (data['territorio_origen'] as String?) ?? '';
+
+        if (estadoCampana == 'completada') {
+          totalDejadas++;
+        } else {
+          totalFaltantes++;
+          // Mover a temporales con mensaje de campaña
+          await db.collection('direcciones_globales').add({
+            'calle': data['calle'] ?? '',
+            'complemento': data['complemento'] ?? '',
+            'direccion_normalizada': data['direccion_normalizada'] ?? '',
+            'territorio_id': data['territorio_origen_id'] ?? '',
+            'territorio_nombre': territorioOrigen,
+            'tarjeta_id': data['tarjeta_origen'] ?? '',
+            'barrio': territorioOrigen,
+            'estado': 'temporal',
+            'estado_predicacion': 'temporal',
+            'motivo_temporal': mensajePendiente,
+            'fecha_temporal': FieldValue.serverTimestamp(),
+            'origen_campana': nombre,
+          });
+        }
+
+        // Contar por territorio
+        porTerritorio[territorioOrigen] =
+            (porTerritorio[territorioOrigen] ?? 0) + 1;
+      }
+
+      // 3. Guardar estadísticas
+      await db.collection('estadisticas').doc('campana_${nombre}_$mes').set({
+        'nombre_campana': nombre,
+        'mes': mes,
+        'total_invitaciones_dejadas': totalDejadas,
+        'total_faltantes': totalFaltantes,
+        'total_direcciones': carpetaSnap.docs.length,
+        'por_territorio': porTerritorio,
+        'cerrada_en': FieldValue.serverTimestamp(),
+        'cierre_automatico': autoCierre,
+      }, SetOptions(merge: true));
+
+      // 4. Eliminar carpeta de campaña (borrar docs uno a uno)
+      final batch = db.batch();
+      for (final dirDoc in carpetaSnap.docs) {
+        batch.delete(dirDoc.reference);
+      }
+      await batch.commit();
+
+      // 5. Desactivar campaña en configuración
+      await db.collection('configuracion').doc(slot).update({
+        'activa': false,
+        'cerrada_en': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted && !autoCierre) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '✅ Campaña "$nombre" cerrada — $totalFaltantes direcciones a temporales'),
+            backgroundColor: _verde,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error cerrando campaña: $e');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // CREAR/EDITAR CAMPAÑA
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _mostrarDialogoCampana(String slot,
+      {Map<String, dynamic>? datos}) async {
+    final nombreCtrl = TextEditingController(text: datos?['nombre'] ?? '');
+    final mensajeCtrl = TextEditingController(
+        text: datos?['mensaje_pendiente'] ??
+            'Falta entregar invitación de campaña');
+    DateTime fechaInicio = datos?['fecha_inicio'] != null
+        ? (datos!['fecha_inicio'] as Timestamp).toDate()
+        : DateTime.now();
+    DateTime fechaFin = datos?['fecha_fin'] != null
+        ? (datos!['fecha_fin'] as Timestamp).toDate()
+        : DateTime.now().add(const Duration(days: 7));
+
+    await showDialog(
       context: context,
-      builder: (c) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Eliminar permanentemente'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.shade200),
-              ),
-              child: Text(calle,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+      builder: (c) => StatefulBuilder(
+        builder: (context, setDlg) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(Icons.campaign, color: _naranja),
+              const SizedBox(width: 8),
+              Text(datos == null ? 'Nueva Campaña' : 'Editar Campaña'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Nombre
+                const Text('Nombre de la campaña',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: nombreCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Ej: Memorial 2026',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Mensaje personalizable
+                const Text('Mensaje para direcciones sin invitación',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: mensajeCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Ej: Falta entregar invitación',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+
+                // Fecha inicio
+                const Text('Fecha de inicio',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: fechaInicio,
+                      firstDate:
+                          DateTime.now().subtract(const Duration(days: 1)),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      setDlg(() => fechaInicio = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_today,
+                            size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${fechaInicio.day}/${fechaInicio.month}/${fechaInicio.year}',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Fecha fin
+                const Text('Fecha de fin (cierre automático)',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: fechaFin,
+                      firstDate: fechaInicio,
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      setDlg(() => fechaFin = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.orange.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.orange.shade50,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.event_busy,
+                            size: 16, color: Colors.orange.shade700),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${fechaFin.day}/${fechaFin.month}/${fechaFin.year}',
+                          style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.orange.shade700,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${fechaFin.difference(fechaInicio).inDays} días',
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.orange.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            const Text(
-              '⚠️ Esta acción NO se puede deshacer.\nLa dirección desaparecerá para siempre.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Colors.red),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final nombre = nombreCtrl.text.trim();
+                if (nombre.isEmpty) return;
+                await FirebaseFirestore.instance
+                    .collection('configuracion')
+                    .doc(slot)
+                    .set({
+                  'activa': true,
+                  'nombre': nombre,
+                  'mensaje_pendiente': mensajeCtrl.text.trim(),
+                  'fecha_inicio': Timestamp.fromDate(fechaInicio),
+                  'fecha_fin': Timestamp.fromDate(fechaFin),
+                  'creada_por': widget.usuarioData['nombre'] ?? '',
+                  'created_at': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true));
+                if (context.mounted) Navigator.pop(c);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: _naranja),
+              child: const Text('Activar campaña'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Eliminar para siempre'),
-          ),
-        ],
       ),
     );
-    if (confirmar != true) return;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // ANUNCIO GENERAL
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _enviarAnuncio() async {
+    final texto = _anuncioCtrl.text.trim();
+    if (texto.isEmpty) return;
+    setState(() => _enviandoAnuncio = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('configuracion')
+          .doc('anuncio_general')
+          .set({
+        'activo': true,
+        'mensaje': texto,
+        'enviado_en': FieldValue.serverTimestamp(),
+        'enviado_por': widget.usuarioData['nombre'] ?? '',
+      }, SetOptions(merge: true));
+
+      await FirebaseFirestore.instance.collection('notificaciones').add({
+        'titulo': '📢 Anuncio de la congregación',
+        'cuerpo': texto,
+        'tipo': 'anuncio_general',
+        'leida': false,
+        'created_at': FieldValue.serverTimestamp(),
+        'para_todos': true,
+      });
+
+      _anuncioCtrl.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Anuncio enviado'),
+            backgroundColor: _verde,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    setState(() => _enviandoAnuncio = false);
+  }
+
+  Future<void> _limpiarAnuncio() async {
+    await FirebaseFirestore.instance
+        .collection('configuracion')
+        .doc('anuncio_general')
+        .set({'activo': false, 'mensaje': ''}, SetOptions(merge: true));
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // APROBAR SOLICITUD DE DIRECCIÓN
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _aprobarSolicitud(DocumentSnapshot solicitudDoc) async {
+    final data = (solicitudDoc.data() as Map<String, dynamic>?) ?? {};
+    final calle = (data['direccion_original'] as String?) ?? '';
+    final complemento = (data['complemento'] as String?) ?? '';
+    final detalles = (data['detalles'] as String?) ?? '';
+    final esCondominio = (data['es_condominio'] as bool?) ?? false;
+    final unidades = (data['unidades_condominio'] as List?) ?? [];
+
+    final territoriosSnap =
+        await FirebaseFirestore.instance.collection('territorios').get();
+
+    if (!mounted) return;
+
+    String? territorioIdSel;
+    String? territorioNombreSel;
+    String? tarjetaIdSel;
+
+    await showDialog(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (context, setDlg) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Agregar dirección a tarjeta'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Selecciona territorio:',
+                      style:
+                          TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  ...territoriosSnap.docs
+                      .where((d) => d.id != 'temporales' && d.id != 'campanas')
+                      .map((terDoc) {
+                    final terData =
+                        (terDoc.data() as Map<String, dynamic>?) ?? {};
+                    final terNombre =
+                        (terData['nombre'] as String?) ?? terDoc.id;
+                    final sel = territorioIdSel == terDoc.id;
+                    return GestureDetector(
+                      onTap: () => setDlg(() {
+                        territorioIdSel = terDoc.id;
+                        territorioNombreSel = terNombre;
+                        tarjetaIdSel = null;
+                      }),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sel
+                              ? _verde.withOpacity(0.08)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: sel ? _verde : Colors.grey.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.map,
+                                size: 16, color: sel ? _verde : Colors.grey),
+                            const SizedBox(width: 8),
+                            Text(terNombre,
+                                style: TextStyle(
+                                    fontWeight: sel
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: sel ? _verde : null)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  if (territorioIdSel != null) ...[
+                    const SizedBox(height: 12),
+                    const Text('Selecciona tarjeta:',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    FutureBuilder<QuerySnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('territorios')
+                          .doc(territorioIdSel)
+                          .collection('tarjetas')
+                          .get(),
+                      builder: (context, tarjSnap) {
+                        if (!tarjSnap.hasData) {
+                          return const CircularProgressIndicator();
+                        }
+                        return Column(
+                          children: tarjSnap.data!.docs.map((tarjDoc) {
+                            final sel = tarjetaIdSel == tarjDoc.id;
+                            return GestureDetector(
+                              onTap: () =>
+                                  setDlg(() => tarjetaIdSel = tarjDoc.id),
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: sel
+                                      ? Colors.blue.withOpacity(0.08)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: sel
+                                          ? Colors.blue
+                                          : Colors.grey.shade300),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.credit_card,
+                                        size: 16,
+                                        color: sel ? Colors.blue : Colors.grey),
+                                    const SizedBox(width: 8),
+                                    Text(tarjDoc.id,
+                                        style: TextStyle(
+                                            fontWeight: sel
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                            color: sel ? Colors.blue : null)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+              onPressed: territorioIdSel != null && tarjetaIdSel != null
+                  ? () => Navigator.pop(c, true)
+                  : null,
+              style: ElevatedButton.styleFrom(backgroundColor: _verde),
+              child: const Text('Agregar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (territorioIdSel == null || tarjetaIdSel == null) return;
 
     try {
       final db = FirebaseFirestore.instance;
       final batch = db.batch();
 
-      // Guardar en estadísticas
-      batch.set(
-        db.collection('estadisticas').doc('removidas_$mes'),
-        {
-          'mes': mes,
-          'eliminadas_permanente': FieldValue.increment(1),
-          'ultima_actualizacion': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
-      );
+      String _norm(String s) {
+        var t = s.toLowerCase();
+        t = t.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
+        t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+        return t;
+      }
 
-      // Eliminar
-      batch.delete(doc.reference);
+      if (esCondominio && unidades.isNotEmpty) {
+        for (final u in unidades) {
+          batch.set(db.collection('direcciones_globales').doc(), {
+            'calle': calle,
+            'complemento': u.toString(),
+            'direccion_normalizada': _norm('$calle $u'),
+            'territorio_id': territorioIdSel,
+            'territorio_nombre': territorioNombreSel ?? '',
+            'tarjeta_id': tarjetaIdSel,
+            'barrio': territorioNombreSel ?? '',
+            'estado': 'activa',
+            'estado_predicacion': 'pendiente',
+            'predicado': false,
+            'es_hispano': true,
+            'es_condominio': true,
+            'created_at': FieldValue.serverTimestamp(),
+          });
+        }
+      } else {
+        batch.set(db.collection('direcciones_globales').doc(), {
+          'calle': calle,
+          'complemento': complemento,
+          'direccion_normalizada': _norm('$calle $complemento'),
+          'territorio_id': territorioIdSel,
+          'territorio_nombre': territorioNombreSel ?? '',
+          'tarjeta_id': tarjetaIdSel,
+          'barrio': territorioNombreSel ?? '',
+          'estado': 'activa',
+          'estado_predicacion': 'pendiente',
+          'predicado': false,
+          'es_hispano': true,
+          'informacion': detalles,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }
+
+      batch.update(solicitudDoc.reference, {
+        'estado': 'aprobada',
+        'aprobada_por': widget.usuarioData['nombre'] ?? '',
+        'aprobada_en': FieldValue.serverTimestamp(),
+        'territorio_asignado': territorioNombreSel,
+        'tarjeta_asignada': tarjetaIdSel,
+      });
 
       await batch.commit();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Dirección eliminada permanentemente'),
-            backgroundColor: Colors.red,
+          SnackBar(
+            content: Text(esCondominio
+                ? '✅ ${unidades.length} unidades agregadas a $tarjetaIdSel'
+                : '✅ Dirección agregada a $tarjetaIdSel'),
+            backgroundColor: _verde,
           ),
         );
       }
@@ -331,42 +647,12 @@ class _DevueltasTabState extends State<DevueltasTab> {
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // VERIFICAR ALERTAS AUTOMÁTICAS
-  // ─────────────────────────────────────────────────────────
-
-  Future<void> _verificarAlertas(List<DocumentSnapshot> docs) async {
-    final db = FirebaseFirestore.instance;
-    for (final doc in docs) {
-      final data = (doc.data() as Map<String, dynamic>?) ?? {};
-      final removidaEn = data['removida_en'] as Timestamp?;
-      final alerta30 = (data['alerta_30_enviada'] as bool?) ?? false;
-      final alerta60 = (data['alerta_60_enviada'] as bool?) ?? false;
-      final dias = _diasDesdeRemocion(removidaEn);
-      final calle = (data['calle'] as String?) ?? '';
-
-      if (dias >= 60 && !alerta60) {
-        await db.collection('notificaciones').add({
-          'titulo': '🚨 Dirección para eliminar',
-          'cuerpo': '$calle lleva 60 días removida. Verificar urgente.',
-          'tipo': 'alerta_60',
-          'leida': false,
-          'created_at': FieldValue.serverTimestamp(),
-          'para_roles': ['es_admin', 'es_admin_territorios'],
-        });
-        await doc.reference.update({'alerta_60_enviada': true});
-      } else if (dias >= 30 && !alerta30) {
-        await db.collection('notificaciones').add({
-          'titulo': '🔍 Verificar dirección removida',
-          'cuerpo': '$calle lleva 30 días removida. ¿Sigue sin hispanos?',
-          'tipo': 'alerta_30',
-          'leida': false,
-          'created_at': FieldValue.serverTimestamp(),
-          'para_roles': ['es_admin', 'es_admin_territorios'],
-        });
-        await doc.reference.update({'alerta_30_enviada': true});
-      }
-    }
+  Future<void> _rechazarSolicitud(DocumentSnapshot doc) async {
+    await doc.reference.update({
+      'estado': 'rechazada',
+      'rechazada_por': widget.usuarioData['nombre'] ?? '',
+      'rechazada_en': FieldValue.serverTimestamp(),
+    });
   }
 
   // ─────────────────────────────────────────────────────────
@@ -375,461 +661,661 @@ class _DevueltasTabState extends State<DevueltasTab> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('direcciones_removidas')
-          .orderBy('removida_en', descending: false)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Campañas Especiales ──────────────────────────
+          _seccionTitulo('CAMPAÑAS ESPECIALES'),
+          const SizedBox(height: 10),
+          _buildSlotCampana('campana_1', 'Campaña 1'),
+          const SizedBox(height: 10),
+          _buildSlotCampana('campana_2', 'Campaña 2'),
 
-        final docs = snapshot.data?.docs ?? [];
+          const SizedBox(height: 20),
 
-        if (docs.isNotEmpty) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _verificarAlertas(docs);
-          });
-        }
+          // ── Progreso global de campañas ──────────────────
+          _buildProgresoGlobalCampanas(),
 
-        if (docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.check_circle_outline,
-                    size: 64, color: Colors.grey[400]),
-                const SizedBox(height: 16),
-                Text(
-                  'No hay direcciones removidas',
-                  style: TextStyle(fontSize: 16, color: Colors.grey[500]),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Las direcciones "no hispanohablantes"\naparecerán aquí',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+          const SizedBox(height: 20),
+
+          // ── Anuncio General ──────────────────────────────
+          _seccionTitulo('ANUNCIO GENERAL'),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
-          );
-        }
-
-        // Contadores por urgencia
-        final urgentes = docs.where((d) {
-          final data = (d.data() as Map<String, dynamic>?) ?? {};
-          return _diasDesdeRemocion(data['removida_en'] as Timestamp?) >= 60;
-        }).length;
-        final verificar = docs.where((d) {
-          final data = (d.data() as Map<String, dynamic>?) ?? {};
-          final dias = _diasDesdeRemocion(data['removida_en'] as Timestamp?);
-          return dias >= 30 && dias < 60;
-        }).length;
-
-        // Agrupar por territorio
-        final Map<String, List<DocumentSnapshot>> porTerritorio = {};
-        for (final doc in docs) {
-          final data = (doc.data() as Map<String, dynamic>?) ?? {};
-          final terNombre =
-              (data['territorio_nombre'] as String?)?.isNotEmpty == true
-                  ? data['territorio_nombre'] as String
-                  : (data['territorio_id'] as String?) ?? 'Sin territorio';
-          porTerritorio.putIfAbsent(terNombre, () => []).add(doc);
-        }
-
-        return Column(
-          children: [
-            // ── Resumen ─────────────────────────────────────
-            Container(
-              margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: urgentes > 0
-                    ? Colors.red.shade50
-                    : verificar > 0
-                        ? Colors.orange.shade50
-                        : Colors.green.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: urgentes > 0
-                      ? Colors.red.shade200
-                      : verificar > 0
-                          ? Colors.orange.shade200
-                          : Colors.green.shade200,
+            child: Column(
+              children: [
+                StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('configuracion')
+                      .doc('anuncio_general')
+                      .snapshots(),
+                  builder: (context, snap) {
+                    final data =
+                        (snap.data?.data() as Map<String, dynamic>?) ?? {};
+                    final activo = (data['activo'] as bool?) ?? false;
+                    final msg = (data['mensaje'] as String?) ?? '';
+                    if (!activo || msg.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1565C0).withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: const Color(0xFF1565C0).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline,
+                              color: Color(0xFF1565C0), size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                              child: Text(msg,
+                                  style: const TextStyle(
+                                      fontSize: 12, color: Color(0xFF1565C0)))),
+                          IconButton(
+                            icon: const Icon(Icons.close,
+                                size: 14, color: Color(0xFF1565C0)),
+                            onPressed: _limpiarAnuncio,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    urgentes > 0
-                        ? Icons.warning_amber
-                        : verificar > 0
-                            ? Icons.search
-                            : Icons.check_circle_outline,
-                    color: urgentes > 0
-                        ? Colors.red
-                        : verificar > 0
-                            ? Colors.orange
-                            : Colors.green,
-                    size: 20,
+                TextField(
+                  controller: _anuncioCtrl,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: 'Mensaje para todos los usuarios...',
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.grey.shade300)),
+                    isDense: true,
                   ),
-                  const SizedBox(width: 10),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _enviandoAnuncio ? null : _enviarAnuncio,
+                    icon: _enviandoAnuncio
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.send, size: 16),
+                    label: Text(
+                        _enviandoAnuncio ? 'Enviando...' : 'Enviar anuncio'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1565C0),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── Solicitudes de direcciones ───────────────────
+          _seccionTitulo('SOLICITUDES DE DIRECCIONES'),
+          const SizedBox(height: 10),
+          _buildSolicitudes(),
+
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // WIDGET: SLOT DE CAMPAÑA
+  // ─────────────────────────────────────────────────────────
+
+  Widget _buildSlotCampana(String slot, String slotLabel) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('configuracion')
+          .doc(slot)
+          .snapshots(),
+      builder: (context, snap) {
+        final data = (snap.data?.data() as Map<String, dynamic>?) ?? {};
+        final activa = (data['activa'] as bool?) ?? false;
+        final nombre = (data['nombre'] as String?) ?? '';
+        final mensaje = (data['mensaje_pendiente'] as String?) ?? '';
+        final fechaInicio = (data['fecha_inicio'] as Timestamp?)?.toDate();
+        final fechaFin = (data['fecha_fin'] as Timestamp?)?.toDate();
+        final ahora = DateTime.now();
+        final diasRestantes =
+            fechaFin != null ? fechaFin.difference(ahora).inDays : null;
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: activa ? _naranja.withOpacity(0.4) : Colors.grey.shade200,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: activa
+                          ? _naranja.withOpacity(0.1)
+                          : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.campaign,
+                        color: activa ? _naranja : Colors.grey, size: 20),
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${docs.length} direcci${docs.length == 1 ? 'ón removida' : 'ones removidas'}',
+                          activa && nombre.isNotEmpty ? nombre : slotLabel,
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: urgentes > 0
-                                ? Colors.red.shade800
-                                : verificar > 0
-                                    ? Colors.orange.shade800
-                                    : Colors.green.shade800,
+                            fontSize: 14,
+                            color: activa ? _naranja : Colors.grey[700],
                           ),
                         ),
-                        if (urgentes > 0 || verificar > 0)
+                        if (activa && diasRestantes != null)
                           Text(
-                            '${urgentes > 0 ? '$urgentes para eliminar  ' : ''}${verificar > 0 ? '$verificar para verificar' : ''}',
+                            diasRestantes > 0
+                                ? '$diasRestantes días restantes'
+                                : 'Venció hoy',
                             style: TextStyle(
                               fontSize: 11,
-                              color: urgentes > 0
-                                  ? Colors.red.shade700
-                                  : Colors.orange.shade700,
+                              color: diasRestantes <= 3
+                                  ? Colors.red
+                                  : Colors.orange,
+                            ),
+                          )
+                        else
+                          Text(
+                            activa ? 'Activa' : 'Sin campaña',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: activa ? _naranja : Colors.grey,
                             ),
                           ),
                       ],
                     ),
                   ),
-                  if (urgentes > 0) _alertaBadge('$urgentes', Colors.red),
-                  if (verificar > 0) ...[
-                    const SizedBox(width: 6),
-                    _alertaBadge('$verificar', Colors.orange),
-                  ],
+                  if (!activa)
+                    ElevatedButton.icon(
+                      onPressed: () => _mostrarDialogoCampana(slot),
+                      icon: const Icon(Icons.add, size: 14),
+                      label:
+                          const Text('Crear', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _naranja,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                      ),
+                    )
+                  else
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined,
+                              size: 18, color: Colors.orange),
+                          onPressed: () =>
+                              _mostrarDialogoCampana(slot, datos: data),
+                          tooltip: 'Editar',
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.stop_circle_outlined,
+                              size: 18, color: Colors.red),
+                          onPressed: () => _cerrarCampana(slot, data),
+                          tooltip: 'Cerrar campaña',
+                        ),
+                      ],
+                    ),
                 ],
               ),
-            ),
+              if (activa) ...[
+                const SizedBox(height: 10),
+                // Fechas
+                Row(
+                  children: [
+                    _fechaBadge(
+                      Icons.play_circle_outline,
+                      fechaInicio != null
+                          ? '${fechaInicio.day}/${fechaInicio.month}/${fechaInicio.year}'
+                          : '-',
+                      Colors.green,
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward,
+                        size: 12, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    _fechaBadge(
+                      Icons.stop_circle_outlined,
+                      fechaFin != null
+                          ? '${fechaFin.day}/${fechaFin.month}/${fechaFin.year}'
+                          : '-',
+                      Colors.red,
+                    ),
+                  ],
+                ),
+                if (mensaje.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.message_outlined,
+                            size: 12, color: Colors.orange.shade700),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Sin invitación: "$mensaje"',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.orange.shade700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
 
-            // ── Lista ────────────────────────────────────────
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                itemCount: porTerritorio.length,
-                itemBuilder: (context, index) {
-                  final terNombre = porTerritorio.keys.elementAt(index);
-                  final dirs = porTerritorio[terNombre]!;
+  Widget _fechaBadge(IconData icon, String texto, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(texto,
+              style: TextStyle(
+                  fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
 
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        child: Row(
+  Widget _buildProgresoGlobalCampanas() {
+    return FutureBuilder<List<DocumentSnapshot>>(
+      future: Future.wait([
+        FirebaseFirestore.instance
+            .collection('configuracion')
+            .doc('campana_1')
+            .get(),
+        FirebaseFirestore.instance
+            .collection('configuracion')
+            .doc('campana_2')
+            .get(),
+      ]),
+      builder: (context, campSnap) {
+        if (!campSnap.hasData) return const SizedBox.shrink();
+
+        final campanas = campSnap.data!.where((d) {
+          final data = (d.data() as Map<String, dynamic>?) ?? {};
+          return (data['activa'] as bool?) == true;
+        }).toList();
+
+        if (campanas.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _seccionTitulo('PROGRESO DE CAMPAÑAS'),
+            const SizedBox(height: 10),
+            ...campanas.map((campDoc) {
+              final data = (campDoc.data() as Map<String, dynamic>?) ?? {};
+              final nombreOriginal = (data['nombre'] as String?) ?? 'Campaña';
+              final nombreCampo =
+                  nombreOriginal.replaceAll(' ', '_').toLowerCase();
+
+              return StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('direcciones_globales')
+                    .snapshots(),
+                builder: (context, dirSnap) {
+                  final dirs = dirSnap.data?.docs ?? [];
+                  final total = dirs.length;
+                  final conInvitacion = dirs.where((d) {
+                    final dd = (d.data() as Map<String, dynamic>?) ?? {};
+                    return dd['campana_invitacion_$nombreCampo'] == true;
+                  }).length;
+                  final pct = total > 0
+                      ? (conInvitacion / total * 100).clamp(0, 100).toDouble()
+                      : 0.0;
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 6,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            Container(
-                              width: 4,
-                              height: 16,
-                              decoration: BoxDecoration(
-                                color: Colors.red,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
+                            const Icon(Icons.campaign,
+                                color: Color(0xFFE65100), size: 16),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(nombreOriginal,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13)),
                             ),
-                            const SizedBox(width: 8),
                             Text(
-                              terNombre.toUpperCase(),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.2,
-                                color: Colors.red,
+                              '${pct.toStringAsFixed(0)}%',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: pct >= 80
+                                    ? _verde
+                                    : pct >= 50
+                                        ? Colors.orange
+                                        : _naranja,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Text('${dirs.length} dir.',
-                                style: TextStyle(
-                                    fontSize: 11, color: Colors.grey[500])),
                           ],
                         ),
-                      ),
-                      ...dirs.map((doc) {
-                        final data =
-                            (doc.data() as Map<String, dynamic>?) ?? {};
-                        final calle = (data['calle'] as String?) ?? '';
-                        final complemento =
-                            (data['complemento'] as String?) ?? '';
-                        final tarjetaOrigen =
-                            (data['tarjeta_id_origen'] as String?) ?? '';
-                        final removidaPor =
-                            (data['removida_por'] as String?) ?? '';
-                        final removidaEn = data['removida_en'] as Timestamp?;
-                        final dias = _diasDesdeRemocion(removidaEn);
-                        final color = _colorPorDias(dias);
-                        final label = _labelPorDias(dias);
-                        final verificaciones =
-                            (data['verificaciones'] as List?) ?? [];
-
-                        String fechaRemovida = '';
-                        if (removidaEn != null) {
-                          final dt = removidaEn.toDate();
-                          fechaRemovida = '${dt.day}/${dt.month}/${dt.year}';
-                        }
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: color.withOpacity(0.08),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
+                        const SizedBox(height: 8),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: pct / 100,
+                            minHeight: 8,
+                            backgroundColor: Colors.grey.shade100,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              pct >= 80
+                                  ? _verde
+                                  : pct >= 50
+                                      ? Colors.orange
+                                      : _naranja,
+                            ),
                           ),
-                          child: Column(
-                            children: [
-                              // Barra de color superior
-                              Container(
-                                height: 4,
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius: const BorderRadius.only(
-                                    topLeft: Radius.circular(12),
-                                    topRight: Radius.circular(12),
-                                  ),
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(14),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Cabecera
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.location_off,
-                                            color: Colors.red, size: 16),
-                                        const SizedBox(width: 6),
-                                        Expanded(
-                                          child: Text(
-                                            '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 14,
-                                              color: Color(0xFF263238),
-                                            ),
-                                          ),
-                                        ),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: color.withOpacity(0.1),
-                                            borderRadius:
-                                                BorderRadius.circular(20),
-                                            border: Border.all(
-                                                color: color.withOpacity(0.4),
-                                                width: 1),
-                                          ),
-                                          child: Text(
-                                            label,
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                              color: color,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Wrap(
-                                      spacing: 6,
-                                      runSpacing: 4,
-                                      children: [
-                                        if (tarjetaOrigen.isNotEmpty)
-                                          _infoBadge(Icons.credit_card,
-                                              tarjetaOrigen, Colors.grey),
-                                        if (removidaPor.isNotEmpty)
-                                          _infoBadge(Icons.person, removidaPor,
-                                              Colors.orange),
-                                        if (fechaRemovida.isNotEmpty)
-                                          _infoBadge(Icons.calendar_today,
-                                              fechaRemovida, Colors.grey),
-                                        if (verificaciones.isNotEmpty)
-                                          _infoBadge(
-                                              Icons.history,
-                                              '${verificaciones.length} verif.',
-                                              Colors.blue),
-                                      ],
-                                    ),
-
-                                    // Historial
-                                    if (verificaciones.isNotEmpty)
-                                      Container(
-                                        margin: const EdgeInsets.only(top: 8),
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.shade50,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            const Text('Historial:',
-                                                style: TextStyle(
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.blue)),
-                                            ...verificaciones.take(2).map((v) {
-                                              final vMap =
-                                                  v as Map<String, dynamic>;
-                                              final vFecha = vMap['fecha']
-                                                      is Timestamp
-                                                  ? (vMap['fecha'] as Timestamp)
-                                                      .toDate()
-                                                  : DateTime.now();
-                                              return Padding(
-                                                padding: const EdgeInsets.only(
-                                                    top: 2),
-                                                child: Text(
-                                                  '${vFecha.day}/${vFecha.month} · ${vMap['verificado_por']} · ${vMap['resultado']}${(vMap['nota'] as String?)?.isNotEmpty == true ? ' — ${vMap['nota']}' : ''}',
-                                                  style: const TextStyle(
-                                                      fontSize: 10,
-                                                      color: Colors.blue),
-                                                ),
-                                              );
-                                            }).toList(),
-                                          ],
-                                        ),
-                                      ),
-
-                                    const SizedBox(height: 12),
-
-                                    // Botones
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: OutlinedButton.icon(
-                                            onPressed: () =>
-                                                _verificarDireccion(doc),
-                                            icon: Icon(
-                                              dias >= 30
-                                                  ? Icons.search
-                                                  : Icons.check_circle_outline,
-                                              size: 15,
-                                            ),
-                                            label: Text(
-                                              dias >= 30
-                                                  ? 'Verificar'
-                                                  : 'Revisar',
-                                              style:
-                                                  const TextStyle(fontSize: 12),
-                                            ),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor: color,
-                                              side: BorderSide(color: color),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 8),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: OutlinedButton.icon(
-                                            onPressed: () =>
-                                                _restaurarDireccion(doc),
-                                            icon: const Icon(Icons.restore,
-                                                size: 15),
-                                            label: const Text('Restaurar',
-                                                style: TextStyle(fontSize: 12)),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor:
-                                                  const Color(0xFF1B5E20),
-                                              side: const BorderSide(
-                                                  color: Color(0xFF1B5E20)),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 8),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        OutlinedButton(
-                                          onPressed: () =>
-                                              _eliminarPermanente(doc),
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor: Colors.red,
-                                            side: const BorderSide(
-                                                color: Colors.red),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 10, vertical: 8),
-                                          ),
-                                          child: const Icon(
-                                              Icons.delete_forever,
-                                              size: 16),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                    ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '$conInvitacion de $total direcciones con invitación entregada',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
                   );
                 },
-              ),
-            ),
+              );
+            }).toList(),
           ],
         );
       },
     );
   }
 
-  Widget _alertaBadge(String texto, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        texto,
-        style: const TextStyle(
-            color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-      ),
+  // ─────────────────────────────────────────────────────────
+  // WIDGET: SOLICITUDES
+  // ─────────────────────────────────────────────────────────
+
+  Widget _buildSolicitudes() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('solicitudes_direcciones')
+          .where('estado', isEqualTo: 'pendiente')
+          .orderBy('created_at', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final docs = snapshot.data?.docs ?? [];
+
+        if (docs.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.mark_email_read_outlined,
+                      size: 36, color: Colors.grey[400]),
+                  const SizedBox(height: 8),
+                  Text('Sin solicitudes pendientes',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          children: docs.map((doc) {
+            final data = (doc.data() as Map<String, dynamic>?) ?? {};
+            final calle = (data['direccion_original'] as String?) ?? '';
+            final complemento = (data['complemento'] as String?) ?? '';
+            final detalles = (data['detalles'] as String?) ?? '';
+            final solicitante = (data['solicitante_email'] as String?) ?? '';
+            final esCondominio = (data['es_condominio'] as bool?) ?? false;
+            final unidades = (data['unidades_condominio'] as List?) ?? [];
+            final createdAt = data['created_at'] as Timestamp?;
+            String fecha = '';
+            if (createdAt != null) {
+              final dt = createdAt.toDate();
+              fecha =
+                  '${dt.day}/${dt.month} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+            }
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border(
+                  left: BorderSide(
+                    color: esCondominio ? Colors.blue : _verde,
+                    width: 4,
+                  ),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          esCondominio ? Icons.apartment : Icons.location_on,
+                          color: esCondominio ? Colors.blue : _verde,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ),
+                        if (esCondominio)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '🏢 ${unidades.length} unid.',
+                              style: const TextStyle(
+                                  fontSize: 10, color: Colors.blue),
+                            ),
+                          ),
+                      ],
+                    ),
+                    if (detalles.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(detalles,
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600])),
+                    ],
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.person, size: 11, color: Colors.grey[400]),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(solicitante,
+                              style: TextStyle(
+                                  fontSize: 10, color: Colors.grey[500])),
+                        ),
+                        Text(fecha,
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey[400])),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _aprobarSolicitud(doc),
+                            icon: const Icon(Icons.add_location_alt, size: 14),
+                            label: const Text('Agregar',
+                                style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _verde,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () => _rechazarSolicitud(doc),
+                          icon: const Icon(Icons.close, size: 14),
+                          label: const Text('Rechazar',
+                              style: TextStyle(fontSize: 12)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 
-  Widget _infoBadge(IconData icon, String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: color),
-          const SizedBox(width: 4),
-          Text(
-            text,
-            style: TextStyle(
-                fontSize: 10, color: color, fontWeight: FontWeight.w500),
+  Widget _seccionTitulo(String titulo) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 16,
+          decoration: BoxDecoration(
+            color: _verde,
+            borderRadius: BorderRadius.circular(2),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          titulo,
+          style: const TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.2,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1B5E20),
+          ),
+        ),
+      ],
     );
   }
 }

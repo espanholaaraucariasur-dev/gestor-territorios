@@ -220,318 +220,453 @@ class _PublicadorTabState extends State<PublicadorTab> {
           _modificadosPorTarjeta[tarjetaId] = {};
         }
 
-        return FutureBuilder<QuerySnapshot>(
-          future: FirebaseFirestore.instance
-              .collection('direcciones_globales')
-              .where('tarjeta_id', isEqualTo: tarjetaId)
-              .where('estado', isNotEqualTo: 'removida')
-              .get(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('Sin direcciones pendientes.',
-                    style: TextStyle(color: Colors.grey)),
-              );
-            }
+        return FutureBuilder<List<DocumentSnapshot>>(
+          future: Future.wait([
+            FirebaseFirestore.instance
+                .collection('configuracion')
+                .doc('campana_1')
+                .get(),
+            FirebaseFirestore.instance
+                .collection('configuracion')
+                .doc('campana_2')
+                .get(),
+          ]),
+          builder: (context, campSnap) {
+            if (!campSnap.hasData) return const SizedBox.shrink();
+            final campanasActivas = campSnap.data!.where((d) {
+              final data = (d.data() as Map<String, dynamic>?) ?? {};
+              return (data['activa'] as bool?) == true;
+            }).toList();
 
-            final direcciones = snapshot.data!.docs;
+            return FutureBuilder<QuerySnapshot>(
+              future: FirebaseFirestore.instance
+                  .collection('direcciones_globales')
+                  .where('tarjeta_id', isEqualTo: tarjetaId)
+                  .where('estado', isNotEqualTo: 'removida')
+                  .get(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('Sin direcciones pendientes.',
+                        style: TextStyle(color: Colors.grey)),
+                  );
+                }
 
-            if (_estadosPorTarjeta[tarjetaId]!.isEmpty) {
-              for (final dir in direcciones) {
-                final data = _safeData(dir);
-                _estadosPorTarjeta[tarjetaId]![dir.id] =
-                    (data['estado_predicacion'] as String?) ?? 'pendiente';
-                _textosPorTarjeta[tarjetaId]![dir.id] =
-                    (data['motivo_temporal'] as String?) ?? '';
-                _modificadosPorTarjeta[tarjetaId]![dir.id] = false;
-              }
-            }
+                final direcciones = snapshot.data!.docs;
 
-            return Column(
-              children: [
-                // ── Lista de direcciones ──────────────────────
-                ...direcciones.map((dirDoc) {
-                  final data = _safeData(dirDoc);
-                  final estadoLocal =
-                      _estadosPorTarjeta[tarjetaId]![dirDoc.id] ?? 'pendiente';
-                  final otroTexto =
-                      _textosPorTarjeta[tarjetaId]![dirDoc.id] ?? '';
-                  final calle = (data['calle'] as String?) ?? '';
-                  final complemento = (data['complemento'] as String?) ?? '';
-                  final direccionCompleta =
-                      '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}';
-
-                  // FIX 1: Color de acento según estado
-                  Color accentColor = const Color(0xFFB0BEC5);
-                  IconData estadoIcon = Icons.radio_button_unchecked;
-                  if (estadoLocal == 'completada') {
-                    accentColor = const Color(0xFF2E7D32);
-                    estadoIcon = Icons.check_circle;
-                  } else if (estadoLocal == 'no_predicado') {
-                    accentColor = const Color(0xFFE65100);
-                    estadoIcon = Icons.hourglass_empty;
-                  } else if (estadoLocal == 'no_hispano') {
-                    accentColor = const Color(0xFF1565C0);
-                    estadoIcon = Icons.public_off;
-                  } else if (estadoLocal == 'otro') {
-                    accentColor = const Color(0xFF6A1B9A);
-                    estadoIcon = Icons.edit_note;
+                if (_estadosPorTarjeta[tarjetaId]!.isEmpty) {
+                  for (final dir in direcciones) {
+                    final data = _safeData(dir);
+                    _estadosPorTarjeta[tarjetaId]![dir.id] =
+                        (data['estado_predicacion'] as String?) ?? 'pendiente';
+                    _textosPorTarjeta[tarjetaId]![dir.id] =
+                        (data['motivo_temporal'] as String?) ?? '';
+                    _modificadosPorTarjeta[tarjetaId]![dir.id] = false;
                   }
+                }
 
-                  return Container(
-                    margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                          color: accentColor.withOpacity(0.25), width: 1),
-                      boxShadow: [
-                        BoxShadow(
-                          color: accentColor.withOpacity(0.15),
-                          blurRadius: 12,
-                          spreadRadius: 1,
-                          offset: const Offset(0, 4),
+                return Column(
+                  children: [
+                    // ── Lista de direcciones ──────────────────
+                    ...direcciones.map((dirDoc) {
+                      final data = _safeData(dirDoc);
+                      final estadoLocal =
+                          _estadosPorTarjeta[tarjetaId]![dirDoc.id] ??
+                              'pendiente';
+                      final otroTexto =
+                          _textosPorTarjeta[tarjetaId]![dirDoc.id] ?? '';
+                      final calle = (data['calle'] as String?) ?? '';
+                      final complemento =
+                          (data['complemento'] as String?) ?? '';
+                      final direccionCompleta =
+                          '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}';
+
+                      Color accentColor = const Color(0xFFB0BEC5);
+                      IconData estadoIcon = Icons.radio_button_unchecked;
+                      if (estadoLocal == 'completada') {
+                        accentColor = const Color(0xFF2E7D32);
+                        estadoIcon = Icons.check_circle;
+                      } else if (estadoLocal == 'no_predicado') {
+                        accentColor = const Color(0xFFE65100);
+                        estadoIcon = Icons.hourglass_empty;
+                      } else if (estadoLocal == 'no_hispano') {
+                        accentColor = const Color(0xFF1565C0);
+                        estadoIcon = Icons.public_off;
+                      } else if (estadoLocal == 'otro') {
+                        accentColor = const Color(0xFF6A1B9A);
+                        estadoIcon = Icons.edit_note;
+                      }
+
+                      return Container(
+                        margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: accentColor.withOpacity(0.25), width: 1),
+                          boxShadow: [
+                            BoxShadow(
+                              color: accentColor.withOpacity(0.12),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
                         ),
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.06),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Stack(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(21, 14, 16, 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Cabecera
-                              Row(
-                                children: [
-                                  Icon(Icons.location_on,
-                                      color: accentColor, size: 18),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      direccionCompleta,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 14,
-                                        color: Color(0xFF263238),
-                                      ),
-                                    ),
-                                  ),
-                                  if (estadoLocal != 'pendiente')
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: accentColor.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      child: Icon(estadoIcon,
-                                          size: 16, color: accentColor),
-                                    ),
-                                ],
+                        child: Column(
+                          children: [
+                            // Borde superior de color
+                            Container(
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: accentColor,
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(16),
+                                  topRight: Radius.circular(16),
+                                ),
                               ),
-                              const SizedBox(height: 10),
-                              Divider(
-                                  height: 1,
-                                  thickness: 1,
-                                  color: Colors.grey.shade100),
-                              const SizedBox(height: 6),
-
-                              // FIX 2: Opciones limpias sin flechas
-                              ...[
-                                {
-                                  'label': 'Se predicó',
-                                  'value': 'completada',
-                                  'color': const Color(0xFF2E7D32),
-                                  'icon': Icons.check_circle_outline,
-                                },
-                                {
-                                  'label': 'No se predicó',
-                                  'value': 'no_predicado',
-                                  'color': const Color(0xFFE65100),
-                                  'icon': Icons.hourglass_empty,
-                                },
-                                {
-                                  'label': 'No vive hispanohablante',
-                                  'value': 'no_hispano',
-                                  'color': const Color(0xFF1565C0),
-                                  'icon': Icons.public_off,
-                                },
-                                {
-                                  'label': 'Otro (escribir nota)',
-                                  'value': 'otro',
-                                  'color': const Color(0xFF6A1B9A),
-                                  'icon': Icons.edit_note,
-                                },
-                              ].map((opcion) {
-                                final val = opcion['value'] as String;
-                                final color = opcion['color'] as Color;
-                                final isSelected = estadoLocal == val;
-
-                                return InkWell(
-                                  onTap: () => setLocalState(() {
-                                    _estadosPorTarjeta[tarjetaId]![dirDoc.id] =
-                                        val;
-                                    _modificadosPorTarjeta[tarjetaId]![
-                                        dirDoc.id] = true;
-                                  }),
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 3),
-                                    child: Row(
-                                      children: [
-                                        Radio<String>(
-                                          value: val,
-                                          groupValue: estadoLocal,
-                                          onChanged: (v) => setLocalState(() {
-                                            _estadosPorTarjeta[tarjetaId]![
-                                                dirDoc.id] = v!;
-                                            _modificadosPorTarjeta[tarjetaId]![
-                                                dirDoc.id] = true;
-                                          }),
-                                          activeColor: color,
-                                          materialTapTargetSize:
-                                              MaterialTapTargetSize.shrinkWrap,
-                                          visualDensity: VisualDensity.compact,
-                                        ),
-                                        Icon(
-                                          opcion['icon'] as IconData,
-                                          size: 16,
-                                          color: isSelected
-                                              ? color
-                                              : Colors.grey.shade400,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          opcion['label'] as String,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: isSelected
-                                                ? FontWeight.w600
-                                                : FontWeight.w400,
-                                            color: isSelected
-                                                ? color
-                                                : const Color(0xFF546E7A),
+                            ),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Cabecera
+                                  Row(
+                                    children: [
+                                      Icon(Icons.location_on,
+                                          color: accentColor, size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          direccionCompleta,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 14,
+                                            color: Color(0xFF263238),
                                           ),
                                         ),
-                                      ],
-                                    ),
+                                      ),
+                                      if (estadoLocal != 'pendiente')
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color:
+                                                accentColor.withOpacity(0.12),
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                          ),
+                                          child: Icon(estadoIcon,
+                                              size: 16, color: accentColor),
+                                        ),
+                                    ],
                                   ),
-                                );
-                              }).toList(),
+                                  const SizedBox(height: 4),
+                                  const SizedBox(height: 10),
+                                  Divider(
+                                      height: 1,
+                                      thickness: 1,
+                                      color: Colors.grey.shade100),
+                                  const SizedBox(height: 8),
 
-                              // Campo texto para "Otro"
-                              if (estadoLocal == 'otro')
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                      left: 36, top: 6, bottom: 4),
-                                  child: TextField(
-                                    controller: TextEditingController(
-                                        text: otroTexto)
-                                      ..selection = TextSelection.fromPosition(
-                                        TextPosition(offset: otroTexto.length),
+                                  // ── Opciones de predicación ──
+                                  ...[
+                                    {
+                                      'label': 'Se predicó',
+                                      'value': 'completada',
+                                      'color': const Color(0xFF2E7D32),
+                                      'icon': Icons.check_circle_outline,
+                                    },
+                                    {
+                                      'label': 'No se predicó',
+                                      'value': 'no_predicado',
+                                      'color': const Color(0xFFE65100),
+                                      'icon': Icons.hourglass_empty,
+                                    },
+                                    {
+                                      'label': 'No vive hispanohablante',
+                                      'value': 'no_hispano',
+                                      'color': const Color(0xFF1565C0),
+                                      'icon': Icons.public_off,
+                                    },
+                                    {
+                                      'label': 'Otro (escribir nota)',
+                                      'value': 'otro',
+                                      'color': const Color(0xFF6A1B9A),
+                                      'icon': Icons.edit_note,
+                                    },
+                                  ].map((opcion) {
+                                    final val = opcion['value'] as String;
+                                    final color = opcion['color'] as Color;
+                                    final isSelected = estadoLocal == val;
+
+                                    return InkWell(
+                                      onTap: () => setLocalState(() {
+                                        _estadosPorTarjeta[tarjetaId]![
+                                            dirDoc.id] = val;
+                                        _modificadosPorTarjeta[tarjetaId]![
+                                            dirDoc.id] = true;
+                                      }),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 3),
+                                        child: Row(
+                                          children: [
+                                            Radio<String>(
+                                              value: val,
+                                              groupValue: estadoLocal,
+                                              onChanged: (v) =>
+                                                  setLocalState(() {
+                                                _estadosPorTarjeta[tarjetaId]![
+                                                    dirDoc.id] = v!;
+                                                _modificadosPorTarjeta[
+                                                        tarjetaId]![dirDoc.id] =
+                                                    true;
+                                              }),
+                                              activeColor: color,
+                                              materialTapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                              visualDensity:
+                                                  VisualDensity.compact,
+                                            ),
+                                            Icon(
+                                              opcion['icon'] as IconData,
+                                              size: 16,
+                                              color: isSelected
+                                                  ? color
+                                                  : Colors.grey.shade400,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              opcion['label'] as String,
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: isSelected
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
+                                                color: isSelected
+                                                    ? color
+                                                    : const Color(0xFF546E7A),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                    decoration: InputDecoration(
-                                      hintText: 'Escribe el motivo o nota...',
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                        borderSide: BorderSide(
-                                            color: Colors.purple.shade200),
+                                    );
+                                  }).toList(),
+
+                                  // Campo texto para "Otro"
+                                  if (estadoLocal == 'otro')
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                          left: 36, top: 6, bottom: 4),
+                                      child: TextField(
+                                        controller: TextEditingController(
+                                            text: otroTexto)
+                                          ..selection =
+                                              TextSelection.fromPosition(
+                                            TextPosition(
+                                                offset: otroTexto.length),
+                                          ),
+                                        decoration: InputDecoration(
+                                          hintText: 'Escribe el motivo...',
+                                          border: OutlineInputBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            borderSide: BorderSide(
+                                                color: Colors.purple.shade200),
+                                          ),
+                                          isDense: true,
+                                          filled: true,
+                                          fillColor: Colors.purple.shade50,
+                                        ),
+                                        maxLines: 2,
+                                        onChanged: (value) => setLocalState(() {
+                                          _textosPorTarjeta[tarjetaId]![
+                                              dirDoc.id] = value;
+                                        }),
                                       ),
-                                      isDense: true,
-                                      filled: true,
-                                      fillColor: Colors.purple.shade50,
                                     ),
-                                    maxLines: 2,
-                                    onChanged: (value) => setLocalState(() {
-                                      _textosPorTarjeta[tarjetaId]![dirDoc.id] =
-                                          value;
-                                    }),
-                                  ),
-                                ),
-                            ],
-                          ),
+
+                                  // ── Checkboxes de campaña ────
+                                  if (campanasActivas.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      padding: const EdgeInsets.all(10),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFE65100)
+                                            .withOpacity(0.05),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: const Color(0xFFE65100)
+                                              .withOpacity(0.2),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          const Row(
+                                            children: [
+                                              Icon(Icons.campaign,
+                                                  color: Color(0xFFE65100),
+                                                  size: 14),
+                                              SizedBox(width: 4),
+                                              Text(
+                                                'Campaña especial',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFFE65100),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          ...campanasActivas.map((campDoc) {
+                                            final campData = (campDoc.data()
+                                                    as Map<String, dynamic>?) ??
+                                                {};
+                                            final campNombre =
+                                                (campData['nombre']
+                                                        as String?) ??
+                                                    'Campaña';
+                                            final campKey =
+                                                'campana_inv_${campNombre}_${dirDoc.id}';
+                                            final marcada = _estadosPorTarjeta[
+                                                    tarjetaId]![campKey] ==
+                                                'true';
+
+                                            return InkWell(
+                                              onTap: () => setLocalState(() {
+                                                _estadosPorTarjeta[tarjetaId]![
+                                                        campKey] =
+                                                    marcada ? 'false' : 'true';
+                                              }),
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        vertical: 2),
+                                                child: Row(
+                                                  children: [
+                                                    Checkbox(
+                                                      value: marcada,
+                                                      onChanged: (v) =>
+                                                          setLocalState(() {
+                                                        _estadosPorTarjeta[
+                                                                    tarjetaId]![
+                                                                campKey] =
+                                                            v == true
+                                                                ? 'true'
+                                                                : 'false';
+                                                      }),
+                                                      activeColor: const Color(
+                                                          0xFFE65100),
+                                                      materialTapTargetSize:
+                                                          MaterialTapTargetSize
+                                                              .shrinkWrap,
+                                                      visualDensity:
+                                                          VisualDensity.compact,
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    Expanded(
+                                                      child: Text(
+                                                        'Invitación entregada — $campNombre',
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          color: marcada
+                                                              ? const Color(
+                                                                  0xFFE65100)
+                                                              : Colors
+                                                                  .grey[600],
+                                                          fontWeight: marcada
+                                                              ? FontWeight.w600
+                                                              : FontWeight
+                                                                  .normal,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            );
+                                          }).toList(),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        Positioned(
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          child: Container(
-                            width: 5,
-                            decoration: BoxDecoration(
-                              color: accentColor,
-                              borderRadius: const BorderRadius.only(
-                                topLeft: Radius.circular(16),
-                                bottomLeft: Radius.circular(16),
+                      );
+                    }).toList(),
+
+                    // ── Botones ──────────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => setLocalState(() {
+                                for (final dir in direcciones) {
+                                  final data = _safeData(dir);
+                                  _estadosPorTarjeta[tarjetaId]![dir.id] =
+                                      (data['estado_predicacion'] as String?) ??
+                                          'pendiente';
+                                  _textosPorTarjeta[tarjetaId]![dir.id] =
+                                      (data['motivo_temporal'] as String?) ??
+                                          '';
+                                  _modificadosPorTarjeta[tarjetaId]![dir.id] =
+                                      false;
+                                }
+                              }),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.black54,
+                                side: const BorderSide(color: Colors.black26),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                              child: const Text('Cancelar'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton.icon(
+                              onPressed: () async =>
+                                  _confirmarProcesamientoTarjeta(
+                                tarjetaId,
+                                territorioId,
+                                tarjetaNombre,
+                                direcciones,
+                                context,
+                              ),
+                              icon: const Icon(Icons.check_circle_outline,
+                                  size: 18),
+                              label: const Text('Confirmar',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1B5E20),
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  );
-                }).toList(),
-
-                // ── Botones ──────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => setLocalState(() {
-                            for (final dir in direcciones) {
-                              final data = _safeData(dir);
-                              _estadosPorTarjeta[tarjetaId]![dir.id] =
-                                  (data['estado_predicacion'] as String?) ??
-                                      'pendiente';
-                              _textosPorTarjeta[tarjetaId]![dir.id] =
-                                  (data['motivo_temporal'] as String?) ?? '';
-                              _modificadosPorTarjeta[tarjetaId]![dir.id] =
-                                  false;
-                            }
-                          }),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.black54,
-                            side: const BorderSide(color: Colors.black26),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          child: const Text('Cancelar'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: () async => _confirmarProcesamientoTarjeta(
-                            tarjetaId,
-                            territorioId,
-                            tarjetaNombre,
-                            direcciones,
-                            context,
-                          ),
-                          icon:
-                              const Icon(Icons.check_circle_outline, size: 18),
-                          label: const Text('Confirmar',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1B5E20),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                  ],
+                );
+              },
             );
           },
         );
@@ -544,12 +679,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // ───────────────────────────────────────────────────────────
 
   Future<void> _confirmarProcesamientoTarjeta(
-    String tarjetaId,
-    String territorioId,
-    String tarjetaNombre,
-    List<QueryDocumentSnapshot> direcciones,
-    BuildContext context,
-  ) async {
+      String tarjetaId,
+      String territorioId,
+      String tarjetaNombre,
+      List<QueryDocumentSnapshot> direcciones,
+      BuildContext context) async {
     final estados = _estadosPorTarjeta[tarjetaId] ?? {};
     final textos = _textosPorTarjeta[tarjetaId] ?? {};
 
@@ -606,16 +740,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
       final mesActual =
           '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
 
-      // Verificar si existe el folder temporal para este territorio
+      // Verificar folder temporal
       final folderRef = db
           .collection('territorios')
           .doc('temporales')
           .collection('tarjetas')
           .doc(territorioId);
-
-      bool folderYaExiste = false;
-      final folderSnap = await folderRef.get();
-      folderYaExiste = folderSnap.exists;
+      bool folderYaExiste = (await folderRef.get()).exists;
 
       final batch = db.batch();
 
@@ -628,14 +759,56 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final territorioNombre =
             (data['territorio_nombre'] as String?)?.isNotEmpty == true
                 ? data['territorio_nombre'] as String
-                : (data['barrio'] as String?)?.isNotEmpty == true
-                    ? data['barrio'] as String
-                    : territorioId;
+                : (data['barrio'] as String?) ?? territorioId;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
 
+        // ── Verificar campañas activas ──────────────────
+        final campSnap = await FirebaseFirestore.instance
+            .collection('configuracion')
+            .where('activa', isEqualTo: true)
+            .get();
+
+        for (final campDoc in campSnap.docs) {
+          final campData = campDoc.data();
+          final campNombre = (campData['nombre'] as String?) ?? '';
+          if (campNombre.isEmpty) continue;
+          final mensajePendiente = (campData['mensaje_pendiente'] as String?) ??
+              'Falta entregar invitación';
+          final campKey = 'campana_inv_${campNombre}_${dir.id}';
+          final invitacionMarcada = estados[campKey] == 'true';
+
+          if (!invitacionMarcada && estado != 'no_hispano') {
+            // ❌ No marcó — va a carpeta de campaña
+            batch.set(
+              db
+                  .collection('territorios')
+                  .doc('campanas')
+                  .collection(campNombre)
+                  .doc(dir.id),
+              {
+                'calle': calle,
+                'complemento': complemento,
+                'direccion_normalizada':
+                    _normalizarDireccion('$calle $complemento'),
+                'territorio_origen': territorioNombre,
+                'territorio_origen_id': territorioId,
+                'tarjeta_origen': tarjetaIdOriginal,
+                'estado_campana': 'pendiente',
+                'mensaje': mensajePendiente,
+                'created_at': FieldValue.serverTimestamp(),
+              },
+            );
+          } else if (invitacionMarcada) {
+            // ✅ Marcó invitación — guardar en dirección
+            batch.update(dir.reference, {
+              'campana_invitacion_$campNombre': true,
+              'campana_invitacion_fecha': FieldValue.serverTimestamp(),
+            });
+          }
+        }
+
+        // ── Procesar estado de predicación ─────────────────
         if (estado == 'completada') {
-          // Se predicó — completar en direcciones_globales
-          // tarjeta_id se MANTIENE para que admin vea progreso por tarjeta
           batch.update(dir.reference, {
             'estado': 'activa',
             'estado_predicacion': 'completada',
@@ -644,8 +817,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
             'mes_predicacion': mesActual,
           });
         } else if (estado == 'no_predicado' || estado == 'otro') {
-          // No se predicó / Otro — va a temporales
-          // Crear folder si no existe (sin duplicar)
           if (!folderYaExiste) {
             batch.set(folderRef, {
               'nombre_grupo': territorioNombre,
@@ -653,10 +824,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
               'tipo': 'folder_temporal',
               'created_at': FieldValue.serverTimestamp(),
             });
-            folderYaExiste = true; // evitar duplicar en el mismo batch
+            folderYaExiste = true;
           }
 
-          // Guardar dirección en el folder temporal
           batch.set(folderRef.collection('direcciones').doc(dir.id), {
             'calle': calle,
             'complemento': complemento,
@@ -669,8 +839,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
             'created_at': FieldValue.serverTimestamp(),
           });
 
-          // Actualizar en direcciones_globales — estado temporal
-          // tarjeta_id se MANTIENE apuntando a tarjeta original
           batch.update(dir.reference, {
             'estado': 'temporal',
             'estado_predicacion': 'temporal',
@@ -678,25 +846,25 @@ class _PublicadorTabState extends State<PublicadorTab> {
             'fecha_temporal': FieldValue.serverTimestamp(),
           });
         } else if (estado == 'no_hispano') {
-          // No vive hispanohablante — ELIMINAR de direcciones_globales
-          // y CREAR en direcciones_removidas
-
-          // 1. Crear en direcciones_removidas
-          batch.set(db.collection('direcciones_removidas').doc(dir.id), {
-            'calle': calle,
-            'complemento': complemento,
-            'direccion_normalizada':
-                _normalizarDireccion('$calle $complemento'),
-            'territorio_id': territorioId,
-            'territorio_nombre': territorioNombre,
-            'tarjeta_id_origen': tarjetaIdOriginal,
-            'motivo': 'no_hispano',
-            'removida_por': widget.usuarioData['nombre'] ?? '',
-            'removida_en': FieldValue.serverTimestamp(),
-            'doc_id_original': dir.id,
-          });
-
-          // 2. ELIMINAR de direcciones_globales
+          // Eliminar de globales → ir a removidas
+          batch.set(
+            db.collection('direcciones_removidas').doc(dir.id),
+            {
+              'calle': calle,
+              'complemento': complemento,
+              'direccion_normalizada':
+                  _normalizarDireccion('$calle $complemento'),
+              'territorio_id': territorioId,
+              'territorio_nombre': territorioNombre,
+              'tarjeta_id_origen': tarjetaIdOriginal,
+              'motivo': 'no_hispano',
+              'removida_por': widget.usuarioData['nombre'] ?? '',
+              'removida_en': FieldValue.serverTimestamp(),
+              'doc_id_original': dir.id,
+              'alerta_30_enviada': false,
+              'alerta_60_enviada': false,
+            },
+          );
           batch.delete(dir.reference);
         }
       }
@@ -728,8 +896,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 const Icon(Icons.check_circle, color: Colors.white, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('¡Tarjeta "$tarjetaNombre" completada!',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  child: Text(
+                    '¡Tarjeta "$tarjetaNombre" completada!',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
             ),
@@ -751,17 +921,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
         );
       }
     }
-  }
+  } // ✅ cierra _confirmarProcesamientoTarjeta
 
-  // ───────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────
   // BUILD
-  // ───────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final nombrePublicador = widget.usuarioData['nombre'] ?? 'Publicador';
     debugPrint('=== NOMBRE: ${widget.usuarioData['nombre']}');
     debugPrint('=== EMAIL: ${widget.usuarioEmail}');
-    final nombrePublicador = widget.usuarioData['nombre'] ?? 'Publicador';
     final iniciales =
         nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
 
@@ -772,72 +942,84 @@ class _PublicadorTabState extends State<PublicadorTab> {
           // ── HEADER ─────────────────────────────────────
           SliverToBoxAdapter(
             child: Container(
-              decoration: BoxDecoration(
-                color: const Color(0xFF1B5E20).withOpacity(0.85),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
               ),
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundColor: Colors.white.withOpacity(0.2),
-                    child: Text(
-                      iniciales,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Hola, $nombrePublicador',
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 28,
+                        backgroundColor: Colors.white.withOpacity(0.2),
+                        child: Text(
+                          iniciales,
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 20,
+                            fontSize: 22,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Tus tarjetas asignadas este mes',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.8),
-                            fontSize: 13,
-                          ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Hola, $nombrePublicador',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Tus tarjetas asignadas este mes',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  // ✅ Botón solicitar territorio a la derecha
+                  const SizedBox(height: 16),
+                  // ✅ Botón solicitar integrado al header
                   GestureDetector(
                     onTap: widget.onSolicitarTerritorio,
                     child: Container(
+                      width: double.infinity,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                          vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                            color: Colors.white.withOpacity(0.4), width: 1),
+                            color: Colors.white.withOpacity(0.5), width: 1.5),
                       ),
-                      child: const Column(
-                        mainAxisSize: MainAxisSize.min,
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.map_outlined,
-                              color: Colors.white, size: 20),
-                          SizedBox(height: 2),
+                              color: Colors.white, size: 18),
+                          SizedBox(width: 8),
                           Text(
-                            'Solicitar',
+                            'Solicitar territorio',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
                               fontWeight: FontWeight.w600,
+                              fontSize: 14,
+                              letterSpacing: 0.3,
                             ),
                           ),
                         ],

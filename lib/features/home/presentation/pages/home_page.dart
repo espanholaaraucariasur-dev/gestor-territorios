@@ -94,6 +94,127 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     }
   }
 
+  void _mostrarNotificaciones() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.notifications, color: Color(0xFF1B5E20)),
+            SizedBox(width: 8),
+            Text('Notificaciones'),
+          ],
+        ),
+        content: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('notificaciones')
+              .orderBy('created_at', descending: true)
+              .limit(50)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final docs = snapshot.data!.docs;
+            if (docs.isEmpty) {
+              return const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.notifications_none_outlined,
+                        size: 48, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text('No tienes notificaciones',
+                        style: TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              );
+            }
+
+            return SizedBox(
+              width: double.maxFinite,
+              height: 400,
+              child: ListView.builder(
+                itemCount: docs.length,
+                itemBuilder: (context, index) {
+                  final doc = docs[index];
+                  final data = doc.data() as Map<String, dynamic>?;
+                  final titulo = data?['titulo'] ?? 'Sin título';
+                  final cuerpo = data?['cuerpo'] ?? 'Sin contenido';
+                  final createdAt = data?['created_at'] as Timestamp?;
+                  final leida = data?['leida'] ?? false;
+
+                  String fecha = '';
+                  if (createdAt != null) {
+                    final dt = createdAt.toDate();
+                    fecha =
+                        '${dt.day}/${dt.month} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+                  }
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    color: leida ? Colors.grey.shade50 : Colors.white,
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        radius: 20,
+                        backgroundColor: leida
+                            ? Colors.grey.shade300
+                            : const Color(0xFF1B5E20).withOpacity(0.1),
+                        child: Icon(
+                          Icons.notifications,
+                          color: leida ? Colors.grey : const Color(0xFF1B5E20),
+                          size: 20,
+                        ),
+                      ),
+                      title: Text(
+                        titulo,
+                        style: TextStyle(
+                          fontWeight:
+                              leida ? FontWeight.normal : FontWeight.bold,
+                          color: leida ? Colors.grey.shade700 : Colors.black,
+                        ),
+                      ),
+                      subtitle: Text(
+                        cuerpo,
+                        style: TextStyle(
+                          color: leida ? Colors.grey.shade600 : Colors.black87,
+                          fontSize: 13,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: Text(
+                        fecha,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
+                      onTap: () async {
+                        // Marcar como leída
+                        if (!leida) {
+                          await doc.reference.update({'leida': true});
+                        }
+                      },
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _cargarConfiguracionComunicacion() async {
     try {
       final snapshot = await FirebaseFirestore.instance
@@ -359,6 +480,136 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     );
   }
 
+  // ─────────────────────────────────────────────────────────
+  // DRAWER HELPER METHODS
+  // ─────────────────────────────────────────────────────────
+
+  Widget _idiomaChip(String idioma) {
+    final activo = _idiomaActual == idioma;
+    return GestureDetector(
+      onTap: () => setState(() => _idiomaActual = idioma),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: activo ? Colors.white : Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          idioma,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: activo ? const Color(0xFF1B5E20) : Colors.white70,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerModo({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required Color color,
+    required bool activo,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: activo ? color.withOpacity(0.08) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: activo ? Border.all(color: color.withOpacity(0.3)) : null,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: activo ? color : const Color(0xFF263238),
+                      )),
+                  Text(subtitle,
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ],
+              ),
+            ),
+            if (activo)
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerItem({
+    required IconData icon,
+    required String label,
+    String? subtitle,
+    required Color color,
+    bool activo = false,
+    Widget? trailing,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: activo ? color.withOpacity(0.08) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: activo ? color : Colors.grey[600], size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight:
+                            activo ? FontWeight.w600 : FontWeight.normal,
+                        color: activo ? color : const Color(0xFF263238),
+                      )),
+                  if (subtitle != null)
+                    Text(subtitle,
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing,
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final esConductor = widget.usuarioData['es_conductor'] ?? false;
@@ -375,211 +626,257 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 16.0,
-                  horizontal: 12.0,
+              // ── Header verde ─────────────────────────────
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back,
-                        color: Color(0xFF263238),
-                      ),
-                      onPressed: () => Navigator.of(context).pop(),
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 26,
+                          backgroundColor: Colors.white.withOpacity(0.2),
+                          child: Text(
+                            (widget.usuarioData['nombre'] ?? 'U')
+                                .toString()
+                                .trim()
+                                .split(' ')
+                                .take(2)
+                                .map((p) => p[0].toUpperCase())
+                                .join(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close,
+                              color: Colors.white70, size: 20),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    const Expanded(
-                      child: Text(
-                        'Menú de modos',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+                    const SizedBox(height: 10),
+                    Text(
+                      widget.usuarioData['nombre'] ?? 'Usuario',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      widget.usuarioData['email'] ?? '',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(Icons.language,
+                            color: Colors.white70, size: 16),
+                        const SizedBox(width: 8),
+                        const Text('Idioma',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 12)),
+                        const Spacer(),
+                        _idiomaChip('ES'),
+                        const SizedBox(width: 6),
+                        _idiomaChip('PT'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── Contenido ────────────────────────────────
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+
+                      // Notificaciones
+                      _drawerItem(
+                        icon: Icons.notifications_none_outlined,
+                        label: 'Notificaciones',
+                        subtitle: 'Ver últimas alertas',
+                        color: const Color(0xFF1B5E20),
+                        trailing: StreamBuilder<QuerySnapshot>(
+                          stream: FirebaseFirestore.instance
+                              .collection('notificaciones')
+                              .where('leida', isEqualTo: false)
+                              .limit(99)
+                              .snapshots(),
+                          builder: (context, snap) {
+                            final count = snap.data?.docs.length ?? 0;
+                            if (count == 0) {
+                              return const Icon(Icons.chevron_right,
+                                  color: Colors.grey, size: 18);
+                            }
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '$count',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            );
+                          },
+                        ),
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          _mostrarNotificaciones();
+                        },
+                      ),
+
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(20, 16, 20, 6),
+                        child: Text(
+                          'MODOS DE ACCESO',
+                          style: TextStyle(
+                            fontSize: 10,
+                            letterSpacing: 1.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.grey,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.notifications_none_outlined),
-                title: const Text('Notificaciones'),
-                subtitle: const Text('Ver últimas alertas'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No hay notificaciones nuevas'),
-                    ),
-                  );
-                },
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 4.0,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.language, color: Color(0xFF1B5E20)),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text(
-                        'Idioma',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+
+                      if (esAdmin)
+                        _drawerModo(
+                          icon: Icons.admin_panel_settings_outlined,
+                          label: 'Modo Admin',
+                          subtitle: 'Acceso completo',
+                          color: Colors.red,
+                          activo: _modoAdminActivo,
+                          onTap: () {
+                            setState(() {
+                              _modoAdminActivo = true;
+                              _modoAdminTerritoriosActivo = false;
+                              _modoConductorActivo = false;
+                            });
+                            Navigator.of(context).pop();
+                          },
+                        ),
+
+                      if (esAdminTerritorios)
+                        _drawerModo(
+                          icon: Icons.map_outlined,
+                          label: 'Modo Territorios',
+                          subtitle: 'Gestión y envío',
+                          color: Colors.purple,
+                          activo: _modoAdminTerritoriosActivo,
+                          onTap: () {
+                            setState(() {
+                              _modoAdminTerritoriosActivo = true;
+                              _modoAdminActivo = false;
+                              _modoConductorActivo = false;
+                            });
+                            Navigator.of(context).pop();
+                          },
+                        ),
+
+                      if (esConductor)
+                        _drawerModo(
+                          icon: Icons.groups_outlined,
+                          label: 'Modo Conductor',
+                          subtitle: 'Grupo de predicación',
+                          color: const Color(0xFF1B5E20),
+                          activo: _modoConductorActivo,
+                          onTap: () {
+                            setState(() {
+                              _modoConductorActivo = true;
+                              _modoAdminActivo = false;
+                              _modoAdminTerritoriosActivo = false;
+                              _indiceActual = 0;
+                            });
+                            Navigator.of(context).pop();
+                          },
+                        ),
+
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(20, 16, 20, 6),
+                        child: Text(
+                          'VISTAS',
+                          style: TextStyle(
+                            fontSize: 10,
+                            letterSpacing: 1.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.grey,
+                          ),
+                        ),
                       ),
-                    ),
-                    ChoiceChip(
-                      label: const Text('ES'),
-                      selected: _idiomaActual == 'ES',
-                      selectedColor: const Color(0xFF1B5E20),
-                      labelStyle: const TextStyle(color: Colors.white),
-                      backgroundColor: Colors.grey.shade200,
-                      onSelected: (selected) =>
-                          setState(() => _idiomaActual = 'ES'),
-                    ),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                      label: const Text('PT'),
-                      selected: _idiomaActual == 'PT',
-                      selectedColor: const Color(0xFF1B5E20),
-                      labelStyle: const TextStyle(color: Colors.white),
-                      backgroundColor: Colors.grey.shade200,
-                      onSelected: (selected) =>
-                          setState(() => _idiomaActual = 'PT'),
-                    ),
-                  ],
+
+                      _drawerItem(
+                        icon: Icons.home_outlined,
+                        label: 'Inicio',
+                        color: const Color(0xFF1B5E20),
+                        activo: _indiceActual == 0 &&
+                            !_modoAdminActivo &&
+                            !_modoAdminTerritoriosActivo &&
+                            !_modoConductorActivo,
+                        onTap: () {
+                          setState(() {
+                            _modoAdminActivo = false;
+                            _modoAdminTerritoriosActivo = false;
+                            _modoConductorActivo = false;
+                            _indiceActual = 0;
+                          });
+                          Navigator.of(context).pop();
+                        },
+                      ),
+
+                      _drawerItem(
+                        icon: Icons.location_searching,
+                        label: 'Localizador',
+                        color: Colors.blue,
+                        activo: _indiceActual == 2 &&
+                            !_modoAdminActivo &&
+                            !_modoAdminTerritoriosActivo &&
+                            !_modoConductorActivo,
+                        onTap: () {
+                          setState(() {
+                            _modoAdminActivo = false;
+                            _modoAdminTerritoriosActivo = false;
+                            _modoConductorActivo = false;
+                            _indiceActual = 2;
+                          });
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.admin_panel_settings_outlined),
-                title: const Text('Modo Admin'),
-                subtitle: const Text('Acceso completo'),
-                selected: _modoAdminActivo,
-                onTap: esAdmin
-                    ? () {
-                        setState(() {
-                          _modoAdminActivo = true;
-                          _modoAdminTerritoriosActivo = false;
-                          _modoConductorActivo = false;
-                        });
-                        Navigator.of(context).pop();
-                      }
-                    : null,
-              ),
-              ListTile(
-                leading: const Icon(Icons.map_outlined),
-                title: const Text('Modo Territorios'),
-                subtitle: const Text('Solo lectura y envío'),
-                selected: _modoAdminTerritoriosActivo,
-                onTap: esAdminTerritorios
-                    ? () {
-                        setState(() {
-                          _modoAdminTerritoriosActivo = true;
-                          _modoAdminActivo = false;
-                          _modoConductorActivo = false;
-                        });
-                        Navigator.of(context).pop();
-                      }
-                    : null,
-              ),
-              ListTile(
-                leading: const Icon(Icons.drive_eta_outlined),
-                title: const Text('Modo Conductor'),
-                subtitle: const Text('Panel de conductor'),
-                selected: _modoConductorActivo,
-                onTap: esConductor
-                    ? () {
-                        setState(() {
-                          _modoConductorActivo = true;
-                          _modoAdminActivo = false;
-                          _modoAdminTerritoriosActivo = false;
-                          _indiceActual = 0;
-                        });
-                        Navigator.of(context).pop();
-                      }
-                    : null,
-              ),
-              const Divider(),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                child: Text(
-                  'Vistas',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.home_outlined),
-                title: const Text('Inicio'),
-                selected: _indiceActual == 0,
-                onTap: () {
-                  setState(() {
-                    _modoAdminActivo = false;
-                    _modoAdminTerritoriosActivo = false;
-                    _modoConductorActivo = false;
-                    _indiceActual = 0;
-                  });
-                  Navigator.of(context).pop();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.credit_card),
-                title: const Text('Tarjetas'),
-                selected: _indiceActual == 1,
-                onTap: () {
-                  setState(() {
-                    _modoAdminActivo = false;
-                    _modoAdminTerritoriosActivo = false;
-                    _modoConductorActivo = false;
-                    _indiceActual = 1;
-                  });
-                  Navigator.of(context).pop();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.location_searching),
-                title: const Text('Localizador'),
-                selected: _indiceActual == 2,
-                onTap: () {
-                  setState(() {
-                    _modoAdminActivo = false;
-                    _modoAdminTerritoriosActivo = false;
-                    _modoConductorActivo = false;
-                    _indiceActual = 2;
-                  });
-                  Navigator.of(context).pop();
-                },
-              ),
-              const Spacer(),
+
+              // ── Cerrar sesión ─────────────────────────────
+              const Divider(height: 1),
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20.0,
-                  vertical: 8.0,
-                ),
+                padding: const EdgeInsets.all(16),
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.clear),
-                  label: const Text('Limpiar modo'),
-                  onPressed: () {
-                    setState(() {
-                      _modoAdminActivo = false;
-                      _modoAdminTerritoriosActivo = false;
-                      _modoConductorActivo = false;
-                    });
-                    Navigator.of(context).pop();
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20.0,
-                  vertical: 12.0,
-                ),
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.logout, color: Colors.red),
+                  icon: const Icon(Icons.logout, color: Colors.red, size: 18),
                   label: const Text(
                     'Cerrar sesión',
                     style: TextStyle(color: Colors.red),
@@ -588,6 +885,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                     Navigator.of(context).pop();
                     _cerrarSesion();
                   },
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.red),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
                 ),
               ),
             ],
@@ -595,21 +896,88 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         ),
       ),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 1,
-        leading: IconButton(
-          icon: const Icon(Icons.menu, color: Color(0xFF263238)),
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-        ),
-        title: const Text(
-          'Congregación Araucaria Sur',
-          style: TextStyle(
-            color: Color(0xFF263238),
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.3,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
           ),
         ),
+        leading: IconButton(
+          icon: const Icon(Icons.menu, color: Colors.white),
+          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        ),
+        title: Column(
+          children: [
+            const Text(
+              'Congregación Araucaria Sur',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                letterSpacing: 0.3,
+              ),
+            ),
+            Text(
+              'Congregación de Español',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.75),
+                fontSize: 10,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
         centerTitle: true,
+        actions: [
+          // Badge de notificaciones
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('notificaciones')
+                .where('leida', isEqualTo: false)
+                .limit(99)
+                .snapshots(),
+            builder: (context, snap) {
+              final count = snap.data?.docs.length ?? 0;
+              return Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(
+                      Icons.notifications_none_outlined,
+                      color: Colors.white,
+                    ),
+                    onPressed: () => _mostrarNotificaciones(),
+                  ),
+                  if (count > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '$count',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: IndexedStack(
         index: _indiceActual,

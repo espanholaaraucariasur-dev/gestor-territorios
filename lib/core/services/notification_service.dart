@@ -17,23 +17,33 @@ class NotificationService {
   NotificationService._internal();
 
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
-  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
-  
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
+
   /// Stream controller for handling notification taps
-  final StreamController<RemoteMessage> _messageStreamController = StreamController<RemoteMessage>.broadcast();
+  final StreamController<RemoteMessage> _messageStreamController =
+      StreamController<RemoteMessage>.broadcast();
   Stream<RemoteMessage> get messageStream => _messageStreamController.stream;
 
   /// Initialize notification service
   Future<void> initialize() async {
     try {
+      // Check if running on web
+      if (kIsWeb) {
+        debugPrint('🌐 Running on web - FCM limited functionality');
+        await _getAndSaveToken();
+        return;
+      }
+
       // Request notification permissions
       await _requestPermissions();
-      
+
       // Initialize local notifications
       await _initializeLocalNotifications();
-      
+
       // Get initial message if app was opened from notification
-      RemoteMessage? initialMessage = await _firebaseMessaging.getInitialMessage();
+      RemoteMessage? initialMessage =
+          await _firebaseMessaging.getInitialMessage();
       if (initialMessage != null) {
         _handleMessage(initialMessage);
       }
@@ -45,7 +55,8 @@ class NotificationService {
       FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
 
       // Handle background messages
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onBackgroundMessage(
+          _firebaseMessagingBackgroundHandler);
 
       // Get and save FCM token
       await _getAndSaveToken();
@@ -58,6 +69,20 @@ class NotificationService {
 
   /// Request notification permissions
   Future<void> _requestPermissions() async {
+    if (kIsWeb) {
+      // Web permissions are handled differently
+      await _firebaseMessaging.requestPermission(
+        alert: true,
+        announcement: false,
+        badge: true,
+        carPlay: false,
+        criticalAlert: false,
+        provisional: false,
+        sound: true,
+      );
+      return;
+    }
+
     if (Platform.isIOS) {
       await _firebaseMessaging.requestPermission(
         alert: true,
@@ -70,17 +95,25 @@ class NotificationService {
       );
     } else if (Platform.isAndroid) {
       await _localNotifications
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
     }
   }
 
   /// Initialize local notifications for Android
   Future<void> _initializeLocalNotifications() async {
+    if (kIsWeb) {
+      // Local notifications not supported on web
+      debugPrint('🌐 Local notifications not supported on web');
+      return;
+    }
+
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    const InitializationSettings initializationSettings = InitializationSettings(
+    const InitializationSettings initializationSettings =
+        InitializationSettings(
       android: initializationSettingsAndroid,
     );
 
@@ -98,11 +131,14 @@ class NotificationService {
 
   /// Handle foreground messages
   void _handleForegroundMessage(RemoteMessage message) {
-    debugPrint('🔔 Foreground message received: ${message.notification?.title}');
-    
-    // Show local notification when app is in foreground
-    _showLocalNotification(message);
-    
+    debugPrint(
+        '🔔 Foreground message received: ${message.notification?.title}');
+
+    // Show local notification when app is in foreground (only on mobile)
+    if (!kIsWeb) {
+      _showLocalNotification(message);
+    }
+
     // Add to stream for UI updates
     _messageStreamController.add(message);
   }
@@ -110,10 +146,10 @@ class NotificationService {
   /// Handle background/tapped messages
   void _handleMessage(RemoteMessage message) {
     debugPrint('🔔 Message handled: ${message.notification?.title}');
-    
+
     // Add to stream for UI updates
     _messageStreamController.add(message);
-    
+
     // Navigate based on message data if needed
     _navigateBasedOnMessage(message);
   }
