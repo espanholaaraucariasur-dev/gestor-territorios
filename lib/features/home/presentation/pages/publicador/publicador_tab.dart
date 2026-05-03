@@ -8,6 +8,7 @@ class PublicadorTab extends StatefulWidget {
   final String nombreCampanaEspecial;
   final bool campanaGeneralActiva;
   final String anuncioGeneral;
+  final VoidCallback onSolicitarTerritorio; // ✅ nuevo
 
   const PublicadorTab({
     super.key,
@@ -17,6 +18,7 @@ class PublicadorTab extends StatefulWidget {
     required this.nombreCampanaEspecial,
     required this.campanaGeneralActiva,
     required this.anuncioGeneral,
+    required this.onSolicitarTerritorio, // ✅ nuevo
   });
 
   @override
@@ -282,15 +284,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border(
-                        left: BorderSide(color: accentColor, width: 5),
-                        top: BorderSide(
-                            color: accentColor.withOpacity(0.25), width: 1),
-                        right: BorderSide(
-                            color: accentColor.withOpacity(0.25), width: 1),
-                        bottom: BorderSide(
-                            color: accentColor.withOpacity(0.25), width: 1),
-                      ),
+                      border: Border.all(
+                          color: accentColor.withOpacity(0.25), width: 1),
                       boxShadow: [
                         BoxShadow(
                           color: accentColor.withOpacity(0.15),
@@ -305,168 +300,188 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         ),
                       ],
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Cabecera
-                          Row(
+                    child: Stack(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(21, 14, 16, 12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.location_on,
-                                  color: accentColor, size: 18),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  direccionCompleta,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14,
-                                    color: Color(0xFF263238),
-                                  ),
-                                ),
-                              ),
-                              if (estadoLocal != 'pendiente')
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: accentColor.withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Icon(estadoIcon,
-                                      size: 16, color: accentColor),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Divider(
-                              height: 1,
-                              thickness: 1,
-                              color: Colors.grey.shade100),
-                          const SizedBox(height: 6),
-
-                          // FIX 2: Opciones limpias sin flechas
-                          ...[
-                            {
-                              'label': 'Se predicó',
-                              'value': 'completada',
-                              'color': const Color(0xFF2E7D32),
-                              'icon': Icons.check_circle_outline,
-                            },
-                            {
-                              'label': 'No se predicó',
-                              'value': 'no_predicado',
-                              'color': const Color(0xFFE65100),
-                              'icon': Icons.hourglass_empty,
-                            },
-                            {
-                              'label': 'No vive hispanohablante',
-                              'value': 'no_hispano',
-                              'color': const Color(0xFF1565C0),
-                              'icon': Icons.public_off,
-                            },
-                            {
-                              'label': 'Otro (escribir nota)',
-                              'value': 'otro',
-                              'color': const Color(0xFF6A1B9A),
-                              'icon': Icons.edit_note,
-                            },
-                          ].map((opcion) {
-                            final val = opcion['value'] as String;
-                            final color = opcion['color'] as Color;
-                            final isSelected = estadoLocal == val;
-
-                            return InkWell(
-                              onTap: () => setLocalState(() {
-                                _estadosPorTarjeta[tarjetaId]![dirDoc.id] = val;
-                                _modificadosPorTarjeta[tarjetaId]![dirDoc.id] =
-                                    true;
-                              }),
-                              borderRadius: BorderRadius.circular(8),
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 3),
-                                child: Row(
-                                  children: [
-                                    Radio<String>(
-                                      value: val,
-                                      groupValue: estadoLocal,
-                                      onChanged: (v) => setLocalState(() {
-                                        _estadosPorTarjeta[tarjetaId]![
-                                            dirDoc.id] = v!;
-                                        _modificadosPorTarjeta[tarjetaId]![
-                                            dirDoc.id] = true;
-                                      }),
-                                      activeColor: color,
-                                      materialTapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                      visualDensity: VisualDensity.compact,
-                                    ),
-                                    Icon(
-                                      opcion['icon'] as IconData,
-                                      size: 16,
-                                      color: isSelected
-                                          ? color
-                                          : Colors.grey.shade400,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      opcion['label'] as String,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: isSelected
-                                            ? FontWeight.w600
-                                            : FontWeight.w400,
-                                        color: isSelected
-                                            ? color
-                                            : const Color(0xFF546E7A),
+                              // Cabecera
+                              Row(
+                                children: [
+                                  Icon(Icons.location_on,
+                                      color: accentColor, size: 18),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      direccionCompleta,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                        color: Color(0xFF263238),
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                  if (estadoLocal != 'pendiente')
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: accentColor.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Icon(estadoIcon,
+                                          size: 16, color: accentColor),
+                                    ),
+                                ],
                               ),
-                            );
-                          }).toList(),
+                              const SizedBox(height: 10),
+                              Divider(
+                                  height: 1,
+                                  thickness: 1,
+                                  color: Colors.grey.shade100),
+                              const SizedBox(height: 6),
 
-                          // Campo texto para "Otro"
-                          if (estadoLocal == 'otro')
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                  left: 36, top: 6, bottom: 4),
-                              child: TextField(
-                                controller:
-                                    TextEditingController(text: otroTexto)
+                              // FIX 2: Opciones limpias sin flechas
+                              ...[
+                                {
+                                  'label': 'Se predicó',
+                                  'value': 'completada',
+                                  'color': const Color(0xFF2E7D32),
+                                  'icon': Icons.check_circle_outline,
+                                },
+                                {
+                                  'label': 'No se predicó',
+                                  'value': 'no_predicado',
+                                  'color': const Color(0xFFE65100),
+                                  'icon': Icons.hourglass_empty,
+                                },
+                                {
+                                  'label': 'No vive hispanohablante',
+                                  'value': 'no_hispano',
+                                  'color': const Color(0xFF1565C0),
+                                  'icon': Icons.public_off,
+                                },
+                                {
+                                  'label': 'Otro (escribir nota)',
+                                  'value': 'otro',
+                                  'color': const Color(0xFF6A1B9A),
+                                  'icon': Icons.edit_note,
+                                },
+                              ].map((opcion) {
+                                final val = opcion['value'] as String;
+                                final color = opcion['color'] as Color;
+                                final isSelected = estadoLocal == val;
+
+                                return InkWell(
+                                  onTap: () => setLocalState(() {
+                                    _estadosPorTarjeta[tarjetaId]![dirDoc.id] =
+                                        val;
+                                    _modificadosPorTarjeta[tarjetaId]![
+                                        dirDoc.id] = true;
+                                  }),
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 3),
+                                    child: Row(
+                                      children: [
+                                        Radio<String>(
+                                          value: val,
+                                          groupValue: estadoLocal,
+                                          onChanged: (v) => setLocalState(() {
+                                            _estadosPorTarjeta[tarjetaId]![
+                                                dirDoc.id] = v!;
+                                            _modificadosPorTarjeta[tarjetaId]![
+                                                dirDoc.id] = true;
+                                          }),
+                                          activeColor: color,
+                                          materialTapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        Icon(
+                                          opcion['icon'] as IconData,
+                                          size: 16,
+                                          color: isSelected
+                                              ? color
+                                              : Colors.grey.shade400,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          opcion['label'] as String,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: isSelected
+                                                ? FontWeight.w600
+                                                : FontWeight.w400,
+                                            color: isSelected
+                                                ? color
+                                                : const Color(0xFF546E7A),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+
+                              // Campo texto para "Otro"
+                              if (estadoLocal == 'otro')
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                      left: 36, top: 6, bottom: 4),
+                                  child: TextField(
+                                    controller: TextEditingController(
+                                        text: otroTexto)
                                       ..selection = TextSelection.fromPosition(
                                         TextPosition(offset: otroTexto.length),
                                       ),
-                                decoration: InputDecoration(
-                                  hintText: 'Escribe el motivo o nota...',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                    borderSide: BorderSide(
-                                        color: Colors.purple.shade200),
+                                    decoration: InputDecoration(
+                                      hintText: 'Escribe el motivo o nota...',
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                        borderSide: BorderSide(
+                                            color: Colors.purple.shade200),
+                                      ),
+                                      isDense: true,
+                                      filled: true,
+                                      fillColor: Colors.purple.shade50,
+                                    ),
+                                    maxLines: 2,
+                                    onChanged: (value) => setLocalState(() {
+                                      _textosPorTarjeta[tarjetaId]![dirDoc.id] =
+                                          value;
+                                    }),
                                   ),
-                                  isDense: true,
-                                  filled: true,
-                                  fillColor: Colors.purple.shade50,
                                 ),
-                                maxLines: 2,
-                                onChanged: (value) => setLocalState(() {
-                                  _textosPorTarjeta[tarjetaId]![dirDoc.id] =
-                                      value;
-                                }),
+                            ],
+                          ),
+                        ),
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: Container(
+                            width: 5,
+                            decoration: BoxDecoration(
+                              color: accentColor,
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(16),
+                                bottomLeft: Radius.circular(16),
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 }).toList(),
 
                 // ── Botones ──────────────────────────────────
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
                   child: Row(
                     children: [
                       Expanded(
@@ -611,7 +626,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final calle = (data['calle'] as String?) ?? '';
         final complemento = (data['complemento'] as String?) ?? '';
         final territorioNombre =
-            (data['territorio_nombre'] as String?) ?? territorioId;
+            (data['territorio_nombre'] as String?)?.isNotEmpty == true
+                ? data['territorio_nombre'] as String
+                : (data['barrio'] as String?)?.isNotEmpty == true
+                    ? data['barrio'] as String
+                    : territorioId;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
 
         if (estado == 'completada') {
@@ -740,6 +759,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('=== NOMBRE: ${widget.usuarioData['nombre']}');
+    debugPrint('=== EMAIL: ${widget.usuarioEmail}');
     final nombrePublicador = widget.usuarioData['nombre'] ?? 'Publicador';
     final iniciales =
         nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
@@ -747,494 +768,531 @@ class _PublicadorTabState extends State<PublicadorTab> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       body: CustomScrollView(
-            slivers: [
-              // ── HEADER ─────────────────────────────────────
-              SliverToBoxAdapter(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1B5E20).withOpacity(0.85),
+        slivers: [
+          // ── HEADER ─────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B5E20).withOpacity(0.85),
+              ),
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: Colors.white.withOpacity(0.2),
+                    child: Text(
+                      iniciales,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
-                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 28,
-                        backgroundColor: Colors.white.withOpacity(0.2),
-                        child: Text(
-                          iniciales,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Hola, $nombrePublicador',
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 22,
+                            fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Tus tarjetas asignadas este mes',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ✅ Botón solicitar territorio a la derecha
+                  GestureDetector(
+                    onTap: widget.onSolicitarTerritorio,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.white.withOpacity(0.4), width: 1),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.map_outlined,
+                              color: Colors.white, size: 20),
+                          SizedBox(height: 2),
+                          Text(
+                            'Solicitar',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // ── ALERTAS ────────────────────────────────────
+          if (widget.campanaEspecialActiva ||
+              (widget.campanaGeneralActiva &&
+                  widget.anuncioGeneral.trim().isNotEmpty))
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  if (widget.campanaEspecialActiva)
+                    _alertaBanner(
+                      icon: Icons.campaign,
+                      color: const Color(0xFFE65100),
+                      bgColor: const Color(0xFFFFF3E0),
+                      title: 'Campaña especial activa',
+                      body: widget.nombreCampanaEspecial,
+                    ),
+                  if (widget.campanaGeneralActiva &&
+                      widget.anuncioGeneral.trim().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    _alertaBanner(
+                      icon: Icons.info_outline,
+                      color: const Color(0xFF1565C0),
+                      bgColor: const Color(0xFFE3F2FD),
+                      title: 'Anuncio',
+                      body: widget.anuncioGeneral,
+                    ),
+                  ],
+                ]),
+              ),
+            ),
+
+          // ── STATS ──────────────────────────────────────
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            sliver: SliverToBoxAdapter(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collectionGroup('tarjetas')
+                    .where('asignado_a',
+                        isEqualTo: widget.usuarioData['nombre'] ?? '')
+                    .snapshots(),
+                builder: (context, tarjetasSnap) {
+                  int totalDirAsignadas = 0;
+                  final List<String> tarjetaIds = [];
+
+                  if (tarjetasSnap.hasData) {
+                    for (final t in tarjetasSnap.data!.docs) {
+                      final d = _safeData(t);
+                      totalDirAsignadas +=
+                          ((d['cantidad_direcciones'] ?? 0) as int);
+                      tarjetaIds.add(t.id);
+                    }
+                  }
+
+                  return FutureBuilder<QuerySnapshot?>(
+                    future: tarjetaIds.isEmpty
+                        ? Future.value(null)
+                        : FirebaseFirestore.instance
+                            .collection('direcciones_globales')
+                            .where('tarjeta_id',
+                                whereIn: tarjetaIds.take(10).toList())
+                            .get(),
+                    builder: (context, dirsSnap) {
+                      final mesActual =
+                          '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
+
+                      final completadas = dirsSnap.data?.docs.where((doc) {
+                            final d = _safeData(doc);
+                            return d['predicado'] == true &&
+                                d['mes_predicacion'] == mesActual;
+                          }).length ??
+                          0;
+
+                      final pendientes = totalDirAsignadas - completadas;
+
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: _statCard('Dir Asignadas', totalDirAsignadas,
+                                Icons.home_work_outlined),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _statCard('Dir Completadas', completadas,
+                                Icons.check_circle_outline),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _statCard(
+                                'Dir Pendientes',
+                                pendientes < 0 ? 0 : pendientes,
+                                Icons.schedule_outlined),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+
+          // ── PROGRESO ───────────────────────────────────
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            sliver: SliverToBoxAdapter(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('direcciones_globales')
+                    .snapshots(),
+                builder: (context, snapTotal) {
+                  final totalExistentes = snapTotal.data?.docs.length ?? 0;
+                  final completadasGlobal = snapTotal.data?.docs.where((doc) {
+                        final d = _safeData(doc);
+                        return d['predicado'] == true;
+                      }).length ??
+                      0;
+                  final pendientesGlobal = totalExistentes - completadasGlobal;
+                  final avance = totalExistentes > 0
+                      ? completadasGlobal / totalExistentes
+                      : 0.0;
+
+                  return Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              'Hola, $nombrePublicador',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
+                            const Text(
+                              'Progreso mensual',
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: Color(0xFF263238),
                               ),
                             ),
-                            const SizedBox(height: 4),
                             Text(
-                              'Tus tarjetas asignadas este mes',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.8),
-                                fontSize: 13,
+                              '${(avance * 100).toStringAsFixed(0)}%',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: Color(0xFF1B5E20),
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // ── ALERTAS ────────────────────────────────────
-              if (widget.campanaEspecialActiva ||
-                  (widget.campanaGeneralActiva &&
-                      widget.anuncioGeneral.trim().isNotEmpty))
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      if (widget.campanaEspecialActiva)
-                        _alertaBanner(
-                          icon: Icons.campaign,
-                          color: const Color(0xFFE65100),
-                          bgColor: const Color(0xFFFFF3E0),
-                          title: 'Campaña especial activa',
-                          body: widget.nombreCampanaEspecial,
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            value: avance,
+                            minHeight: 10,
+                            backgroundColor: const Color(0xFFE8F5E9),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                Color(0xFF1B5E20)),
+                          ),
                         ),
-                      if (widget.campanaGeneralActiva &&
-                          widget.anuncioGeneral.trim().isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        _alertaBanner(
-                          icon: Icons.info_outline,
-                          color: const Color(0xFF1565C0),
-                          bgColor: const Color(0xFFE3F2FD),
-                          title: 'Anuncio',
-                          body: widget.anuncioGeneral,
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _miniStat('Existentes', totalExistentes,
+                                  Icons.home_work_outlined, Colors.blue),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _miniStat(
+                                  'Completadas',
+                                  completadasGlobal,
+                                  Icons.check_circle_outline,
+                                  const Color(0xFF1B5E20)),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _miniStat('Pendientes', pendientesGlobal,
+                                  Icons.schedule_outlined, Colors.orange),
+                            ),
+                          ],
                         ),
                       ],
-                    ]),
-                  ),
-                ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
 
-              // ── STATS ──────────────────────────────────────
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                sliver: SliverToBoxAdapter(
-                  child: StreamBuilder<QuerySnapshot>(
+          // ── MIS TARJETAS ───────────────────────────────
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'MIS TARJETAS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF9E9E9E),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collectionGroup('tarjetas')
                         .where('asignado_a',
                             isEqualTo: widget.usuarioData['nombre'] ?? '')
                         .snapshots(),
-                    builder: (context, tarjetasSnap) {
-                      int totalDirAsignadas = 0;
-                      final List<String> tarjetaIds = [];
-
-                      if (tarjetasSnap.hasData) {
-                        for (final t in tarjetasSnap.data!.docs) {
-                          final d = _safeData(t);
-                          totalDirAsignadas +=
-                              ((d['cantidad_direcciones'] ?? 0) as int);
-                          tarjetaIds.add(t.id);
-                        }
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Center(
+                            child: Text(
+                              'No tienes tarjetas asignadas.',
+                              style: TextStyle(color: Colors.grey),
+                            ),
+                          ),
+                        );
                       }
 
-                      return FutureBuilder<QuerySnapshot?>(
-                        future: tarjetaIds.isEmpty
-                            ? Future.value(null)
-                            : FirebaseFirestore.instance
-                                .collection('direcciones_globales')
-                                .where('tarjeta_id',
-                                    whereIn: tarjetaIds.take(10).toList())
-                                .get(),
-                        builder: (context, dirsSnap) {
-                          final mesActual =
-                              '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
+                      // FIX 3: Ocultar completadas al instante
+                      final tarjetasVisibles = snapshot.data!.docs.where((doc) {
+                        if (_tarjetasCompletadas.contains(doc.id)) {
+                          return false;
+                        }
+                        final d = _safeData(doc);
+                        return d['completada'] != true;
+                      }).toList();
 
-                          final completadas = dirsSnap.data?.docs.where((doc) {
-                                final d = _safeData(doc);
-                                return d['predicado'] == true &&
-                                    d['mes_predicacion'] == mesActual;
-                              }).length ??
-                              0;
-
-                          final pendientes = totalDirAsignadas - completadas;
-
-                          return Row(
+                      if (tarjetasVisibles.isEmpty) {
+                        return Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F5E9),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFF1B5E20).withOpacity(0.3)),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Expanded(
-                                child: _statCard(
-                                    'Dir Asignadas',
-                                    totalDirAsignadas,
-                                    Icons.home_work_outlined),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _statCard('Dir Completadas', completadas,
-                                    Icons.check_circle_outline),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _statCard(
-                                    'Dir Pendientes',
-                                    pendientes < 0 ? 0 : pendientes,
-                                    Icons.schedule_outlined),
+                              Icon(Icons.check_circle,
+                                  color: Color(0xFF1B5E20)),
+                              SizedBox(width: 8),
+                              Text(
+                                '¡Todas las tarjetas completadas!',
+                                style: TextStyle(
+                                  color: Color(0xFF1B5E20),
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ],
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ),
+                          ),
+                        );
+                      }
 
-              // ── PROGRESO ───────────────────────────────────
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                sliver: SliverToBoxAdapter(
-                  child: StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('direcciones_globales')
-                        .snapshots(),
-                    builder: (context, snapTotal) {
-                      final totalExistentes = snapTotal.data?.docs.length ?? 0;
-                      final completadasGlobal =
-                          snapTotal.data?.docs.where((doc) {
-                                final d = _safeData(doc);
-                                return d['predicado'] == true;
-                              }).length ??
-                              0;
-                      final pendientesGlobal =
-                          totalExistentes - completadasGlobal;
-                      final avance = totalExistentes > 0
-                          ? completadasGlobal / totalExistentes
-                          : 0.0;
+                      return Column(
+                        children:
+                            List.generate(tarjetasVisibles.length, (index) {
+                          final tarjetaDoc = tarjetasVisibles[index];
+                          final data = _safeData(tarjetaDoc);
+                          final nombre =
+                              (data['nombre'] as String?) ?? tarjetaDoc.id;
+                          final territorioId =
+                              tarjetaDoc.reference.parent.parent?.id ?? '';
 
-                      return Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text(
-                                  'Progreso mensual',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                    color: Color(0xFF263238),
-                                  ),
+                          // Color aleatorio pero estable por índice
+                          final color =
+                              _tarjetaColores[index % _tarjetaColores.length];
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 14),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                  color: color.withOpacity(0.2), width: 1),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: color.withOpacity(0.12),
+                                  blurRadius: 12,
+                                  spreadRadius: 1,
+                                  offset: const Offset(0, 4),
                                 ),
-                                Text(
-                                  '${(avance * 100).toStringAsFixed(0)}%',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                    color: Color(0xFF1B5E20),
-                                  ),
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 12),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: LinearProgressIndicator(
-                                value: avance,
-                                minHeight: 10,
-                                backgroundColor: const Color(0xFFE8F5E9),
-                                valueColor: const AlwaysStoppedAnimation<Color>(
-                                    Color(0xFF1B5E20)),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Row(
+                            child: Stack(
                               children: [
-                                Expanded(
-                                  child: _miniStat(
-                                      'Existentes',
-                                      totalExistentes,
-                                      Icons.home_work_outlined,
-                                      Colors.blue),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: _miniStat(
-                                      'Completadas',
-                                      completadasGlobal,
-                                      Icons.check_circle_outline,
-                                      const Color(0xFF1B5E20)),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: _miniStat(
-                                      'Pendientes',
-                                      pendientesGlobal,
-                                      Icons.schedule_outlined,
-                                      Colors.orange),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-
-              // ── MIS TARJETAS ───────────────────────────────
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'MIS TARJETAS',
-                        style: TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 1.5,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF9E9E9E),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collectionGroup('tarjetas')
-                            .where('asignado_a',
-                                isEqualTo: widget.usuarioData['nombre'] ?? '')
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const Center(
-                                child: CircularProgressIndicator());
-                          }
-                          if (!snapshot.hasData ||
-                              snapshot.data!.docs.isEmpty) {
-                            return Container(
-                              padding: const EdgeInsets.all(20),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  'No tienes tarjetas asignadas.',
-                                  style: TextStyle(color: Colors.grey),
-                                ),
-                              ),
-                            );
-                          }
-
-                          // FIX 3: Ocultar completadas al instante
-                          final tarjetasVisibles =
-                              snapshot.data!.docs.where((doc) {
-                            if (_tarjetasCompletadas.contains(doc.id)) {
-                              return false;
-                            }
-                            final d = _safeData(doc);
-                            return d['completada'] != true;
-                          }).toList();
-
-                          if (tarjetasVisibles.isEmpty) {
-                            return Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE8F5E9),
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                    color: const Color(0xFF1B5E20)
-                                        .withOpacity(0.3)),
-                              ),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.check_circle,
-                                      color: Color(0xFF1B5E20)),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    '¡Todas las tarjetas completadas!',
-                                    style: TextStyle(
-                                      color: Color(0xFF1B5E20),
-                                      fontWeight: FontWeight.w600,
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 5),
+                                  child: ExpansionTile(
+                                    leading: Container(
+                                      width: 36,
+                                      height: 36,
+                                      decoration: BoxDecoration(
+                                        color: color.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(Icons.credit_card,
+                                          color: color, size: 20),
                                     ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }
-
-                          return Column(
-                            children:
-                                List.generate(tarjetasVisibles.length, (index) {
-                              final tarjetaDoc = tarjetasVisibles[index];
-                              final data = _safeData(tarjetaDoc);
-                              final nombre =
-                                  (data['nombre'] as String?) ?? tarjetaDoc.id;
-                              final territorioId =
-                                  tarjetaDoc.reference.parent.parent?.id ?? '';
-
-                              // Color aleatorio pero estable por índice
-                              final color = _tarjetaColores[
-                                  index % _tarjetaColores.length];
-
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 14),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border(
-                                    left: BorderSide(color: color, width: 5),
-                                    top: BorderSide(
-                                        color: color.withOpacity(0.2),
-                                        width: 1),
-                                    right: BorderSide(
-                                        color: color.withOpacity(0.2),
-                                        width: 1),
-                                    bottom: BorderSide(
-                                        color: color.withOpacity(0.2),
-                                        width: 1),
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: color.withOpacity(0.12),
-                                      blurRadius: 12,
-                                      spreadRadius: 1,
-                                      offset: const Offset(0, 4),
+                                    title: Text(nombre,
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.bold)),
+                                    subtitle: FutureBuilder<QuerySnapshot>(
+                                      future: FirebaseFirestore.instance
+                                          .collection('direcciones_globales')
+                                          .where('tarjeta_id',
+                                              isEqualTo: tarjetaDoc.id)
+                                          .where('estado',
+                                              isNotEqualTo: 'removida')
+                                          .get(),
+                                      builder: (context, dirSnap) {
+                                        final cantReal =
+                                            dirSnap.data?.docs.length ?? 0;
+                                        final enviadoNombre =
+                                            (data['enviado_nombre']
+                                                    as String?) ??
+                                                '';
+                                        final enviadoEn =
+                                            data['enviado_en'] as Timestamp?;
+                                        String fechaHora = '';
+                                        if (enviadoEn != null) {
+                                          final dt = enviadoEn.toDate();
+                                          final h = dt.hour
+                                              .toString()
+                                              .padLeft(2, '0');
+                                          final m = dt.minute
+                                              .toString()
+                                              .padLeft(2, '0');
+                                          fechaHora =
+                                              '${dt.day}/${dt.month}/${dt.year} $h:$m';
+                                        }
+                                        return Text(
+                                          '$cantReal dir${enviadoNombre.isNotEmpty ? ' · $enviadoNombre' : ''}${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
+                                          style: const TextStyle(fontSize: 11),
+                                        );
+                                      },
                                     ),
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 6,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: ExpansionTile(
-                                  leading: Container(
-                                    width: 36,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      color: color.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Icon(Icons.credit_card,
-                                        color: color, size: 20),
-                                  ),
-                                  title: Text(nombre,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                  subtitle: FutureBuilder<QuerySnapshot>(
-                                    future: FirebaseFirestore.instance
-                                        .collection('direcciones_globales')
-                                        .where('tarjeta_id',
-                                            isEqualTo: tarjetaDoc.id)
-                                        .where('estado',
-                                            isNotEqualTo: 'removida')
-                                        .get(),
-                                    builder: (context, dirSnap) {
-                                      final cantReal =
-                                          dirSnap.data?.docs.length ?? 0;
-                                      final enviadoNombre =
-                                          (data['enviado_nombre'] as String?) ??
-                                              '';
-                                      final enviadoEn =
-                                          data['enviado_en'] as Timestamp?;
-                                      String fechaHora = '';
-                                      if (enviadoEn != null) {
-                                        final dt = enviadoEn.toDate();
-                                        final h =
-                                            dt.hour.toString().padLeft(2, '0');
-                                        final m = dt.minute
-                                            .toString()
-                                            .padLeft(2, '0');
-                                        fechaHora =
-                                            '${dt.day}/${dt.month}/${dt.year} $h:$m';
-                                      }
-                                      return Text(
-                                        '$cantReal dir${enviadoNombre.isNotEmpty ? ' · $enviadoNombre' : ''}${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
-                                        style: const TextStyle(fontSize: 11),
-                                      );
-                                    },
-                                  ),
-                                  trailing: TextButton(
-                                    onPressed: () async {
-                                      final confirmar = await showDialog<bool>(
-                                        context: context,
-                                        builder: (c) => AlertDialog(
-                                          title: const Text('Devolver tarjeta'),
-                                          content: Text(
-                                            '¿Devolver "$nombre"? Quedará disponible para otros.',
+                                    trailing: TextButton(
+                                      onPressed: () async {
+                                        final confirmar =
+                                            await showDialog<bool>(
+                                          context: context,
+                                          builder: (c) => AlertDialog(
+                                            title:
+                                                const Text('Devolver tarjeta'),
+                                            content: Text(
+                                              '¿Devolver "$nombre"? Quedará disponible para otros.',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, false),
+                                                child: const Text('Cancelar'),
+                                              ),
+                                              ElevatedButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, true),
+                                                style: ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.orange),
+                                                child: const Text('Devolver'),
+                                              ),
+                                            ],
                                           ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(c, false),
-                                              child: const Text('Cancelar'),
-                                            ),
-                                            ElevatedButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(c, true),
-                                              style: ElevatedButton.styleFrom(
-                                                  backgroundColor:
-                                                      Colors.orange),
-                                              child: const Text('Devolver'),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                      if (confirmar == true) {
-                                        await _devolverTarjeta(
-                                            territorioId, tarjetaDoc.id);
-                                      }
-                                    },
-                                    child: const Text('Devolver',
-                                        style: TextStyle(color: Colors.orange)),
+                                        );
+                                        if (confirmar == true) {
+                                          await _devolverTarjeta(
+                                              territorioId, tarjetaDoc.id);
+                                        }
+                                      },
+                                      child: const Text('Devolver',
+                                          style:
+                                              TextStyle(color: Colors.orange)),
+                                    ),
+                                    children: [
+                                      _buildDireccionesTarjeta(
+                                          tarjetaDoc.id, territorioId, nombre),
+                                    ],
                                   ),
-                                  children: [
-                                    _buildDireccionesTarjeta(
-                                        tarjetaDoc.id, territorioId, nombre),
-                                  ],
                                 ),
-                              );
-                            }),
+                                Positioned(
+                                  left: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  child: Container(
+                                    width: 5,
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      borderRadius: const BorderRadius.only(
+                                        topLeft: Radius.circular(16),
+                                        bottomLeft: Radius.circular(16),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           );
-                        },
-                      ),
-                    ],
+                        }),
+                      );
+                    },
                   ),
-                ),
+                ],
               ),
-
-            ],
+            ),
           ),
-      );
+
+          // Padding para que el FAB no tape el contenido inferior
+          const SliverPadding(
+            padding: EdgeInsets.only(bottom: 140),
+          ),
+        ],
+      ),
+    );
   }
 }

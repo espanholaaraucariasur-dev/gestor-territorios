@@ -408,7 +408,13 @@ class _TemporalesTabState extends State<TemporalesTab> {
               for (final doc in docs) {
                 final data = (doc.data() as Map<String, dynamic>?) ?? {};
                 final terNombre =
-                    (data['territorio_nombre'] as String?) ?? 'Sin territorio';
+                    (data['territorio_nombre'] as String?)?.isNotEmpty == true
+                        ? data['territorio_nombre'] as String
+                        : (data['barrio'] as String?)?.isNotEmpty == true
+                            ? data['barrio'] as String
+                            : (data['territorio_id'] as String?)?.isNotEmpty == true
+                                ? data['territorio_id'] as String
+                                : 'Sin territorio';
                 final terId = (data['territorio_id'] as String?) ?? 'sin_id';
                 final key = '$terId||$terNombre';
                 porTerritorio.putIfAbsent(key, () => []).add(doc);

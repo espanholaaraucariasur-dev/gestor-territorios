@@ -622,65 +622,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       floatingActionButton: !_modoAdminActivo &&
               !_modoAdminTerritoriosActivo &&
               !_modoConductorActivo
-          ? Container(
-              height: 42,
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [
-                    Color(0xFF1B5E20),
-                    Color(0xFF2E7D32),
-                    Color(0xFF43A047),
-                  ],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-                borderRadius: BorderRadius.circular(25),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF1B5E20).withValues(alpha: 0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: _mostrarDialogoSolicitarTerritorioPublicador,
-                  borderRadius: BorderRadius.circular(25),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.map, color: Colors.white, size: 18),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Solicitar territorio',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            letterSpacing: 0.5,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black26,
-                                offset: Offset(0, 1),
-                                blurRadius: 2,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            )
+          ? null
           : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
@@ -3939,6 +3881,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       nombreCampanaEspecial: _nombreCampanaEspecial,
       campanaGeneralActiva: _campanaGeneralActiva,
       anuncioGeneral: _anuncioGeneral,
+      onSolicitarTerritorio: _mostrarDialogoSolicitarTerritorioPublicador, // ✅
     );
   }
 

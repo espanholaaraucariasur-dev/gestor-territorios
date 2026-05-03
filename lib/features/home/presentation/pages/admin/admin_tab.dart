@@ -123,29 +123,74 @@ class _AdminTabState extends State<AdminTab> {
   void _levantarArchivoCSV() {
     startCsvUpload(
       (String contenidoDelArchivo) {
-        List<String> lineas = contenidoDelArchivo.split('\n');
-        if (lineas.isNotEmpty) lineas.removeAt(0);
-        Map<String, List<Map<String, String>>> tarjetasMap = {};
-        for (var linea in lineas) {
-          if (linea.trim().isEmpty) continue;
-          List<String> columnas = linea.split(',');
-          if (columnas.length < 3) continue;
-          final tarjeta = columnas[0].trim();
-          final calle = columnas[2].trim();
-          final complemento = columnas.length > 3 ? columnas[3].trim() : '';
-          if (tarjeta.isEmpty || calle.isEmpty) continue;
-          tarjetasMap.putIfAbsent(tarjeta, () => []);
-          tarjetasMap[tarjeta]!
-              .add({'calle': calle, 'complemento': complemento});
-        }
-        if (tarjetasMap.isEmpty) {
+        try {
+          // Convertir bytes a string con UTF-8 para manejar caracteres especiales
+          List<String> lineas = contenidoDelArchivo.split('\n');
+          if (lineas.isNotEmpty) lineas.removeAt(0); // Remover header si existe
+
+          Map<String, List<Map<String, String>>> tarjetasMap = {};
+
+          for (var linea in lineas) {
+            if (linea.trim().isEmpty) continue;
+
+            // Parse CSV más robusto que maneja campos entre comillas
+            List<String> columnas = [];
+            bool enComillas = false;
+            String campoActual = '';
+
+            for (int i = 0; i < linea.length; i++) {
+              String char = linea[i];
+
+              if (char == '"') {
+                enComillas = !enComillas;
+              } else if (char == ',' && !enComillas) {
+                columnas.add(campoActual);
+                campoActual = '';
+              } else {
+                campoActual += char;
+              }
+            }
+
+            // Agregar último campo si no está vacío
+            if (campoActual.isNotEmpty) {
+              columnas.add(campoActual);
+            }
+
+            if (columnas.length >= 3) {
+              final tarjeta = columnas[0].trim();
+              final calle = columnas.length > 2 ? columnas[2].trim() : '';
+              final complemento = columnas.length > 3 ? columnas[3].trim() : '';
+
+              if (tarjeta.isNotEmpty && calle.isNotEmpty) {
+                tarjetasMap.putIfAbsent(tarjeta, () => []);
+                tarjetasMap[tarjeta]!.add({
+                  'calle': calle,
+                  'complemento': complemento,
+                });
+              }
+            }
+          }
+
+          if (tarjetasMap.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No se pudieron extraer datos del CSV'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+            return;
+          }
+
+          _mostrarSelectorTerritorioParaCSV(tarjetasMap);
+        } catch (e) {
+          debugPrint('Error procesando CSV: $e');
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('No se pudieron extraer datos del CSV')),
+            SnackBar(
+              content: Text('Error al procesar archivo: $e'),
+              backgroundColor: Colors.red,
+            ),
           );
-          return;
         }
-        _mostrarSelectorTerritorioParaCSV(tarjetasMap);
       },
     );
   }
@@ -451,10 +496,13 @@ class _AdminTabState extends State<AdminTab> {
               if (nombre.isEmpty) return;
               Navigator.pop(dialogCtx);
               try {
-                await FirebaseFirestore.instance.collection('territorios').add({
+                await FirebaseFirestore.instance
+                    .collection('territorios')
+                    .doc(nombre.toUpperCase().replaceAll(' ', '_'))
+                    .set({
                   'nombre': nombre,
                   'created_at': FieldValue.serverTimestamp(),
-                });
+                }, SetOptions(merge: true));
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(

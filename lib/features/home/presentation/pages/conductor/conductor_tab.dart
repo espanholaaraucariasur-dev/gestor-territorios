@@ -163,6 +163,14 @@ class _ConductorTabState extends State<ConductorTab> {
 
       if (confirmado != true) return;
 
+      // Obtener nombre del territorio
+      final terDoc = await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .get();
+      final territorioNombre =
+          (terDoc.data()?['nombre'] as String?) ?? territorioId;
+
       // Update tarjeta document
       await FirebaseFirestore.instance
           .collection('territorios')
@@ -174,6 +182,23 @@ class _ConductorTabState extends State<ConductorTab> {
         'enviado_nombre': nombreElegido,
         'enviado_en': FieldValue.serverTimestamp(),
         'disponible_para_publicadores': false,
+        'territorio_nombre': territorioNombre,
+      });
+
+      // Contar direcciones reales
+      final dirsCount = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('tarjeta_id', isEqualTo: tarjetaId)
+          .count()
+          .get();
+
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .update({
+        'cantidad_direcciones': dirsCount.count ?? 0,
       });
 
       // Update all direcciones_globales with tarjeta_id
@@ -260,11 +285,16 @@ class _ConductorTabState extends State<ConductorTab> {
                               tarjetasDirectas + tarjetasEnTerritorios;
                           final enviadas = todas.where((d) {
                             final data = d.data() as Map<String, dynamic>;
-                            return (data['conductor_email'] ==
-                                        widget.usuarioEmail ||
-                                    data['enviado_a'] == widget.usuarioEmail) &&
-                                (data['asignado_a'] as String?)?.isNotEmpty ==
-                                    true;
+                            final esDelConductor =
+                                data['conductor_email'] == widget.usuarioEmail ||
+                                data['enviado_a'] == widget.usuarioEmail;
+                            if (!esDelConductor) return false;
+                            final enviadoNombre =
+                                (data['enviado_nombre'] as String?) ?? '';
+                            final asignadoA =
+                                (data['asignado_a'] as String?) ?? '';
+                            return enviadoNombre.isNotEmpty ||
+                                asignadoA.isNotEmpty;
                           }).length;
                           final devueltas = todas.where((d) {
                             final data = d.data() as Map<String, dynamic>;

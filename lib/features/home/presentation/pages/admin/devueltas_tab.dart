@@ -15,26 +15,86 @@ class DevueltasTab extends StatefulWidget {
 
 class _DevueltasTabState extends State<DevueltasTab> {
   // ─────────────────────────────────────────────────────────
-  // RESTAURAR — vuelve a direcciones_globales con tarjeta origen
+  // HELPERS
   // ─────────────────────────────────────────────────────────
 
-  Future<void> _restaurarDireccion(DocumentSnapshot doc) async {
-    final confirmar = await showDialog<bool>(
+  int _diasDesdeRemocion(Timestamp? removidaEn) {
+    if (removidaEn == null) return 0;
+    return DateTime.now().difference(removidaEn.toDate()).inDays;
+  }
+
+  Color _colorPorDias(int dias) {
+    if (dias >= 60) return Colors.red;
+    if (dias >= 30) return Colors.orange;
+    return const Color(0xFF1B5E20);
+  }
+
+  String _labelPorDias(int dias) {
+    if (dias >= 60) return '⚠️ Eliminar';
+    if (dias >= 30) return '🔍 Verificar';
+    return '${dias}d';
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // VERIFICAR DIRECCIÓN
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _verificarDireccion(DocumentSnapshot doc) async {
+    final data = (doc.data() as Map<String, dynamic>?) ?? {};
+    final calle = (data['calle'] as String?) ?? '';
+    final notaCtrl = TextEditingController();
+
+    final resultado = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Restaurar dirección'),
-        content: const Text(
-          'Esta dirección volverá a direcciones globales con su tarjeta original.\n\n'
-          '¿Confirmar?',
+        title: const Text('Verificar dirección'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                calle,
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('¿Resultado de la verificación?',
+                style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: notaCtrl,
+              decoration: InputDecoration(
+                hintText: 'Ej: Se verificó, sigue sin hispanos...',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                isDense: true,
+              ),
+              maxLines: 2,
+            ),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(c, false),
+            onPressed: () => Navigator.pop(c),
             child: const Text('Cancelar'),
           ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(c, 'sin_cambio'),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.orange,
+                side: const BorderSide(color: Colors.orange)),
+            child: const Text('Sin cambio'),
+          ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(c, true),
+            onPressed: () => Navigator.pop(c, 'restaurar'),
             style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1B5E20)),
             child: const Text('Restaurar'),
@@ -42,14 +102,61 @@ class _DevueltasTabState extends State<DevueltasTab> {
         ],
       ),
     );
-    if (confirmar != true) return;
 
+    if (resultado == null) return;
+
+    try {
+      final verificadoPor = widget.usuarioData['nombre'] ?? 'Admin';
+
+      await doc.reference.update({
+        'verificaciones': FieldValue.arrayUnion([
+          {
+            'fecha': Timestamp.now(),
+            'verificado_por': verificadoPor,
+            'resultado': resultado,
+            'nota': notaCtrl.text.trim(),
+          }
+        ]),
+        'ultima_verificacion': FieldValue.serverTimestamp(),
+        'estado_revision':
+            resultado == 'restaurar' ? 'restaurada' : 'verificada',
+      });
+
+      if (resultado == 'restaurar') {
+        await _restaurarDireccion(doc, nota: notaCtrl.text.trim());
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Verificación registrada — sin cambios'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // RESTAURAR DIRECCIÓN
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _restaurarDireccion(DocumentSnapshot doc,
+      {String nota = ''}) async {
     try {
       final data = (doc.data() as Map<String, dynamic>?) ?? {};
       final docIdOriginal = (data['doc_id_original'] as String?) ?? doc.id;
       final tarjetaIdOrigen = (data['tarjeta_id_origen'] as String?) ?? '';
       final territorioId = (data['territorio_id'] as String?) ?? '';
       final territorioNombre = (data['territorio_nombre'] as String?) ?? '';
+      final mes =
+          '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
 
       final db = FirebaseFirestore.instance;
       final batch = db.batch();
@@ -64,6 +171,8 @@ class _DevueltasTabState extends State<DevueltasTab> {
           'territorio_id': territorioId,
           'territorio_nombre': territorioNombre,
           'tarjeta_id': tarjetaIdOrigen,
+          'barrio':
+              territorioNombre.isNotEmpty ? territorioNombre : territorioId,
           'estado': 'activa',
           'estado_predicacion': 'pendiente',
           'predicado': false,
@@ -73,25 +182,53 @@ class _DevueltasTabState extends State<DevueltasTab> {
           'created_at': FieldValue.serverTimestamp(),
           'restaurada_en': FieldValue.serverTimestamp(),
           'restaurada_por': widget.usuarioData['nombre'] ?? '',
+          'nota_restauracion': nota,
         },
       );
 
-      // 2. Eliminar de direcciones_removidas
+      // 2. Guardar en estadísticas
+      batch.set(
+        db.collection('estadisticas').doc('removidas_$mes'),
+        {
+          'mes': mes,
+          'restauradas': FieldValue.increment(1),
+          'ultima_actualizacion': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      // 3. Guardar notificación en Firestore para admins
+      batch.set(
+        db.collection('notificaciones').doc(),
+        {
+          'titulo': '✅ Dirección restaurada',
+          'cuerpo':
+              '${data['calle']} fue restaurada al territorio $territorioNombre',
+          'tipo': 'restauracion',
+          'leida': false,
+          'created_at': FieldValue.serverTimestamp(),
+          'para_roles': ['es_admin', 'es_admin_territorios'],
+        },
+      );
+
+      // 4. Eliminar de direcciones_removidas
       batch.delete(doc.reference);
 
       await batch.commit();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle, color: Colors.white, size: 18),
-                SizedBox(width: 8),
-                Text('Dirección restaurada correctamente'),
+                const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Dirección restaurada a $tarjetaIdOrigen'),
+                ),
               ],
             ),
-            backgroundColor: Color(0xFF1B5E20),
+            backgroundColor: const Color(0xFF1B5E20),
           ),
         );
       }
@@ -99,30 +236,48 @@ class _DevueltasTabState extends State<DevueltasTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error al restaurar: $e'),
-            backgroundColor: Colors.red,
-          ),
+              content: Text('Error al restaurar: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
   }
 
   // ─────────────────────────────────────────────────────────
-  // ELIMINAR PERMANENTEMENTE
+  // ELIMINAR PERMANENTE
   // ─────────────────────────────────────────────────────────
 
   Future<void> _eliminarPermanente(DocumentSnapshot doc) async {
     final data = (doc.data() as Map<String, dynamic>?) ?? {};
     final calle = (data['calle'] as String?) ?? 'esta dirección';
+    final mes =
+        '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
 
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Eliminar permanentemente'),
-        content: Text(
-          '¿Eliminar "$calle" para siempre?\n\n'
-          '⚠️ Esta acción NO se puede deshacer.',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Text(calle,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '⚠️ Esta acción NO se puede deshacer.\nLa dirección desaparecerá para siempre.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: Colors.red),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -140,10 +295,24 @@ class _DevueltasTabState extends State<DevueltasTab> {
     if (confirmar != true) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('direcciones_removidas')
-          .doc(doc.id)
-          .delete();
+      final db = FirebaseFirestore.instance;
+      final batch = db.batch();
+
+      // Guardar en estadísticas
+      batch.set(
+        db.collection('estadisticas').doc('removidas_$mes'),
+        {
+          'mes': mes,
+          'eliminadas_permanente': FieldValue.increment(1),
+          'ultima_actualizacion': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      // Eliminar
+      batch.delete(doc.reference);
+
+      await batch.commit();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -156,11 +325,46 @@ class _DevueltasTabState extends State<DevueltasTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al eliminar: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // VERIFICAR ALERTAS AUTOMÁTICAS
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _verificarAlertas(List<DocumentSnapshot> docs) async {
+    final db = FirebaseFirestore.instance;
+    for (final doc in docs) {
+      final data = (doc.data() as Map<String, dynamic>?) ?? {};
+      final removidaEn = data['removida_en'] as Timestamp?;
+      final alerta30 = (data['alerta_30_enviada'] as bool?) ?? false;
+      final alerta60 = (data['alerta_60_enviada'] as bool?) ?? false;
+      final dias = _diasDesdeRemocion(removidaEn);
+      final calle = (data['calle'] as String?) ?? '';
+
+      if (dias >= 60 && !alerta60) {
+        await db.collection('notificaciones').add({
+          'titulo': '🚨 Dirección para eliminar',
+          'cuerpo': '$calle lleva 60 días removida. Verificar urgente.',
+          'tipo': 'alerta_60',
+          'leida': false,
+          'created_at': FieldValue.serverTimestamp(),
+          'para_roles': ['es_admin', 'es_admin_territorios'],
+        });
+        await doc.reference.update({'alerta_60_enviada': true});
+      } else if (dias >= 30 && !alerta30) {
+        await db.collection('notificaciones').add({
+          'titulo': '🔍 Verificar dirección removida',
+          'cuerpo': '$calle lleva 30 días removida. ¿Sigue sin hispanos?',
+          'tipo': 'alerta_30',
+          'leida': false,
+          'created_at': FieldValue.serverTimestamp(),
+          'para_roles': ['es_admin', 'es_admin_territorios'],
+        });
+        await doc.reference.update({'alerta_30_enviada': true});
       }
     }
   }
@@ -174,7 +378,7 @@ class _DevueltasTabState extends State<DevueltasTab> {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('direcciones_removidas')
-          .orderBy('removida_en', descending: true)
+          .orderBy('removida_en', descending: false)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -182,6 +386,12 @@ class _DevueltasTabState extends State<DevueltasTab> {
         }
 
         final docs = snapshot.data?.docs ?? [];
+
+        if (docs.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _verificarAlertas(docs);
+          });
+        }
 
         if (docs.isEmpty) {
           return Center(
@@ -197,7 +407,7 @@ class _DevueltasTabState extends State<DevueltasTab> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Las direcciones marcadas como "no hispanohablante"\naparecerán aquí',
+                  'Las direcciones "no hispanohablantes"\naparecerán aquí',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Colors.grey[400]),
                 ),
@@ -206,45 +416,104 @@ class _DevueltasTabState extends State<DevueltasTab> {
           );
         }
 
+        // Contadores por urgencia
+        final urgentes = docs.where((d) {
+          final data = (d.data() as Map<String, dynamic>?) ?? {};
+          return _diasDesdeRemocion(data['removida_en'] as Timestamp?) >= 60;
+        }).length;
+        final verificar = docs.where((d) {
+          final data = (d.data() as Map<String, dynamic>?) ?? {};
+          final dias = _diasDesdeRemocion(data['removida_en'] as Timestamp?);
+          return dias >= 30 && dias < 60;
+        }).length;
+
         // Agrupar por territorio
         final Map<String, List<DocumentSnapshot>> porTerritorio = {};
         for (final doc in docs) {
           final data = (doc.data() as Map<String, dynamic>?) ?? {};
           final terNombre =
-              (data['territorio_nombre'] as String?) ?? 'Sin territorio';
+              (data['territorio_nombre'] as String?)?.isNotEmpty == true
+                  ? data['territorio_nombre'] as String
+                  : (data['territorio_id'] as String?) ?? 'Sin territorio';
           porTerritorio.putIfAbsent(terNombre, () => []).add(doc);
         }
 
         return Column(
           children: [
-            // Header con contador
+            // ── Resumen ─────────────────────────────────────
             Container(
               margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: urgentes > 0
+                    ? Colors.red.shade50
+                    : verificar > 0
+                        ? Colors.orange.shade50
+                        : Colors.green.shade50,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.red.shade200, width: 1),
+                border: Border.all(
+                  color: urgentes > 0
+                      ? Colors.red.shade200
+                      : verificar > 0
+                          ? Colors.orange.shade200
+                          : Colors.green.shade200,
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.person_off, color: Colors.red.shade700, size: 20),
+                  Icon(
+                    urgentes > 0
+                        ? Icons.warning_amber
+                        : verificar > 0
+                            ? Icons.search
+                            : Icons.check_circle_outline,
+                    color: urgentes > 0
+                        ? Colors.red
+                        : verificar > 0
+                            ? Colors.orange
+                            : Colors.green,
+                    size: 20,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      '${docs.length} direcci${docs.length == 1 ? 'ón removida' : 'ones removidas'} — no hispanohablantes',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.red.shade700,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${docs.length} direcci${docs.length == 1 ? 'ón removida' : 'ones removidas'}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: urgentes > 0
+                                ? Colors.red.shade800
+                                : verificar > 0
+                                    ? Colors.orange.shade800
+                                    : Colors.green.shade800,
+                          ),
+                        ),
+                        if (urgentes > 0 || verificar > 0)
+                          Text(
+                            '${urgentes > 0 ? '$urgentes para eliminar  ' : ''}${verificar > 0 ? '$verificar para verificar' : ''}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: urgentes > 0
+                                  ? Colors.red.shade700
+                                  : Colors.orange.shade700,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
+                  if (urgentes > 0) _alertaBadge('$urgentes', Colors.red),
+                  if (verificar > 0) ...[
+                    const SizedBox(width: 6),
+                    _alertaBadge('$verificar', Colors.orange),
+                  ],
                 ],
               ),
             ),
 
-            // Lista agrupada por territorio
+            // ── Lista ────────────────────────────────────────
             Expanded(
               child: ListView.builder(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -256,7 +525,6 @@ class _DevueltasTabState extends State<DevueltasTab> {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header territorio
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         child: Row(
@@ -280,16 +548,12 @@ class _DevueltasTabState extends State<DevueltasTab> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Text(
-                              '${dirs.length} dir.',
-                              style: TextStyle(
-                                  fontSize: 11, color: Colors.grey[500]),
-                            ),
+                            Text('${dirs.length} dir.',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey[500])),
                           ],
                         ),
                       ),
-
-                      // Direcciones del territorio
                       ...dirs.map((doc) {
                         final data =
                             (doc.data() as Map<String, dynamic>?) ?? {};
@@ -301,6 +565,12 @@ class _DevueltasTabState extends State<DevueltasTab> {
                         final removidaPor =
                             (data['removida_por'] as String?) ?? '';
                         final removidaEn = data['removida_en'] as Timestamp?;
+                        final dias = _diasDesdeRemocion(removidaEn);
+                        final color = _colorPorDias(dias);
+                        final label = _labelPorDias(dias);
+                        final verificaciones =
+                            (data['verificaciones'] as List?) ?? [];
+
                         String fechaRemovida = '';
                         if (removidaEn != null) {
                           final dt = removidaEn.toDate();
@@ -312,119 +582,206 @@ class _DevueltasTabState extends State<DevueltasTab> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border(
-                              left: BorderSide(
-                                  color: Colors.red.shade300, width: 4),
-                              top: BorderSide(
-                                  color: Colors.red.shade100, width: 1),
-                              right: BorderSide(
-                                  color: Colors.red.shade100, width: 1),
-                              bottom: BorderSide(
-                                  color: Colors.red.shade100, width: 1),
-                            ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.red.withOpacity(0.06),
+                                color: color.withOpacity(0.08),
                                 blurRadius: 8,
                                 offset: const Offset(0, 2),
                               ),
                             ],
                           ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Dirección
-                                Row(
+                          child: Column(
+                            children: [
+                              // Barra de color superior
+                              Container(
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: const BorderRadius.only(
+                                    topLeft: Radius.circular(12),
+                                    topRight: Radius.circular(12),
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Icon(Icons.location_off,
-                                        color: Colors.red, size: 16),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(
-                                        '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 14,
-                                          color: Color(0xFF263238),
+                                    // Cabecera
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.location_off,
+                                            color: Colors.red, size: 16),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14,
+                                              color: Color(0xFF263238),
+                                            ),
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-
-                                // Info
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 4,
-                                  children: [
-                                    if (tarjetaOrigen.isNotEmpty)
-                                      _infoBadge(
-                                        Icons.credit_card,
-                                        'Tarjeta: $tarjetaOrigen',
-                                        Colors.grey,
-                                      ),
-                                    if (removidaPor.isNotEmpty)
-                                      _infoBadge(
-                                        Icons.person,
-                                        removidaPor,
-                                        Colors.orange,
-                                      ),
-                                    if (fechaRemovida.isNotEmpty)
-                                      _infoBadge(
-                                        Icons.calendar_today,
-                                        fechaRemovida,
-                                        Colors.grey,
-                                      ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                // Botones
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () =>
-                                            _restaurarDireccion(doc),
-                                        icon:
-                                            const Icon(Icons.restore, size: 15),
-                                        label: const Text('Restaurar',
-                                            style: TextStyle(fontSize: 12)),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor:
-                                              const Color(0xFF1B5E20),
-                                          side: const BorderSide(
-                                              color: Color(0xFF1B5E20)),
+                                        Container(
                                           padding: const EdgeInsets.symmetric(
-                                              vertical: 8),
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: color.withOpacity(0.1),
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                            border: Border.all(
+                                                color: color.withOpacity(0.4),
+                                                width: 1),
+                                          ),
+                                          child: Text(
+                                            label,
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: color,
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                      ],
                                     ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        onPressed: () =>
-                                            _eliminarPermanente(doc),
-                                        icon: const Icon(Icons.delete_forever,
-                                            size: 15),
-                                        label: const Text('Eliminar',
-                                            style: TextStyle(fontSize: 12)),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.red,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(
-                                              vertical: 8),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: [
+                                        if (tarjetaOrigen.isNotEmpty)
+                                          _infoBadge(Icons.credit_card,
+                                              tarjetaOrigen, Colors.grey),
+                                        if (removidaPor.isNotEmpty)
+                                          _infoBadge(Icons.person, removidaPor,
+                                              Colors.orange),
+                                        if (fechaRemovida.isNotEmpty)
+                                          _infoBadge(Icons.calendar_today,
+                                              fechaRemovida, Colors.grey),
+                                        if (verificaciones.isNotEmpty)
+                                          _infoBadge(
+                                              Icons.history,
+                                              '${verificaciones.length} verif.',
+                                              Colors.blue),
+                                      ],
+                                    ),
+
+                                    // Historial
+                                    if (verificaciones.isNotEmpty)
+                                      Container(
+                                        margin: const EdgeInsets.only(top: 8),
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade50,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Text('Historial:',
+                                                style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.blue)),
+                                            ...verificaciones.take(2).map((v) {
+                                              final vMap =
+                                                  v as Map<String, dynamic>;
+                                              final vFecha = vMap['fecha']
+                                                      is Timestamp
+                                                  ? (vMap['fecha'] as Timestamp)
+                                                      .toDate()
+                                                  : DateTime.now();
+                                              return Padding(
+                                                padding: const EdgeInsets.only(
+                                                    top: 2),
+                                                child: Text(
+                                                  '${vFecha.day}/${vFecha.month} · ${vMap['verificado_por']} · ${vMap['resultado']}${(vMap['nota'] as String?)?.isNotEmpty == true ? ' — ${vMap['nota']}' : ''}',
+                                                  style: const TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.blue),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ],
                                         ),
                                       ),
+
+                                    const SizedBox(height: 12),
+
+                                    // Botones
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton.icon(
+                                            onPressed: () =>
+                                                _verificarDireccion(doc),
+                                            icon: Icon(
+                                              dias >= 30
+                                                  ? Icons.search
+                                                  : Icons.check_circle_outline,
+                                              size: 15,
+                                            ),
+                                            label: Text(
+                                              dias >= 30
+                                                  ? 'Verificar'
+                                                  : 'Revisar',
+                                              style:
+                                                  const TextStyle(fontSize: 12),
+                                            ),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: color,
+                                              side: BorderSide(color: color),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 8),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: OutlinedButton.icon(
+                                            onPressed: () =>
+                                                _restaurarDireccion(doc),
+                                            icon: const Icon(Icons.restore,
+                                                size: 15),
+                                            label: const Text('Restaurar',
+                                                style: TextStyle(fontSize: 12)),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor:
+                                                  const Color(0xFF1B5E20),
+                                              side: const BorderSide(
+                                                  color: Color(0xFF1B5E20)),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 8),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        OutlinedButton(
+                                          onPressed: () =>
+                                              _eliminarPermanente(doc),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.red,
+                                            side: const BorderSide(
+                                                color: Colors.red),
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 8),
+                                          ),
+                                          child: const Icon(
+                                              Icons.delete_forever,
+                                              size: 16),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         );
                       }).toList(),
@@ -436,6 +793,21 @@ class _DevueltasTabState extends State<DevueltasTab> {
           ],
         );
       },
+    );
+  }
+
+  Widget _alertaBadge(String texto, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        texto,
+        style: const TextStyle(
+            color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+      ),
     );
   }
 

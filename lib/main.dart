@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'app/app.dart';
+import 'core/services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,5 +15,9 @@ void main() async {
       appId: "1:288799954885:web:32ae6dfbc7d871b30bddac",
     ),
   );
+
+  // Initialize FCM Notification Service
+  await NotificationService().initialize();
+
   runApp(const AraucariaApp());
 }
