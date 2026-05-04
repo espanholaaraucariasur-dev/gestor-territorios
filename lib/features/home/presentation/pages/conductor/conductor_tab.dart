@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+// Traducciones
+import '../../../../../core/l10n/translation_service.dart';
 
 class ConductorTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -285,8 +287,8 @@ class _ConductorTabState extends State<ConductorTab> {
                               tarjetasDirectas + tarjetasEnTerritorios;
                           final enviadas = todas.where((d) {
                             final data = d.data() as Map<String, dynamic>;
-                            final esDelConductor =
-                                data['conductor_email'] == widget.usuarioEmail ||
+                            final esDelConductor = data['conductor_email'] ==
+                                    widget.usuarioEmail ||
                                 data['enviado_a'] == widget.usuarioEmail;
                             if (!esDelConductor) return false;
                             final enviadoNombre =
@@ -403,7 +405,7 @@ class _ConductorTabState extends State<ConductorTab> {
                     .snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
-                    return const Text('Cargando...',
+                    return Text(context.t('loading'),
                         style: TextStyle(color: Colors.grey));
                   }
                   // Territorios donde el conductor recibió el envío

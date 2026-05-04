@@ -10,6 +10,8 @@ import 'dart:io';
 import '../../../auth/presentation/pages/login_page.dart';
 // CSV
 import 'package:file_picker/file_picker.dart';
+// Traducciones
+import '../../../../core/l10n/translation_service.dart';
 
 class PantallaHomeLegacy extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -485,9 +487,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   // ─────────────────────────────────────────────────────────
 
   Widget _idiomaChip(String idioma) {
-    final activo = _idiomaActual == idioma;
+    final activo = context.currentLanguage == idioma;
     return GestureDetector(
-      onTap: () => setState(() => _idiomaActual = idioma),
+      onTap: () {
+        setState(() => _idiomaActual = idioma);
+        context.changeLanguage(idioma);
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
@@ -689,9 +694,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         const Icon(Icons.language,
                             color: Colors.white70, size: 16),
                         const SizedBox(width: 8),
-                        const Text('Idioma',
-                            style:
-                                TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text(
+                          context.t('language'),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
+                        ),
                         const Spacer(),
                         _idiomaChip('ES'),
                         const SizedBox(width: 6),
@@ -713,8 +720,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       // Notificaciones
                       _drawerItem(
                         icon: Icons.notifications_none_outlined,
-                        label: 'Notificaciones',
-                        subtitle: 'Ver últimas alertas',
+                        label: context.t('notifications'),
+                        subtitle: context.t('last_alerts'),
                         color: const Color(0xFF1B5E20),
                         trailing: StreamBuilder<QuerySnapshot>(
                           stream: FirebaseFirestore.instance
@@ -751,11 +758,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         },
                       ),
 
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(20, 16, 20, 6),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
                         child: Text(
-                          'MODOS DE ACCESO',
-                          style: TextStyle(
+                          context.t('menu_modes'),
+                          style: const TextStyle(
                             fontSize: 10,
                             letterSpacing: 1.5,
                             fontWeight: FontWeight.w700,
@@ -767,8 +774,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       if (esAdmin)
                         _drawerModo(
                           icon: Icons.admin_panel_settings_outlined,
-                          label: 'Modo Admin',
-                          subtitle: 'Acceso completo',
+                          label: context.t('mode_admin'),
+                          subtitle: context.t('full_access'),
                           color: Colors.red,
                           activo: _modoAdminActivo,
                           onTap: () {
@@ -784,8 +791,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       if (esAdminTerritorios)
                         _drawerModo(
                           icon: Icons.map_outlined,
-                          label: 'Modo Territorios',
-                          subtitle: 'Gestión y envío',
+                          label: context.t('mode_territories'),
+                          subtitle: context.t('management_sending'),
                           color: Colors.purple,
                           activo: _modoAdminTerritoriosActivo,
                           onTap: () {
@@ -801,8 +808,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       if (esConductor)
                         _drawerModo(
                           icon: Icons.groups_outlined,
-                          label: 'Modo Conductor',
-                          subtitle: 'Grupo de predicación',
+                          label: context.t('mode_driver'),
+                          subtitle: context.t('preaching_group'),
                           color: const Color(0xFF1B5E20),
                           activo: _modoConductorActivo,
                           onTap: () {
@@ -831,7 +838,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
                       _drawerItem(
                         icon: Icons.home_outlined,
-                        label: 'Inicio',
+                        label: context.t('home'),
                         color: const Color(0xFF1B5E20),
                         activo: _indiceActual == 0 &&
                             !_modoAdminActivo &&
@@ -850,7 +857,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
                       _drawerItem(
                         icon: Icons.location_searching,
-                        label: 'Localizador',
+                        label: context.t('locator'),
                         color: Colors.blue,
                         activo: _indiceActual == 2 &&
                             !_modoAdminActivo &&
@@ -877,9 +884,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                 padding: const EdgeInsets.all(16),
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.logout, color: Colors.red, size: 18),
-                  label: const Text(
-                    'Cerrar sesión',
-                    style: TextStyle(color: Colors.red),
+                  label: Text(
+                    context.t('logout'),
+                    style: const TextStyle(color: Colors.red),
                   ),
                   onPressed: () {
                     Navigator.of(context).pop();

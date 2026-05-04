@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "288799954885",
+    "project_id": "territorio-sur-8b72c",
+    "storage_bucket": "territorio-sur-8b72c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:288799954885:android:c76dad42f61575970bddac",
+        "android_client_info": {
+          "package_name": "com.congregacion.araucaria_sur"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB2FakN7gtSzWekqRbDmKR_1WQCkBowXDs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

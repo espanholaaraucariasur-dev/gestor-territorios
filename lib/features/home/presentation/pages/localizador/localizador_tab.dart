@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+// Traducciones
+import '../../../../../core/l10n/translation_service.dart';
 
 class LocalizadorTab extends StatefulWidget {
   final String usuarioEmail;
@@ -82,17 +85,42 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     final normalizada = _normalizar(consulta);
 
     try {
-      // Buscar en direcciones_globales
-      final snap = await FirebaseFirestore.instance
+      // Buscar por direccion_normalizada exacta
+      final snapExacto = await FirebaseFirestore.instance
           .collection('direcciones_globales')
+          .where('direccion_normalizada', isEqualTo: normalizada)
+          .limit(1)
           .get();
 
-      for (final doc in snap.docs) {
-        final data = doc.data();
+      if (snapExacto.docs.isNotEmpty) {
+        final data = snapExacto.docs.first.data();
         final calle = data['calle']?.toString() ?? '';
         final comp = data['complemento']?.toString() ?? '';
-        final docNorm = _normalizar('$calle $comp');
-        if (docNorm == normalizada || _normalizar(calle) == normalizada) {
+        setState(() {
+          _buscando = false;
+          _buscado = true;
+          _encontrada = true;
+          _direccionEncontrada = data;
+          _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
+          _mostrarFormulario = false;
+        });
+        return;
+      }
+
+      // Buscar por calle parcial
+      final consultas = normalizada.split(' ').where((w) => w.length > 3).toList();
+      if (consultas.isNotEmpty) {
+        final snapParcial = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('direccion_normalizada', isGreaterThanOrEqualTo: consultas.first)
+            .where('direccion_normalizada', isLessThanOrEqualTo: '${consultas.first}')
+            .limit(5)
+            .get();
+
+        if (snapParcial.docs.isNotEmpty) {
+          final data = snapParcial.docs.first.data();
+          final calle = data['calle']?.toString() ?? '';
+          final comp = data['complemento']?.toString() ?? '';
           setState(() {
             _buscando = false;
             _buscado = true;
@@ -107,7 +135,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
       // Verificar si ya fue solicitada
       final pendientes = await FirebaseFirestore.instance
-          .collection('solicitudes_direcciones')
+          .collection('endereços_de_requisições')
           .where('direccion_normalizada', isEqualTo: normalizada)
           .where('estado', isEqualTo: 'pendiente')
           .get();
@@ -128,14 +156,13 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         _buscado = true;
         _encontrada = false;
         _mostrarFormulario = true;
-        _mensaje =
-            'No encontrada en el directorio. ¿Deseas reportarla al administrador?';
+        _mensaje = context.t('address_not_found');
       });
     } catch (e) {
       setState(() {
         _buscando = false;
         _buscado = true;
-        _mensaje = 'Error al buscar: $e';
+        _mensaje = '${context.t('error')}: $e';
       });
     }
   }
@@ -150,7 +177,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     if (_unidades.contains(u)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('La unidad "$u" ya fue agregada'),
+          content: Text(context.t('unit_already_added', args: [u])),
           backgroundColor: Colors.orange,
         ),
       );
@@ -171,8 +198,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     if (calle.isEmpty) return;
     if (_esCondominio && _unidades.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Agrega al menos una unidad del condominio'),
+        SnackBar(
+          content: Text(context.t('add_min_one_unit')),
           backgroundColor: Colors.orange,
         ),
       );
@@ -185,7 +212,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
     try {
       await FirebaseFirestore.instance
-          .collection('solicitudes_direcciones')
+          .collection('endereços_de_requisições')
           .add({
         'direccion_original': calle,
         'direccion_normalizada': normalizada,
@@ -290,22 +317,22 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                           color: Colors.white, size: 26),
                     ),
                     const SizedBox(width: 14),
-                    const Expanded(
+                    Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Localizador',
-                            style: TextStyle(
+                            context.t('locator'),
+                            style: const TextStyle(
                               color: Colors.white,
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                           Text(
-                            'Directorio de hispanohablantes',
+                            context.t('spanish_speakers_directory'),
                             style:
-                                TextStyle(color: Colors.white70, fontSize: 13),
+                                const TextStyle(color: Colors.white70, fontSize: 13),
                           ),
                         ],
                       ),
@@ -318,6 +345,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                 StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
                       .collection('direcciones_globales')
+                      .limit(500)
                       .snapshots(),
                   builder: (context, snap) {
                     final total = snap.data?.docs.length ?? 0;
@@ -366,9 +394,9 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'BUSCAR DIRECCIÓN',
-                      style: TextStyle(
+                    Text(
+                      context.t('search_address'),
+                      style: const TextStyle(
                         fontSize: 11,
                         letterSpacing: 1.2,
                         fontWeight: FontWeight.w700,
@@ -395,7 +423,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                   child: TextField(
                     controller: _calleCtrl,
                     decoration: InputDecoration(
-                      hintText: 'Ej: R. das Flores, 123 - Araucária',
+                      hintText: context.t('address_example'),
                       hintStyle: TextStyle(color: Colors.grey[400]),
                       prefixIcon: const Icon(Icons.search, color: _verde),
                       suffixIcon: ValueListenableBuilder<TextEditingValue>(
@@ -444,7 +472,9 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.search, size: 18),
-                    label: Text(_buscando ? 'Buscando...' : 'Buscar'),
+                    label: Text(_buscando
+                        ? context.t('searching')
+                        : context.t('search')),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _verde,
                       foregroundColor: Colors.white,
@@ -702,7 +732,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           // Complemento
           _campo(
             ctrl: _complementoCtrl,
-            hint: 'Complemento (Apto, Casa, Bloco...)',
+            hint: context.t('complement_example'),
             icon: Icons.home_outlined,
           ),
           const SizedBox(height: 10),
@@ -710,7 +740,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           // Detalles
           _campo(
             ctrl: _detallesCtrl,
-            hint: 'Referencia o detalles adicionales',
+            hint: context.t('reference_details'),
             icon: Icons.notes,
             maxLines: 2,
           ),
@@ -746,7 +776,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Es un condominio / edificio',
+                          context.t('is_condominium_building'),
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 13,
@@ -755,7 +785,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                           ),
                         ),
                         Text(
-                          'Múltiples unidades en la misma dirección',
+                          context.t('multiple_units_same_address'),
                           style:
                               TextStyle(fontSize: 11, color: Colors.grey[500]),
                         ),
@@ -789,9 +819,9 @@ class _LocalizadorTabState extends State<LocalizadorTab>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Unidades del condominio',
-                    style: TextStyle(
+                  Text(
+                    context.t('condominium_units'),
+                    style: const TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
                       color: Colors.blue,
@@ -799,7 +829,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Agrega cada apto, casa o unidad por separado',
+                    context.t('add_unit_separated'),
                     style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                   ),
                   const SizedBox(height: 10),
@@ -901,10 +931,11 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                           strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.send, size: 18),
               label: Text(_enviando
-                  ? 'Enviando...'
+                  ? context.t('sending')
                   : _esCondominio
-                      ? 'Enviar condominio (${_unidades.length} unidades)'
-                      : 'Enviar al administrador'),
+                      ? context
+                          .t('send_condominium', args: ['${_unidades.length}'])
+                      : context.t('send_admin')),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _verde,
                 foregroundColor: Colors.white,
@@ -952,9 +983,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         const SizedBox(height: 12),
         StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
-              .collection('solicitudes_direcciones')
+              .collection('endereços_de_requisições')
               .where('solicitante_email', isEqualTo: widget.usuarioEmail)
-              .orderBy('created_at', descending: true)
               .limit(10)
               .snapshots(),
           builder: (context, snap) {
@@ -962,7 +992,13 @@ class _LocalizadorTabState extends State<LocalizadorTab>
               return const Center(child: CircularProgressIndicator());
             }
 
-            final docs = snap.data?.docs ?? [];
+            final docs = (snap.data?.docs ?? [])
+              ..sort((a, b) {
+                final aTs = (a.data() as Map)['created_at'];
+                final bTs = (b.data() as Map)['created_at'];
+                if (aTs == null || bTs == null) return 0;
+                return (bTs as Timestamp).compareTo(aTs as Timestamp);
+              });
 
             if (docs.isEmpty) {
               return Container(

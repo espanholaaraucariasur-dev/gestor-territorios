@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/themes/app_theme.dart';
+import '../core/l10n/translation_service.dart';
 import '../features/auth/presentation/pages/splash_page.dart';
 
 class AraucariaApp extends StatelessWidget {
@@ -7,11 +8,14 @@ class AraucariaApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Congregación Araucaria Sur',
-      theme: AppTheme.light,
-      home: const SplashPage(),
+    return TranslationProvider(
+      initialLanguage: 'ES', // Idioma por defecto
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Congregación Araucaria Sur',
+        theme: AppTheme.light,
+        home: const SplashPage(),
+      ),
     );
   }
 }

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
+// Traducciones
+import '../../../../../core/l10n/translation_service.dart';
 
 class PublicadorTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -973,7 +976,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Hola, $nombrePublicador',
+                              context.t('hello_user', args: [nombrePublicador]),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 20,
@@ -982,7 +985,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Tus tarjetas asignadas este mes',
+                              context.t('your_assigned_cards'),
                               style: TextStyle(
                                 color: Colors.white.withOpacity(0.8),
                                 fontSize: 13,
@@ -1007,15 +1010,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         border: Border.all(
                             color: Colors.white.withOpacity(0.5), width: 1.5),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.map_outlined,
+                          const Icon(Icons.map_outlined,
                               color: Colors.white, size: 18),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Text(
-                            'Solicitar territorio',
-                            style: TextStyle(
+                            context.t('request_territory'),
+                            style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w600,
                               fontSize: 14,
@@ -1238,13 +1241,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'MIS TARJETAS',
-                    style: TextStyle(
+                  Text(
+                    context.t('my_cards'),
+                    style: const TextStyle(
                       fontSize: 11,
                       letterSpacing: 1.5,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF9E9E9E),
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1265,9 +1268,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(16),
                           ),
-                          child: const Center(
+                          child: Center(
                             child: Text(
-                              'No tienes tarjetas asignadas.',
+                              context.t('no_cards_assigned'),
                               style: TextStyle(color: Colors.grey),
                             ),
                           ),
@@ -1406,7 +1409,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                           context: context,
                                           builder: (c) => AlertDialog(
                                             title:
-                                                const Text('Devolver tarjeta'),
+                                                Text(context.t('return_card')),
                                             content: Text(
                                               '¿Devolver "$nombre"? Quedará disponible para otros.',
                                             ),
@@ -1414,7 +1417,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                               TextButton(
                                                 onPressed: () =>
                                                     Navigator.pop(c, false),
-                                                child: const Text('Cancelar'),
+                                                child:
+                                                    Text(context.t('cancel')),
                                               ),
                                               ElevatedButton(
                                                 onPressed: () =>
@@ -1422,7 +1426,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                                 style: ElevatedButton.styleFrom(
                                                     backgroundColor:
                                                         Colors.orange),
-                                                child: const Text('Devolver'),
+                                                child:
+                                                    Text(context.t('return')),
                                               ),
                                             ],
                                           ),
@@ -1476,5 +1481,76 @@ class _PublicadorTabState extends State<PublicadorTab> {
         ],
       ),
     );
+  }
+
+  Future<void> _abrirMapaRuta(String tarjetaId) async {
+    try {
+      // Obtener direcciones de la tarjeta
+      final dirsSnap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('tarjeta_id', isEqualTo: tarjetaId)
+          .where('estado', isNotEqualTo: 'removida')
+          .get();
+
+      if (dirsSnap.docs.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(context.t('no_new_notifications')),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Construir lista de waypoints
+      final direcciones = dirsSnap.docs.map((doc) {
+        final data = (doc.data() as Map<String, dynamic>?) ?? {};
+        final calle = (data['calle'] as String?) ?? '';
+        final complemento = (data['complemento'] as String?) ?? '';
+        return Uri.encodeComponent(
+            '$calle${complemento.isNotEmpty ? ', $complemento' : ''}, Araucária, PR, Brasil');
+      }).toList();
+
+      if (direcciones.isEmpty) return;
+
+      // Primera dirección como destino, resto como waypoints
+      final destino = direcciones.last;
+      final waypoints = direcciones.length > 1
+          ? direcciones.sublist(0, direcciones.length - 1).join('|')
+          : '';
+
+      // URL de Google Maps con origen GPS
+      String url =
+          'https://www.google.com/maps/dir/?api=1&origin=My+Location&destination=$destino&travelmode=driving';
+
+      if (waypoints.isNotEmpty) {
+        url += '&waypoints=$waypoints';
+      }
+
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(context.t('error_server')),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${context.t('error')}: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }

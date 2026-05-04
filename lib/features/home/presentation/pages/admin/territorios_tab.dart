@@ -514,12 +514,16 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
       final payload = {
         'conductor_email': tipo == 'conductor' ? destinatarioEmail : null,
         'publicador_email': tipo == 'publicador' ? destinatarioEmail : null,
+        'asignado_a': tipo == 'publicador' ? nombreDestinatario : null,
+        'asignado_en': tipo == 'publicador' ? FieldValue.serverTimestamp() : null,
         'estatus_envio': 'enviado',
         'enviado_a': destinatarioEmail,
         'enviado_nombre': nombreDestinatario,
         'enviado_tipo': tipo,
         'enviado_en': FieldValue.serverTimestamp(),
         'territorio_nombre': territoryNombre, // ✅ Nombre legible guardado
+        'disponible_para_publicadores': tipo == 'publicador' ? true : null,
+        'bloqueado': tipo == 'publicador' ? false : null,
       };
       if (tarjetaId != null) {
         await FirebaseFirestore.instance

@@ -4,6 +4,8 @@ import 'comunicacion_tab.dart';
 import 'usuarios_tab.dart';
 import 'mantenimiento_tab.dart';
 import '../../../../../core/services/csv_upload.dart';
+// Traducciones
+import '../../../../../core/l10n/translation_service.dart';
 
 class AdminTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -1595,13 +1597,13 @@ class _AdminTabState extends State<AdminTab> {
             child: Column(
               children: [
                 Row(
-                  children: const [
+                  children: [
                     Icon(Icons.admin_panel_settings, color: Color(0xFF1B5E20)),
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Administración',
-                        style: TextStyle(
+                        context.t('administration'),
+                        style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: Color(0xFF263238),
@@ -1638,26 +1640,26 @@ class _AdminTabState extends State<AdminTab> {
                   setState(() => _tabAnterior = index);
                 }
               },
-              tabs: const [
+              tabs: [
                 Tab(
-                  icon: Icon(Icons.folder_copy, color: Color(0xFF1B5E20)),
-                  text: 'Estructura',
+                  icon: const Icon(Icons.folder_copy, color: Color(0xFF1B5E20)),
+                  text: context.t('structure'),
                 ),
                 Tab(
-                  icon: Icon(Icons.map, color: Color(0xFF1B5E20)),
-                  text: 'Territorios',
+                  icon: const Icon(Icons.map, color: Color(0xFF1B5E20)),
+                  text: context.t('territories'),
                 ),
                 Tab(
-                  icon: Icon(Icons.campaign, color: Color(0xFF1B5E20)),
-                  text: 'Comunicación',
+                  icon: const Icon(Icons.campaign, color: Color(0xFF1B5E20)),
+                  text: context.t('communication'),
                 ),
                 Tab(
-                  icon: Icon(Icons.people_outline, color: Color(0xFF1B5E20)),
-                  text: 'Usuarios',
+                  icon: const Icon(Icons.people_outline, color: Color(0xFF1B5E20)),
+                  text: context.t('users'),
                 ),
                 Tab(
-                  icon: Icon(Icons.build, color: Color(0xFF1B5E20)),
-                  text: 'Mantenimiento',
+                  icon: const Icon(Icons.build, color: Color(0xFF1B5E20)),
+                  text: context.t('maintenance'),
                 ),
               ],
             ),
