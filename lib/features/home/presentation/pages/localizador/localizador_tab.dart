@@ -107,8 +107,11 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           .limit(500)
           .get();
 
-      // Búsqueda de subcadena: ¿el texto del usuario está contenido en la dirección?
+      // Búsqueda por tokens: cada palabra del usuario debe estar en la dirección
+      // Igual que el Google Script pero más flexible — busca token por token
       Map<String, dynamic>? encontrada;
+      int mejorScore = 0;
+
       for (final doc in snap.docs) {
         final data = doc.data();
         final calle = data['calle']?.toString() ?? '';
@@ -116,9 +119,78 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         final full  = '$calle $comp';
         final norm  = _normalizar(full);
 
-        if (norm.contains(consultaNorm)) {
+        // Dividir la consulta en tokens significativos
+        // Mapear abreviaciones comunes antes de tokenizar
+        final consultaExpandida = consultaNorm
+            .replaceAll('rua', 'r')
+            .replaceAll('avenida', 'av')
+            .replaceAll('alameda', 'al');
+
+        // Tokens: números y palabras de 2+ caracteres
+        final tokens = consultaExpandida
+            .replaceAll(RegExp(r'(\d+)'), ' \$1 ')
+            .trim()
+            .split(RegExp(r'\s+'))
+            .where((t) => t.length >= 2)
+            .toList();
+
+        if (tokens.isEmpty) continue;
+
+        // Contar cuántos tokens coinciden
+        int score = 0;
+        for (final token in tokens) {
+          if (norm.contains(token)) score++;
+        }
+
+        // Coincidencia total o muy alta
+        if (score == tokens.length && score > mejorScore) {
+          mejorScore = score;
           encontrada = data;
-          break;
+        }
+      }
+
+      // Si no hay coincidencia total, intentar con 70% de tokens
+      if (encontrada == null) {
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          final calle = data['calle']?.toString() ?? '';
+          final comp  = data['complemento']?.toString() ?? '';
+          final full  = '$calle $comp';
+          final norm  = _normalizar(full);
+
+          final consultaExpandida = consultaNorm
+              .replaceAll('rua', 'r')
+              .replaceAll('avenida', 'av')
+              .replaceAll('alameda', 'al');
+
+          final tokens = consultaExpandida
+              .replaceAll(RegExp(r'(\d+)'), ' \$1 ')
+              .trim()
+              .split(RegExp(r'\s+'))
+              .where((t) => t.length >= 2)
+              .toList();
+
+          if (tokens.isEmpty) continue;
+
+          // El número de calle DEBE coincidir si está presente
+          final numerosConsulta = tokens.where((t) => RegExp(r'^\d+$').hasMatch(t)).toList();
+          final numerosDir = RegExp(r'\d+').allMatches(norm).map((m) => m.group(0)!).toList();
+
+          bool numeroOk = numerosConsulta.isEmpty ||
+              numerosConsulta.any((n) => numerosDir.contains(n));
+
+          if (!numeroOk) continue;
+
+          int score = 0;
+          for (final token in tokens) {
+            if (norm.contains(token)) score++;
+          }
+
+          final umbral = (tokens.length * 0.6).ceil();
+          if (score >= umbral && score > mejorScore) {
+            mejorScore = score;
+            encontrada = data;
+          }
         }
       }
 
