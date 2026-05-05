@@ -135,7 +135,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
       // Verificar si ya fue solicitada
       final pendientes = await FirebaseFirestore.instance
-          .collection('endereços_de_requisições')
+          .collection('solicitudes_localizador')
           .where('direccion_normalizada', isEqualTo: normalizada)
           .where('estado', isEqualTo: 'pendiente')
           .get();
@@ -212,7 +212,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
     try {
       await FirebaseFirestore.instance
-          .collection('endereços_de_requisições')
+          .collection('solicitudes_localizador')
           .add({
         'direccion_original': calle,
         'direccion_normalizada': normalizada,
@@ -983,7 +983,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         const SizedBox(height: 12),
         StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
-              .collection('endereços_de_requisições')
+              .collection('solicitudes_localizador')
               .where('solicitante_email', isEqualTo: widget.usuarioEmail)
               .limit(10)
               .snapshots(),
