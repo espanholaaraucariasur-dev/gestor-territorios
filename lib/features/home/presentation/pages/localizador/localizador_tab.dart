@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
+// Algolia
+import '../../../../../core/services/algolia_service.dart';
 
 class LocalizadorTab extends StatefulWidget {
   final String usuarioEmail;
@@ -70,26 +72,14 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   }
 
   // ─────────────────────────────────────────────────────────
-  // BUSCAR — lógica de subcadena igual al Google Script
+  // BUSCAR CON ALGOLIA
   // ─────────────────────────────────────────────────────────
 
   Future<void> _buscar() async {
     final consulta = _calleCtrl.text.trim();
     if (consulta.isEmpty) return;
 
-    setState(() {
-      _buscando = true;
-      _buscado = false;
-      _encontrada = false;
-      _mostrarFormulario = false;
-      _direccionEncontrada = null;
-      _mensaje = '';
-    });
-
-    final consultaNorm = _normalizar(consulta);
-
-    // Mínimo 5 caracteres normalizados (igual que el Google Script)
-    if (consultaNorm.length < 5) {
+    if (consulta.length < 5) {
       setState(() {
         _buscando = false;
         _buscado = true;
@@ -100,117 +90,38 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       return;
     }
 
+    setState(() {
+      _buscando = true;
+      _buscado = false;
+      _encontrada = false;
+      _mostrarFormulario = false;
+      _direccionEncontrada = null;
+      _mensaje = '';
+    });
+
     try {
-      // Cargar todas las direcciones
-      final snap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .limit(500)
-          .get();
+      // 1. Buscar en Algolia
+      final resultado = await AlgoliaService.buscar(consulta);
 
-      // Búsqueda por tokens: cada palabra del usuario debe estar en la dirección
-      // Igual que el Google Script pero más flexible — busca token por token
-      Map<String, dynamic>? encontrada;
-      int mejorScore = 0;
-
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        final calle = data['calle']?.toString() ?? '';
-        final comp  = data['complemento']?.toString() ?? '';
-        final full  = '$calle $comp';
-        final norm  = _normalizar(full);
-
-        // Dividir la consulta en tokens significativos
-        // Mapear abreviaciones comunes antes de tokenizar
-        final consultaExpandida = consultaNorm
-            .replaceAll('rua', 'r')
-            .replaceAll('avenida', 'av')
-            .replaceAll('alameda', 'al');
-
-        // Tokens: extraer grupos de letras y grupos de números por separado
-        final tokens = RegExp(r'[a-z]+|\d+')
-            .allMatches(consultaExpandida)
-            .map((m) => m.group(0)!)
-            .where((t) => t.length >= 2)
-            .toList();
-
-        if (tokens.isEmpty) continue;
-
-        // Contar cuántos tokens coinciden
-        int score = 0;
-        for (final token in tokens) {
-          if (norm.contains(token)) score++;
-        }
-
-        // Coincidencia total o muy alta
-        if (score == tokens.length && score > mejorScore) {
-          mejorScore = score;
-          encontrada = data;
-        }
-      }
-
-      // Si no hay coincidencia total, intentar con 70% de tokens
-      if (encontrada == null) {
-        for (final doc in snap.docs) {
-          final data = doc.data();
-          final calle = data['calle']?.toString() ?? '';
-          final comp  = data['complemento']?.toString() ?? '';
-          final full  = '$calle $comp';
-          final norm  = _normalizar(full);
-
-          final consultaExpandida = consultaNorm
-              .replaceAll('rua', 'r')
-              .replaceAll('avenida', 'av')
-              .replaceAll('alameda', 'al');
-
-          final tokens = RegExp(r'[a-z]+|\d+')
-              .allMatches(consultaExpandida)
-              .map((m) => m.group(0)!)
-              .where((t) => t.length >= 2)
-              .toList();
-              .toList();
-
-          if (tokens.isEmpty) continue;
-
-          // El número de calle DEBE coincidir si está presente
-          final numerosConsulta = tokens.where((t) => RegExp(r'^\d+$').hasMatch(t)).toList();
-          final numerosDir = RegExp(r'\d+').allMatches(norm).map((m) => m.group(0)!).toList();
-
-          bool numeroOk = numerosConsulta.isEmpty ||
-              numerosConsulta.any((n) => numerosDir.contains(n));
-
-          if (!numeroOk) continue;
-
-          int score = 0;
-          for (final token in tokens) {
-            if (norm.contains(token)) score++;
-          }
-
-          final umbral = (tokens.length * 0.6).ceil();
-          if (score >= umbral && score > mejorScore) {
-            mejorScore = score;
-            encontrada = data;
-          }
-        }
-      }
-
-      if (encontrada != null) {
-        final calle = encontrada['calle']?.toString() ?? '';
-        final comp  = encontrada['complemento']?.toString() ?? '';
+      if (resultado != null) {
+        final calle = resultado['calle']?.toString() ?? '';
+        final comp  = resultado['complemento']?.toString() ?? '';
         setState(() {
           _buscando = false;
           _buscado = true;
           _encontrada = true;
-          _direccionEncontrada = encontrada;
+          _direccionEncontrada = resultado;
           _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
           _mostrarFormulario = false;
         });
         return;
       }
 
-      // No encontrada — verificar si ya fue solicitada
+      // 2. No encontrada — verificar si ya fue solicitada
+      final normalizada = _normalizar(consulta);
       final pendientes = await FirebaseFirestore.instance
           .collection('solicitudes_localizador')
-          .where('direccion_normalizada', isEqualTo: consultaNorm)
+          .where('direccion_normalizada', isEqualTo: normalizada)
           .where('estado', isEqualTo: 'pendiente')
           .get();
 

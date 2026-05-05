@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../../core/services/algolia_service.dart';
 
 class MantenimientoTab extends StatefulWidget {
   const MantenimientoTab({super.key});
@@ -634,6 +635,57 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     }
   }
 
+  Future<void> _sincronizarAlgolia() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🔍 Sincronizar con Algolia'),
+        content: const Text(
+          'Esto enviará todas las direcciones al buscador inteligente.\n\n'
+          'El localizador podrá encontrar direcciones aunque el usuario escriba '
+          'con errores tipográficos o abreviaciones.\n\n'
+          '¿Continuar?',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+            child: const Text('Sincronizar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('⏳ Sincronizando direcciones con Algolia...'),
+        duration: Duration(seconds: 60),
+      ),
+    );
+
+    final resultado = await AlgoliaService.sincronizarTodas();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          resultado['exito'] == true
+              ? '✅ ${resultado['mensaje']}'
+              : '❌ ${resultado['mensaje']}',
+        ),
+        backgroundColor:
+            resultado['exito'] == true ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -697,6 +749,30 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                 'Elimina TODAS las direcciones del directorio global permanentemente.',
             color: Colors.red.shade900,
             onPressed: _borrarTodasDirecciones,
+          ),
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 8),
+          const Text(
+            '🔍 Buscador Inteligente (Algolia)',
+            style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Sincroniza las direcciones con Algolia para que el localizador funcione con búsqueda inteligente.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          _buildBotonMantenimiento(
+            icono: Icons.cloud_sync,
+            titulo: 'Sincronizar con Algolia',
+            descripcion:
+                'Envía todas las direcciones al índice de búsqueda. Ejecutar cuando se agreguen nuevas direcciones.',
+            color: Colors.blue,
+            onPressed: _sincronizarAlgolia,
           ),
         ],
       ),
