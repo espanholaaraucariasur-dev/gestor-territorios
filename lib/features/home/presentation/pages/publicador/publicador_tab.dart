@@ -612,9 +612,27 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                     // ── Botones ──────────────────────────────
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
-                      child: Row(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: Column(
                         children: [
+                          // Botón Ver Ruta
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _abrirRutaGoogleMaps(direcciones),
+                              icon: const Icon(Icons.map_outlined, size: 18),
+                              label: const Text('Ver ruta en Google Maps',
+                                  style: TextStyle(fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue.shade700,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
                           Expanded(
                             child: OutlinedButton(
                               onPressed: () => setLocalState(() {
@@ -666,6 +684,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           ),
                         ],
                       ),
+                        ],
+                      ),
                     ),
                   ],
                 );
@@ -675,6 +695,47 @@ class _PublicadorTabState extends State<PublicadorTab> {
         );
       },
     );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // RUTA GOOGLE MAPS
+  // ───────────────────────────────────────────────────────────
+
+  Future<void> _abrirRutaGoogleMaps(List<QueryDocumentSnapshot> direcciones) async {
+    if (direcciones.isEmpty) return;
+
+    final List<String> dirs = direcciones.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      final calle = (data['calle'] as String? ?? '').trim();
+      final complemento = (data['complemento'] as String? ?? '').trim();
+      final full = complemento.isNotEmpty ? '$calle, $complemento' : calle;
+      return Uri.encodeComponent(full);
+    }).where((d) => d.isNotEmpty).toList();
+
+    if (dirs.isEmpty) return;
+
+    String url;
+    if (dirs.length == 1) {
+      url = 'https://www.google.com/maps/dir/?api=1&destination=${dirs.first}&travelmode=walking';
+    } else {
+      final destino = dirs.last;
+      final waypoints = dirs.sublist(0, dirs.length - 1).join('|');
+      url = 'https://www.google.com/maps/dir/?api=1&destination=$destino&waypoints=$waypoints&travelmode=walking';
+    }
+
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir Google Maps'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   // ───────────────────────────────────────────────────────────
