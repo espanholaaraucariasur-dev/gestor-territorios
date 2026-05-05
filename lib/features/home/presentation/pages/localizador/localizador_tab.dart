@@ -40,33 +40,37 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   // HELPERS
   // ─────────────────────────────────────────────────────────
 
+  // ─────────────────────────────────────────────────────────
+  // NORMALIZACIÓN — port exacto del Google Script
+  // Elimina tildes, puntuación, espacios. Solo letras y números.
+  // ─────────────────────────────────────────────────────────
+
   String _normalizar(String s) {
+    if (s.isEmpty) return '';
     var t = s.toLowerCase();
-    t = t.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
-    t = t.replaceAll(RegExp(r'\b\d{5}-?\d{3}\b'), ' ');
-    t = t.replaceAll(RegExp(r'\b(n\.?|no\.?|nº|n°)\b'), ' ');
-    t = t.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
-    t = t.replaceAll('apto', 'apartamento');
-    t = t.replaceAll('apt', 'apartamento');
-    t = t.replaceAll('ap.', 'apartamento');
-    t = t.replaceAll('dpto', 'departamento');
-    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    // Eliminar tildes y diacríticos
+    const withAccent    = 'áàãâäéèêëíìîïóòõôöúùûüçñ';
+    const withoutAccent = 'aaaааeeeeiiiioooooeuuuucn';
+    // Mapa de sustitución carácter a carácter
+    final Map<String, String> accentMap = {
+      'á':'a','à':'a','ã':'a','â':'a','ä':'a',
+      'é':'e','è':'e','ê':'e','ë':'e',
+      'í':'i','ì':'i','î':'i','ï':'i',
+      'ó':'o','ò':'o','õ':'o','ô':'o','ö':'o',
+      'ú':'u','ù':'u','û':'u','ü':'u',
+      'ç':'c','ñ':'n',
+    };
+    t = t.splitMapJoin('', onNonMatch: (ch) => accentMap[ch] ?? ch);
+
+    // Eliminar todo excepto letras a-z y dígitos 0-9
+    t = t.replaceAll(RegExp(r'[^a-z0-9]'), '');
+
     return t;
   }
 
-  String _tiempoRelativo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return 'hace unos segundos';
-    if (diff.inMinutes < 60) return 'hace ${diff.inMinutes} min';
-    if (diff.inHours < 24) return 'hace ${diff.inHours}h';
-    if (diff.inDays < 7) return 'hace ${diff.inDays}d';
-    if (diff.inDays < 30) return 'hace ${(diff.inDays / 7).floor()}sem';
-    if (diff.inDays < 365) return 'hace ${(diff.inDays / 30).floor()}m';
-    return 'hace ${(diff.inDays / 365).floor()}a';
-  }
-
   // ─────────────────────────────────────────────────────────
-  // BUSCAR
+  // BUSCAR — lógica de subcadena igual al Google Script
   // ─────────────────────────────────────────────────────────
 
   Future<void> _buscar() async {
@@ -82,88 +86,60 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       _mensaje = '';
     });
 
-    final normalizada = _normalizar(consulta);
+    final consultaNorm = _normalizar(consulta);
+
+    // Mínimo 5 caracteres normalizados (igual que el Google Script)
+    if (consultaNorm.length < 5) {
+      setState(() {
+        _buscando = false;
+        _buscado = true;
+        _encontrada = false;
+        _mostrarFormulario = false;
+        _mensaje = 'Dirección demasiado corta para buscar.';
+      });
+      return;
+    }
 
     try {
-      // Buscar por direccion_normalizada exacta
-      final snapExacto = await FirebaseFirestore.instance
+      // Cargar todas las direcciones
+      final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
-          .where('direccion_normalizada', isEqualTo: normalizada)
-          .limit(1)
+          .limit(500)
           .get();
 
-      if (snapExacto.docs.isNotEmpty) {
-        final data = snapExacto.docs.first.data();
+      // Búsqueda de subcadena: ¿el texto del usuario está contenido en la dirección?
+      Map<String, dynamic>? encontrada;
+      for (final doc in snap.docs) {
+        final data = doc.data();
         final calle = data['calle']?.toString() ?? '';
-        final comp = data['complemento']?.toString() ?? '';
+        final comp  = data['complemento']?.toString() ?? '';
+        final full  = '$calle $comp';
+        final norm  = _normalizar(full);
+
+        if (norm.contains(consultaNorm)) {
+          encontrada = data;
+          break;
+        }
+      }
+
+      if (encontrada != null) {
+        final calle = encontrada['calle']?.toString() ?? '';
+        final comp  = encontrada['complemento']?.toString() ?? '';
         setState(() {
           _buscando = false;
           _buscado = true;
           _encontrada = true;
-          _direccionEncontrada = data;
+          _direccionEncontrada = encontrada;
           _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
           _mostrarFormulario = false;
         });
         return;
       }
 
-      // Buscar por coincidencia parcial en memoria
-      // Excluir palabras genéricas que aparecen en todas las direcciones
-      const palabrasGenericas = {
-        'araucaria', 'iguacu', 'iguaçu', 'parana', 'brasil', 'brazil',
-        'centro', 'rua', 'rue', 'avenida', 'av', 'alameda', 'travessa',
-        'pr', 'br', 'sul', 'norte', 'leste', 'oeste',
-      };
-      final consultas = normalizada
-          .split(' ')
-          .where((w) => w.length > 2 && !palabrasGenericas.contains(w))
-          .toList();
-
-      if (consultas.isNotEmpty) {
-        final snapTodas = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .limit(500)
-            .get();
-
-        // Calcular score por coincidencias — más palabras coinciden = mejor resultado
-        final scored = <MapEntry<int, Map<String, dynamic>>>[];
-        for (final doc in snapTodas.docs) {
-          final dirNorm = (doc.data()['direccion_normalizada'] as String? ?? '').toLowerCase();
-          int score = 0;
-          for (final palabra in consultas) {
-            if (dirNorm.contains(palabra)) score++;
-          }
-          if (score == consultas.length) {
-            // Coincidencia exacta de todas las palabras
-            scored.add(MapEntry(score * 2, doc.data() as Map<String, dynamic>));
-          } else if (score >= (consultas.length * 0.7).ceil()) {
-            // Coincidencia parcial de al menos 70%
-            scored.add(MapEntry(score, doc.data() as Map<String, dynamic>));
-          }
-        }
-
-        scored.sort((a, b) => b.key.compareTo(a.key));
-
-        if (scored.isNotEmpty) {
-          final data = scored.first.value;
-          final calle = data['calle']?.toString() ?? '';
-          final comp = data['complemento']?.toString() ?? '';
-          setState(() {
-            _buscando = false;
-            _buscado = true;
-            _encontrada = true;
-            _direccionEncontrada = data;
-            _mensaje = calle + (comp.isNotEmpty ? ' - ' + comp : '');
-            _mostrarFormulario = false;
-          });
-          return;
-        }
-      }
-
-      // Verificar si ya fue solicitada
+      // No encontrada — verificar si ya fue solicitada
       final pendientes = await FirebaseFirestore.instance
           .collection('solicitudes_localizador')
-          .where('direccion_normalizada', isEqualTo: normalizada)
+          .where('direccion_normalizada', isEqualTo: consultaNorm)
           .where('estado', isEqualTo: 'pendiente')
           .get();
 
@@ -173,7 +149,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           _buscado = true;
           _encontrada = false;
           _mostrarFormulario = false;
-          _mensaje = 'Ya fue solicitada y está pendiente de revisión.';
+          _mensaje = context.t('already_requested');
         });
         return;
       }
@@ -185,16 +161,31 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         _mostrarFormulario = true;
         _mensaje = context.t('address_not_found');
       });
+
     } catch (e) {
       setState(() {
         _buscando = false;
         _buscado = true;
-        _mensaje = '${context.t('error')}: $e';
+        _encontrada = false;
+        _mostrarFormulario = true;
+        _mensaje = context.t('address_not_found');
       });
     }
   }
 
-  // ─────────────────────────────────────────────────────────
+
+  String _tiempoRelativo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'hace unos segundos';
+    if (diff.inMinutes < 60) return 'hace \${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'hace \${diff.inHours}h';
+    if (diff.inDays < 7) return 'hace \${diff.inDays}d';
+    if (diff.inDays < 30) return 'hace \${(diff.inDays / 7).floor()}sem';
+    if (diff.inDays < 365) return 'hace \${(diff.inDays / 30).floor()}m';
+    return 'hace \${(diff.inDays / 365).floor()}a';
+  }
+
+    // ─────────────────────────────────────────────────────────
   // AGREGAR UNIDAD DE CONDOMINIO
   // ─────────────────────────────────────────────────────────
 
