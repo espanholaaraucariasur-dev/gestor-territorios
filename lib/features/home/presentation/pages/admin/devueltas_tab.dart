@@ -1125,7 +1125,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   Widget _buildSolicitudes() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('solicitudes_direcciones')
+          .collection('solicitudes_localizador')
           .where('estado', isEqualTo: 'pendiente')
           .orderBy('created_at', descending: true)
           .snapshots(),

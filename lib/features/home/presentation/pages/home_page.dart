@@ -783,6 +783,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                               _modoAdminActivo = true;
                               _modoAdminTerritoriosActivo = false;
                               _modoConductorActivo = false;
+                              _indiceActual = 0;
                             });
                             Navigator.of(context).pop();
                           },
@@ -800,6 +801,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                               _modoAdminTerritoriosActivo = true;
                               _modoAdminActivo = false;
                               _modoConductorActivo = false;
+                              _indiceActual = 0;
                             });
                             Navigator.of(context).pop();
                           },
