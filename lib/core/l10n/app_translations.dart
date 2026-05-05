@@ -159,7 +159,6 @@ class AppTranslations {
 
       // === LOCALIZADOR TAB ===
       'locator_title': 'Localizador',
-      'locator': 'Localizador',
       'spanish_speakers_directory': 'Directorio de hispanohablantes',
       'directory_spanish_speakers': 'Directorio de hispanohablantes',
       'search_address': 'Ej: R. das Flores, 123 - Araucária',
@@ -464,7 +463,6 @@ class AppTranslations {
 
       // === LOCALIZADOR TAB ===
       'locator_title': 'Localizador',
-      'locator': 'Localizador',
       'spanish_speakers_directory': 'Diretório de hispânicos',
       'directory_spanish_speakers': 'Diretório de hispânicos',
       'search_address': 'Ex: R. das Flores, 123 - Araucária',
