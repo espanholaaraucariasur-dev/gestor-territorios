@@ -515,12 +515,9 @@ class _ConductorTabState extends State<ConductorTab> {
                                   return const SizedBox.shrink();
                                 }
 
+                                // Sin tarjetas — ocultar territorio también
                                 if (todasTarjetas.isEmpty) {
-                                  return const Padding(
-                                    padding: EdgeInsets.all(12),
-                                    child: Text('Sin tarjetas',
-                                        style: TextStyle(color: Colors.grey)),
-                                  );
+                                  return const SizedBox.shrink();
                                 }
 
                                 return Column(
@@ -686,10 +683,15 @@ class _ConductorTabState extends State<ConductorTab> {
                     final esParaEste = d['enviado_a'] == widget.usuarioEmail ||
                         d['enviado_a'] == (widget.usuarioData['nombre'] ?? '');
                     if (!esParaEste) return false;
+                    // Excluir tarjetas ya reenviadas a un publicador
+                    final publicadorEmail = d['publicador_email']?.toString() ?? '';
+                    if (publicadorEmail.isNotEmpty) return false;
+                    // Excluir tarjetas devueltas o completadas
+                    if (d['estatus_envio']?.toString() == 'devuelto') return false;
+                    if (d['completada'] == true) return false;
                     // Excluir tarjetas que vienen dentro de un territorio
                     // (esas se ven en la sección TERRITORIOS)
                     final terId = doc.reference.parent.parent?.id ?? '';
-                    // Si el territorio también fue enviado a este conductor, no mostrar aquí
                     final territorioEnviado = snapshot.data!.docs.any((t) =>
                         t.id == terId &&
                         ((t.data() as Map<String, dynamic>)['enviado_a'] ==

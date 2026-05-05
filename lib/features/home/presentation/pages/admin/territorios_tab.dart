@@ -986,41 +986,38 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            nombre,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 15,
-                                            ),
-                                          ),
-                                        ),
-                                        if (data['enviado_a'] != null)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.orange.shade100,
-                                              borderRadius:
-                                                  BorderRadius.circular(
-                                                8,
-                                              ),
-                                            ),
-                                            child: Text(
-                                              'Enviado a: ${data['enviado_a']}',
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.orange.shade900,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ),
-                                      ],
+                                    Text(
+                                      nombre,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
                                     ),
+                                    if (data['enviado_a'] != null) ...[
+                                      const SizedBox(height: 3),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.shade100,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          'Enviado a: ${data['enviado_nombre'] ?? data['enviado_a']}',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.orange.shade900,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                        ),
+                                      ),
+                                    ],
                                     const SizedBox(height: 4),
                                     StreamBuilder<QuerySnapshot>(
                                       stream: FirebaseFirestore.instance
