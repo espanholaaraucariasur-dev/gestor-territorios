@@ -126,11 +126,10 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             .replaceAll('avenida', 'av')
             .replaceAll('alameda', 'al');
 
-        // Tokens: números y palabras de 2+ caracteres
-        final tokens = consultaExpandida
-            .replaceAll(RegExp(r'(\d+)'), ' \$1 ')
-            .trim()
-            .split(RegExp(r'\s+'))
+        // Tokens: extraer grupos de letras y grupos de números por separado
+        final tokens = RegExp(r'[a-z]+|\d+')
+            .allMatches(consultaExpandida)
+            .map((m) => m.group(0)!)
             .where((t) => t.length >= 2)
             .toList();
 
@@ -163,11 +162,11 @@ class _LocalizadorTabState extends State<LocalizadorTab>
               .replaceAll('avenida', 'av')
               .replaceAll('alameda', 'al');
 
-          final tokens = consultaExpandida
-              .replaceAll(RegExp(r'(\d+)'), ' \$1 ')
-              .trim()
-              .split(RegExp(r'\s+'))
+          final tokens = RegExp(r'[a-z]+|\d+')
+              .allMatches(consultaExpandida)
+              .map((m) => m.group(0)!)
               .where((t) => t.length >= 2)
+              .toList();
               .toList();
 
           if (tokens.isEmpty) continue;
