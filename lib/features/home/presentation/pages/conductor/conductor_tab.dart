@@ -453,7 +453,27 @@ class _ConductorTabState extends State<ConductorTab> {
                             '${dt.day}/${dt.month} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
                       }
 
-                      return Container(
+                      return StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('territorios')
+                            .doc(doc.id)
+                            .collection('tarjetas')
+                            .snapshots(),
+                        builder: (context, tarjCheck) {
+                          if (!tarjCheck.hasData) return const SizedBox.shrink();
+                          final todasCheck = tarjCheck.data!.docs;
+                          final pendientesCheck = todasCheck.where((t) {
+                            final td = (t.data() as Map<String, dynamic>?) ?? {};
+                            final asignadoA = (td['asignado_a'] as String?) ?? '';
+                            final envNombre = (td['enviado_nombre'] as String?) ?? '';
+                            return asignadoA.isEmpty && envNombre.isEmpty;
+                          }).toList();
+                          // Ocultar territorio si no tiene tarjetas o todas están enviadas
+                          if (todasCheck.isEmpty || pendientesCheck.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+
+                          return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
                           color: Colors.white,
@@ -639,6 +659,8 @@ class _ConductorTabState extends State<ConductorTab> {
                             const SizedBox(height: 8),
                           ],
                         ),
+                      );
+                        }, // cierre StreamBuilder outer
                       );
                     }).toList(),
                   );
