@@ -108,20 +108,44 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       }
 
       // Buscar por coincidencia parcial en memoria
-      final consultas = normalizada.split(' ').where((w) => w.length > 2).toList();
+      // Excluir palabras genéricas que aparecen en todas las direcciones
+      const palabrasGenericas = {
+        'araucaria', 'iguacu', 'iguaçu', 'parana', 'brasil', 'brazil',
+        'centro', 'rua', 'rue', 'avenida', 'av', 'alameda', 'travessa',
+        'pr', 'br', 'sul', 'norte', 'leste', 'oeste',
+      };
+      final consultas = normalizada
+          .split(' ')
+          .where((w) => w.length > 2 && !palabrasGenericas.contains(w))
+          .toList();
+
       if (consultas.isNotEmpty) {
         final snapTodas = await FirebaseFirestore.instance
             .collection('direcciones_globales')
             .limit(500)
             .get();
 
-        final coincidencias = snapTodas.docs.where((doc) {
+        // Calcular score por coincidencias — más palabras coinciden = mejor resultado
+        final scored = <MapEntry<int, Map<String, dynamic>>>[];
+        for (final doc in snapTodas.docs) {
           final dirNorm = (doc.data()['direccion_normalizada'] as String? ?? '').toLowerCase();
-          return consultas.every((palabra) => dirNorm.contains(palabra));
-        }).toList();
+          int score = 0;
+          for (final palabra in consultas) {
+            if (dirNorm.contains(palabra)) score++;
+          }
+          if (score == consultas.length) {
+            // Coincidencia exacta de todas las palabras
+            scored.add(MapEntry(score * 2, doc.data() as Map<String, dynamic>));
+          } else if (score >= (consultas.length * 0.7).ceil()) {
+            // Coincidencia parcial de al menos 70%
+            scored.add(MapEntry(score, doc.data() as Map<String, dynamic>));
+          }
+        }
 
-        if (coincidencias.isNotEmpty) {
-          final data = coincidencias.first.data() as Map<String, dynamic>;
+        scored.sort((a, b) => b.key.compareTo(a.key));
+
+        if (scored.isNotEmpty) {
+          final data = scored.first.value;
           final calle = data['calle']?.toString() ?? '';
           final comp = data['complemento']?.toString() ?? '';
           setState(() {
