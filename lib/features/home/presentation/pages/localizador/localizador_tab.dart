@@ -107,18 +107,21 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         return;
       }
 
-      // Buscar por calle parcial
-      final consultas = normalizada.split(' ').where((w) => w.length > 3).toList();
+      // Buscar por coincidencia parcial en memoria
+      final consultas = normalizada.split(' ').where((w) => w.length > 2).toList();
       if (consultas.isNotEmpty) {
-        final snapParcial = await FirebaseFirestore.instance
+        final snapTodas = await FirebaseFirestore.instance
             .collection('direcciones_globales')
-            .where('direccion_normalizada', isGreaterThanOrEqualTo: consultas.first)
-            .where('direccion_normalizada', isLessThanOrEqualTo: '${consultas.first}')
-            .limit(5)
+            .limit(500)
             .get();
 
-        if (snapParcial.docs.isNotEmpty) {
-          final data = snapParcial.docs.first.data();
+        final coincidencias = snapTodas.docs.where((doc) {
+          final dirNorm = (doc.data()['direccion_normalizada'] as String? ?? '').toLowerCase();
+          return consultas.every((palabra) => dirNorm.contains(palabra));
+        }).toList();
+
+        if (coincidencias.isNotEmpty) {
+          final data = coincidencias.first.data() as Map<String, dynamic>;
           final calle = data['calle']?.toString() ?? '';
           final comp = data['complemento']?.toString() ?? '';
           setState(() {
@@ -126,7 +129,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             _buscado = true;
             _encontrada = true;
             _direccionEncontrada = data;
-            _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
+            _mensaje = calle + (comp.isNotEmpty ? ' - ' + comp : '');
             _mostrarFormulario = false;
           });
           return;
@@ -339,38 +342,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
 
-                // Stats rápidas
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('direcciones_globales')
-                      .limit(500)
-                      .snapshots(),
-                  builder: (context, snap) {
-                    final total = snap.data?.docs.length ?? 0;
-                    final activas = snap.data?.docs.where((d) {
-                          final data =
-                              (d.data() as Map<String, dynamic>?) ?? {};
-                          return data['estado'] != 'temporal' &&
-                              data['estado'] != 'removida';
-                        }).length ??
-                        0;
-
-                    return Row(
-                      children: [
-                        _statChip(
-                            Icons.home_work_outlined, '$total', 'Registradas'),
-                        const SizedBox(width: 10),
-                        _statChip(
-                            Icons.check_circle_outline, '$activas', 'Activas'),
-                        const SizedBox(width: 10),
-                        _statChip(
-                            Icons.apartment, '${total - activas}', 'Otras'),
-                      ],
-                    );
-                  },
-                ),
               ],
             ),
           ),
