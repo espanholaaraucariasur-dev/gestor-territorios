@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../../core/services/algolia_service.dart';
+import '../../../../../core/services/algolia_service.dart';
 
 class MantenimientoTab extends StatefulWidget {
   const MantenimientoTab({super.key});
