@@ -748,35 +748,32 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
     if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
 
-    // Construir URL de Google Maps con todas las paradas
-    // Formato que abre la app nativa con ruta completa
-    String url;
+    // Construir URL — codificar cada dirección individualmente
+    // El separador | debe ir LITERAL (no como %7C) para que Maps lo interprete
+    String urlString;
+
+    // Función que codifica solo los caracteres especiales de la dirección
+    // pero preserva el | como separador de waypoints
+    String enc(String s) => Uri.encodeQueryComponent(s).replaceAll('+', '%20');
 
     if (dirs.length == 1) {
-      final destino = Uri.encodeComponent(dirs.first);
-      final origem = origenStr != null
-          ? '&origin=${Uri.encodeComponent(origenStr)}'
-          : '';
-      url = 'https://www.google.com/maps/dir/?api=1$origem&destination=$destino&travelmode=walking';
+      final destino = enc(dirs.first);
+      final origem = origenStr != null ? '&origin=${enc(origenStr)}' : '';
+      urlString = 'https://www.google.com/maps/dir/?api=1$origem&destination=$destino&travelmode=walking';
     } else {
-      // Con múltiples paradas: origen + waypoints + destino final
-      final destino = Uri.encodeComponent(dirs.last);
+      final destino = enc(dirs.last);
+      // Waypoints separados por | literal — NO usar Uri.encodeComponent que lo convierte en %7C
       final waypoints = dirs
           .sublist(0, dirs.length - 1)
-          .map(Uri.encodeComponent)
+          .map(enc)
           .join('|');
-
-      final origem = origenStr != null
-          ? '&origin=${Uri.encodeComponent(origenStr)}'
-          : '';
-
-      url = 'https://www.google.com/maps/dir/?api=1$origem'
-          '&destination=$destino'
-          '&waypoints=$waypoints'
-          '&travelmode=walking';
+      final origem = origenStr != null ? '&origin=${enc(origenStr)}' : '';
+      urlString = 'https://www.google.com/maps/dir/?api=1$origem&destination=$destino&waypoints=$waypoints&travelmode=walking';
     }
 
-    final uri = Uri.parse(url);
+    // Usar Uri.parse con allowMalformed para evitar que re-codifique el |
+    // O mejor — usar launchUrl con el string directo via Uri.parse del scheme solamente
+    final uri = Uri.parse(urlString);
 
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
