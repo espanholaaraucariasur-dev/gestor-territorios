@@ -704,26 +704,50 @@ class _PublicadorTabState extends State<PublicadorTab> {
   Future<void> _abrirRutaGoogleMaps(List<QueryDocumentSnapshot> direcciones) async {
     if (direcciones.isEmpty) return;
 
+    // Construir lista de direcciones como texto limpio
     final List<String> dirs = direcciones.map((doc) {
       final data = doc.data() as Map<String, dynamic>;
       final calle = (data['calle'] as String? ?? '').trim();
       final complemento = (data['complemento'] as String? ?? '').trim();
-      final full = complemento.isNotEmpty ? '$calle, $complemento' : calle;
-      return Uri.encodeComponent(full);
+      // Agregar ciudad para mejor resolución de Maps
+      final full = complemento.isNotEmpty
+          ? '$calle, $complemento, Araucária, PR'
+          : '$calle, Araucária, PR';
+      return full;
     }).where((d) => d.isNotEmpty).toList();
 
     if (dirs.isEmpty) return;
 
-    String url;
+    Uri uri;
+
     if (dirs.length == 1) {
-      url = 'https://www.google.com/maps/dir/?api=1&destination=${dirs.first}&travelmode=walking';
+      // Una sola dirección — abrir destino directamente
+      final destino = Uri.encodeComponent(dirs.first);
+      uri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=$destino&travelmode=walking');
     } else {
-      final destino = dirs.last;
-      final waypoints = dirs.sublist(0, dirs.length - 1).join('|');
-      url = 'https://www.google.com/maps/dir/?api=1&destination=$destino&waypoints=$waypoints&travelmode=walking';
+      // Múltiples — usar formato que abre app nativa de Maps en Android
+      // Formato: comgooglemaps:// para app nativa, fallback a URL web
+      final destino = Uri.encodeComponent(dirs.last);
+      final waypoints = dirs
+          .sublist(0, dirs.length - 1)
+          .map((d) => Uri.encodeComponent(d))
+          .join('%7C'); // %7C = | codificado
+
+      // Intentar primero con app nativa de Google Maps
+      final uriNativa = Uri.parse(
+          'comgooglemaps://?waypoints=${dirs.sublist(0, dirs.length - 1).map(Uri.encodeComponent).join('%7C')}&destination=$destino&directionsmode=walking');
+
+      if (await canLaunchUrl(uriNativa)) {
+        await launchUrl(uriNativa, mode: LaunchMode.externalApplication);
+        return;
+      }
+
+      // Fallback: URL web con waypoints
+      uri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=$destino&waypoints=$waypoints&travelmode=walking');
     }
 
-    final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
@@ -1338,13 +1362,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         );
                       }
 
-                      // FIX 3: Ocultar completadas al instante
+                      // Ocultar completadas y BLOQUEADAS
                       final tarjetasVisibles = snapshot.data!.docs.where((doc) {
                         if (_tarjetasCompletadas.contains(doc.id)) {
                           return false;
                         }
                         final d = _safeData(doc);
-                        return d['completada'] != true;
+                        if (d['completada'] == true) return false;
+                        if (d['bloqueado'] == true) return false;
+                        return true;
                       }).toList();
 
                       if (tarjetasVisibles.isEmpty) {
