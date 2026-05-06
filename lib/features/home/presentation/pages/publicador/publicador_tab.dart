@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 
@@ -704,49 +705,78 @@ class _PublicadorTabState extends State<PublicadorTab> {
   Future<void> _abrirRutaGoogleMaps(List<QueryDocumentSnapshot> direcciones) async {
     if (direcciones.isEmpty) return;
 
-    // Construir lista de direcciones como texto limpio
+    // Mostrar loading
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('📍 Obteniendo ubicación...'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+
+    // Obtener ubicación actual del usuario
+    String? origenStr;
+    try {
+      final permiso = await Geolocator.requestPermission();
+      if (permiso == LocationPermission.always ||
+          permiso == LocationPermission.whileInUse) {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 10),
+          ),
+        );
+        origenStr = '${pos.latitude},${pos.longitude}';
+      }
+    } catch (_) {
+      // Sin ubicación — Maps usará la ubicación actual por defecto
+    }
+
+    // Construir lista de direcciones
     final List<String> dirs = direcciones.map((doc) {
       final data = doc.data() as Map<String, dynamic>;
       final calle = (data['calle'] as String? ?? '').trim();
-      final complemento = (data['complemento'] as String? ?? '').trim();
-      // Agregar ciudad para mejor resolución de Maps
-      final full = complemento.isNotEmpty
-          ? '$calle, $complemento, Araucária, PR'
+      final comp = (data['complemento'] as String? ?? '').trim();
+      final full = comp.isNotEmpty
+          ? '$calle, $comp, Araucária, PR'
           : '$calle, Araucária, PR';
       return full;
     }).where((d) => d.isNotEmpty).toList();
 
     if (dirs.isEmpty) return;
 
-    Uri uri;
+    if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
+
+    // Construir URL de Google Maps con todas las paradas
+    // Formato que abre la app nativa con ruta completa
+    String url;
 
     if (dirs.length == 1) {
-      // Una sola dirección — abrir destino directamente
       final destino = Uri.encodeComponent(dirs.first);
-      uri = Uri.parse(
-          'https://www.google.com/maps/dir/?api=1&destination=$destino&travelmode=walking');
+      final origem = origenStr != null
+          ? '&origin=${Uri.encodeComponent(origenStr)}'
+          : '';
+      url = 'https://www.google.com/maps/dir/?api=1$origem&destination=$destino&travelmode=walking';
     } else {
-      // Múltiples — usar formato que abre app nativa de Maps en Android
-      // Formato: comgooglemaps:// para app nativa, fallback a URL web
+      // Con múltiples paradas: origen + waypoints + destino final
       final destino = Uri.encodeComponent(dirs.last);
       final waypoints = dirs
           .sublist(0, dirs.length - 1)
-          .map((d) => Uri.encodeComponent(d))
-          .join('%7C'); // %7C = | codificado
+          .map(Uri.encodeComponent)
+          .join('|');
 
-      // Intentar primero con app nativa de Google Maps
-      final uriNativa = Uri.parse(
-          'comgooglemaps://?waypoints=${dirs.sublist(0, dirs.length - 1).map(Uri.encodeComponent).join('%7C')}&destination=$destino&directionsmode=walking');
+      final origem = origenStr != null
+          ? '&origin=${Uri.encodeComponent(origenStr)}'
+          : '';
 
-      if (await canLaunchUrl(uriNativa)) {
-        await launchUrl(uriNativa, mode: LaunchMode.externalApplication);
-        return;
-      }
-
-      // Fallback: URL web con waypoints
-      uri = Uri.parse(
-          'https://www.google.com/maps/dir/?api=1&destination=$destino&waypoints=$waypoints&travelmode=walking');
+      url = 'https://www.google.com/maps/dir/?api=1$origem'
+          '&destination=$destino'
+          '&waypoints=$waypoints'
+          '&travelmode=walking';
     }
+
+    final uri = Uri.parse(url);
 
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
