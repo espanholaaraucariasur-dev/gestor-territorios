@@ -601,6 +601,19 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         'creado_en': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
+      // Guardar documento de control con inicio del nuevo mes
+      final nuevoMes = ahora.month == 12
+          ? DateTime(ahora.year + 1, 1, 1)
+          : DateTime(ahora.year, ahora.month + 1, 1);
+      await FirebaseFirestore.instance
+          .collection('configuraciones')
+          .doc('mes_actual')
+          .set({
+        'inicio_mes': Timestamp.fromDate(nuevoMes),
+        'mes_str': '${nuevoMes.year}-${nuevoMes.month.toString().padLeft(2, '0')}',
+        'actualizado_en': FieldValue.serverTimestamp(),
+      });
+
       // PASO 2: Resetear todas las tarjetas de todos los territorios
       final territoriosSnap =
           await FirebaseFirestore.instance.collection('territorios').get();

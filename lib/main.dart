@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'app/app.dart';
 import 'core/services/notification_service.dart';
 
@@ -20,6 +21,17 @@ void main() async {
   } catch (e) {
     debugPrint('Firebase ya estaba inicializado: $e');
   }
+
+  // Persistencia local — la app funciona aunque la BD esté procesando cambios
+  try {
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
+  } catch (e) {
+    debugPrint('Firestore settings: $e');
+  }
+
   await NotificationService().initialize();
   runApp(const AraucariaApp());
 }

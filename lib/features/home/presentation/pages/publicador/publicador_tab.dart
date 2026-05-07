@@ -88,7 +88,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // ─────────────────────────────────────────────────────────
 
   Stream<QuerySnapshot> _buildTarjetasStream() {
-    // Usar asignado_a que tiene indice habilitado en Firestore
     final nombre = widget.usuarioData['nombre']?.toString() ?? '';
     return FirebaseFirestore.instance
         .collectionGroup('tarjetas')
