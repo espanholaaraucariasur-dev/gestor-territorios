@@ -89,6 +89,53 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                               foregroundColor: Colors.white),
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 44,
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final snap = await FirebaseFirestore.instance
+                                .collection('territorios')
+                                .doc(terId)
+                                .collection('tarjetas')
+                                .get();
+                            final batch = FirebaseFirestore.instance.batch();
+                            for (final t in snap.docs) {
+                              final td = t.data() as Map<String, dynamic>;
+                              final asignado = td['asignado_a']?.toString() ?? '';
+                              final enviado = td['enviado_a']?.toString() ?? '';
+                              if (asignado.isEmpty && enviado.isEmpty) {
+                                batch.update(t.reference, {
+                                  'bloqueado': false,
+                                  'disponible_para_publicadores': true,
+                                });
+                              }
+                            }
+                            await batch.update(
+                              FirebaseFirestore.instance
+                                  .collection('territorios')
+                                  .doc(terId),
+                              {'disponible_para_publicadores': true},
+                            );
+                            await batch.commit();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('🔓 Tarjetas desbloqueadas'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.lock_open, size: 18),
+                          label: const Text('Desbloquear todas las tarjetas'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.orange,
+                            side: const BorderSide(color: Colors.orange),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 16),
                     ],
                     const Text('Tarjetas en este Territorio:',
@@ -1118,7 +1165,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                           backgroundColor: Colors.orange),
                                     );
                                   } else {
-                                    // ABRIR — liberar todas las tarjetas del territorio
+                                    // ABRIR — liberar TODAS las tarjetas del territorio
                                     final tarjetasSnap = await FirebaseFirestore
                                         .instance
                                         .collection('territorios')
@@ -1128,12 +1175,16 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                     final batch =
                                         FirebaseFirestore.instance.batch();
                                     for (final t in tarjetasSnap.docs) {
-                                      batch.update(t.reference, {
-                                        'bloqueado': false,
-                                        'disponible_para_publicadores': true,
-                                        'asignado_a': null,
-                                        'asignado_en': null,
-                                      });
+                                      final td = t.data() as Map<String, dynamic>;
+                                      // Solo desbloquear tarjetas NO asignadas ni enviadas
+                                      final asignado = td['asignado_a']?.toString() ?? '';
+                                      final enviado = td['enviado_a']?.toString() ?? '';
+                                      if (asignado.isEmpty && enviado.isEmpty) {
+                                        batch.update(t.reference, {
+                                          'bloqueado': false,
+                                          'disponible_para_publicadores': true,
+                                        });
+                                      }
                                     }
                                     batch.update(
                                       FirebaseFirestore.instance
