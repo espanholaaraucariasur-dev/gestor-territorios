@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 // Servicios
 import '../../../../../core/services/mapbox_service.dart';
+import '../../../../../core/services/auto_return_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 
@@ -33,22 +34,50 @@ class PublicadorTab extends StatefulWidget {
 
 class _PublicadorTabState extends State<PublicadorTab> {
   static const List<Color> _tarjetaColores = [
-    Color(0xFF1565C0), // azul
-    Color(0xFF2E7D32), // verde
-    Color(0xFF6A1B9A), // morado
-    Color(0xFFE65100), // naranja
-    Color(0xFF00695C), // teal
-    Color(0xFFC62828), // rojo
-    Color(0xFF4527A0), // violeta
-    Color(0xFF558B2F), // verde oliva
-    Color(0xFF00838F), // cyan
-    Color(0xFF4E342E), // café
+    Color(0xFF1565C0),
+    Color(0xFF2E7D32),
+    Color(0xFF6A1B9A),
+    Color(0xFFE65100),
+    Color(0xFF00695C),
+    Color(0xFFC62828),
+    Color(0xFF4527A0),
+    Color(0xFF558B2F),
+    Color(0xFF00838F),
+    Color(0xFF4E342E),
   ];
 
   final Map<String, Map<String, String>> _estadosPorTarjeta = {};
   final Map<String, Map<String, String>> _textosPorTarjeta = {};
   final Map<String, Map<String, bool>> _modificadosPorTarjeta = {};
   final Set<String> _tarjetasCompletadas = {};
+
+  @override
+  void initState() {
+    super.initState();
+    // Configurar callback para alertas en UI
+    AutoReturnService().onMostrarAlerta = (mensaje, color) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(mensaje),
+            backgroundColor: color,
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
+    };
+    // Verificar tarjetas asignadas al iniciar
+    final nombre = widget.usuarioData['nombre']?.toString() ?? '';
+    if (nombre.isNotEmpty) {
+      AutoReturnService().verificarTarjetasAlIniciar(nombre);
+    }
+  }
+
+  @override
+  void dispose() {
+    AutoReturnService().onMostrarAlerta = null;
+    super.dispose();
+  }
 
   // ───────────────────────────────────────────────────────────
   // HELPERS

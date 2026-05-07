@@ -259,11 +259,11 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       builder: (c) => AlertDialog(
         title: const Text('🔄 Limpiar datos dinámicos'),
         content: const Text(
-          'Esto reiniciará en todas las direcciones:\n\n'
-          '• predicado → false\n'
+          'Esto reiniciará:\n\n'
+          '• predicado → false en todas las direcciones\n'
           '• estado_predicacion → pendiente\n'
-          '• mes_predicacion → null\n'
-          '• fecha_predicacion → null\n\n'
+          '• mes_predicacion / fecha_predicacion → null\n'
+          '• Tarjetas temporales → eliminadas\n\n'
           '⚠️ Las direcciones, territorios y vínculos tarjeta_id NO se modifican.',
         ),
         actions: [
@@ -280,12 +280,20 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     );
     if (confirmar != true) return;
     try {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🔄 Limpiando datos...'),
+            duration: Duration(seconds: 30),
+          ),
+        );
+
+      // 1. Resetear predicaciones en direcciones
       final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .get();
-      final docs = snap.docs;
-      for (int i = 0; i < docs.length; i += 100) {
-        final chunk = docs.skip(i).take(100).toList();
+      for (int i = 0; i < snap.docs.length; i += 100) {
+        final chunk = snap.docs.skip(i).take(100).toList();
         WriteBatch batch = FirebaseFirestore.instance.batch();
         for (final doc in chunk) {
           batch.update(doc.reference, {
@@ -297,19 +305,39 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           });
         }
         await batch.commit();
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(milliseconds: 200));
       }
-      if (mounted)
+
+      // 2. Eliminar tarjetas temporales
+      final temporalesSnap = await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc('temporales')
+          .collection('tarjetas')
+          .get();
+      for (int i = 0; i < temporalesSnap.docs.length; i += 100) {
+        final chunk = temporalesSnap.docs.skip(i).take(100).toList();
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+        for (final t in chunk) {
+          batch.delete(t.reference);
+        }
+        await batch.commit();
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               content: Text('✅ Datos dinámicos limpiados'),
               backgroundColor: Colors.green),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
         );
+      }
     }
   }
 
@@ -579,32 +607,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         });
       }
 
-      // PASO 3: Limpiar tarjetas temporales
-      final temporalesSnap = await FirebaseFirestore.instance
-          .collection('territorios')
-          .doc('temporales')
-          .collection('tarjetas')
-          .get();
-
-      if (temporalesSnap.docs.isNotEmpty) {
-        for (int i = 0; i < temporalesSnap.docs.length; i += 100) {
-          final chunk = temporalesSnap.docs.skip(i).take(100).toList();
-          WriteBatch batch = FirebaseFirestore.instance.batch();
-          for (final t in chunk) {
-            batch.update(t.reference, {
-              'asignado_a': null,
-              'completada': false,
-              'enviado_a': null,
-              'estatus_envio': 'disponible',
-              'bloqueado': true,
-              'disponible_para_publicadores': false,
-            });
-          }
-          await batch.commit();
-        }
-      }
-
-      // PASO 4: Resetear predicaciones en direcciones
+      // PASO 3: Limpiar datos dinámicos (incluye predicaciones)
+      // NO limpia tarjetas temporales — eso es responsabilidad de _limpiarDatosDinamicos
       for (int i = 0; i < dirs.docs.length; i += 100) {
         final chunk = dirs.docs.skip(i).take(100).toList();
         WriteBatch batch = FirebaseFirestore.instance.batch();

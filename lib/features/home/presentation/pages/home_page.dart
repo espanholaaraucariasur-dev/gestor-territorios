@@ -8,6 +8,7 @@ import 'admin/admin_tab.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import '../../../auth/presentation/pages/login_page.dart';
+import '../../../../core/services/auto_return_service.dart';
 // CSV
 import 'package:file_picker/file_picker.dart';
 // Traducciones
@@ -3687,6 +3688,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     String tarjetaNombre,
   ) async {
     try {
+      final ahora = DateTime.now();
       await FirebaseFirestore.instance
           .collection('territorios')
           .doc(territorioId)
@@ -3696,13 +3698,22 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         'asignado_a': widget.usuarioData['nombre'] ?? '',
         'disponible_para_publicadores': false,
         'asignado_en': FieldValue.serverTimestamp(),
-        'tomado_en': FieldValue.serverTimestamp(), // para el timer
+        'tomado_en': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      // Iniciar timer de devolución automática
+      AutoReturnService().iniciarTimer(
+        tarjetaId: tarjetaId,
+        territorioId: territorioId,
+        tarjetaNombre: tarjetaNombre,
+        usuarioNombre: widget.usuarioData['nombre'] ?? '',
+        fechaAsignacion: ahora,
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Tarjeta "$tarjetaNombre" asignada a ti'),
+          content: Text('✅ Tarjeta "$tarjetaNombre" asignada — 2h para trabajarla'),
           backgroundColor: const Color(0xFF1B5E20),
         ),
       );
@@ -3716,6 +3727,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
   Future<void> _devolverTarjeta(String territorioId, String tarjetaId) async {
     try {
+      // Cancelar timer de devolución automática
+      AutoReturnService().cancelarTimer(tarjetaId);
+
       await FirebaseFirestore.instance
           .collection('territorios')
           .doc(territorioId)
