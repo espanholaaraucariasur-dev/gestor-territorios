@@ -28,10 +28,15 @@ class _TemporalesTabState extends State<TemporalesTab> {
     final cantidad = _sliderValue.clamp(1, direccionesDisponibles.length);
     final seleccionadas = direccionesDisponibles.take(cantidad).toList();
 
-    // Nombre único para la tarjeta temporal
-    final ahora = DateTime.now();
-    final nombreTarjeta =
-        'T-$territorioNombre-${ahora.day}${ahora.month}-${ahora.hour}${ahora.minute}';
+    // Nombre secuencial: T-TERRITORIO-001, T-TERRITORIO-002, etc.
+    final tarjetasExistentes = await FirebaseFirestore.instance
+        .collection('territorios')
+        .doc('temporales')
+        .collection('tarjetas')
+        .where('territorio_origen_id', isEqualTo: territorioId)
+        .get();
+    final numero = (tarjetasExistentes.docs.length + 1).toString().padLeft(3, '0');
+    final nombreTarjeta = 'T-$territorioNombre-$numero';
 
     try {
       final db = FirebaseFirestore.instance;
