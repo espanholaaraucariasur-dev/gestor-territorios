@@ -83,6 +83,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // HELPERS
   // ───────────────────────────────────────────────────────────
 
+  // ─────────────────────────────────────────────────────────
+  // STREAM DE TARJETAS
+  // ─────────────────────────────────────────────────────────
+
+  Stream<QuerySnapshot> _buildTarjetasStream() {
+    return FirebaseFirestore.instance
+        .collectionGroup('tarjetas')
+        .where('publicador_email', isEqualTo: widget.usuarioEmail)
+        .snapshots();
+  }
+
   String _normalizarDireccion(String direccion) {
     var texto = direccion.toLowerCase();
     texto = texto.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
@@ -1285,6 +1296,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   if (tarjetasSnap.hasData) {
                     for (final t in tarjetasSnap.data!.docs) {
                       final d = _safeData(t);
+                      if (d['completada'] == true) continue;
                       totalDirAsignadas +=
                           ((d['cantidad_direcciones'] ?? 0) as int);
                       tarjetaIds.add(t.id);
@@ -1455,11 +1467,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   ),
                   const SizedBox(height: 12),
                   StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collectionGroup('tarjetas')
-                        .where('publicador_email',
-                            isEqualTo: widget.usuarioEmail)
-                        .snapshots(),
+                    stream: _buildTarjetasStream(),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return const Center(child: CircularProgressIndicator());
