@@ -187,6 +187,24 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         final data = doc.data();
         final tarjetaIdActual = data['tarjeta_id'] as String?;
 
+        // Para direcciones temporales, usar tarjeta_id_origen
+        final tarjetaIdOrigen = data['tarjeta_id_origen'] as String?;
+        if (tarjetaIdOrigen != null && tarjetaIdOrigen.isNotEmpty &&
+            (tarjetaIdActual == null || tarjetaIdActual.isEmpty)) {
+          batch.update(doc.reference, {
+            'tarjeta_id': tarjetaIdOrigen,
+            'nombre_tarjeta': tarjetaIdOrigen,
+          });
+          actualizadas++;
+          batchCount++;
+          if (batchCount >= 400) {
+            await batch.commit();
+            batch = FirebaseFirestore.instance.batch();
+            batchCount = 0;
+          }
+          continue;
+        }
+
         // Si ya tiene tarjeta_id válido, no tocar
         if (tarjetaIdActual != null && tarjetaIdActual.isNotEmpty) continue;
 

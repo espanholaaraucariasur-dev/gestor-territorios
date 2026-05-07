@@ -1059,6 +1059,37 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
       await batch.commit();
 
+      // Si es tarjeta temporal → eliminar sus direcciones de direcciones_globales
+      // Las direcciones temporales no deben persistir en la BD
+      final esTemporal = territorioId == 'temporales' ||
+          (await db.collection('territorios')
+              .doc(territorioId)
+              .collection('tarjetas')
+              .doc(tarjetaId)
+              .get())
+              .data()?['es_temporal'] == true;
+
+      if (esTemporal) {
+        final dirsTemporales = await db
+            .collection('direcciones_globales')
+            .where('tarjeta_id', isEqualTo: tarjetaId)
+            .get();
+        if (dirsTemporales.docs.isNotEmpty) {
+          final batchClean = db.batch();
+          for (final d in dirsTemporales.docs) {
+            batchClean.delete(d.reference);
+          }
+          await batchClean.commit();
+        }
+        // Eliminar también la tarjeta temporal
+        await db
+            .collection('territorios')
+            .doc(territorioId)
+            .collection('tarjetas')
+            .doc(tarjetaId)
+            .delete();
+      }
+
       if (mounted) {
         setState(() {
           _tarjetasCompletadas.add(tarjetaId);
