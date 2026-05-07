@@ -1181,6 +1181,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         'enviado_tipo': tipo,
         'enviado_en': FieldValue.serverTimestamp(),
         'nombre': nombre,
+        // Asegurar que la tarjeta NO esté bloqueada al enviarse
+        'bloqueado': false,
+        'disponible_para_publicadores': tipo == 'publicador' ? true : false,
       };
 
       if (tarjetaId != null) {
@@ -3700,6 +3703,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           .doc(tarjetaId)
           .set({
         'asignado_a': widget.usuarioData['nombre'] ?? '',
+        'publicador_email': widget.usuarioEmail,
+        'publicador_id': widget.usuarioData['uid'] ?? '',
         'disponible_para_publicadores': false,
         'asignado_en': FieldValue.serverTimestamp(),
         'tomado_en': FieldValue.serverTimestamp(),
