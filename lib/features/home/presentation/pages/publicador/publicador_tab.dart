@@ -89,9 +89,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
   Stream<QuerySnapshot> _buildTarjetasStream() {
     final nombre = widget.usuarioData['nombre']?.toString() ?? '';
+    final mesActual = '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
     return FirebaseFirestore.instance
         .collectionGroup('tarjetas')
         .where('asignado_a', isEqualTo: nombre)
+        .where('mes_asignacion', isEqualTo: mesActual)
         .snapshots();
   }
 

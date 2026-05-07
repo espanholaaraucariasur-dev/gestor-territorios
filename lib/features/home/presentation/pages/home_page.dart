@@ -1171,11 +1171,13 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           ? usuarioSnap.docs.first.id
           : destinatarioEmail;
 
+      final mesActual = '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
       final payload = {
         'conductor_email': tipo == 'conductor' ? destinatarioEmail : null,
         'publicador_email': tipo == 'publicador' ? destinatarioEmail : null,
         'publicador_id': tipo == 'publicador' ? publicadorId : null,
         'asignado_a': tipo == 'publicador' ? nombreDestinatario : null,
+        'mes_asignacion': tipo == 'publicador' ? mesActual : null,
         'estatus_envio': 'enviado',
         'enviado_a': destinatarioEmail,
         'enviado_nombre': nombreDestinatario,
@@ -3706,6 +3708,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         'asignado_a': widget.usuarioData['nombre'] ?? '',
         'publicador_email': _usuarioEmail,
         'publicador_id': widget.usuarioData['uid'] ?? '',
+        'mes_asignacion': '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}',
         'disponible_para_publicadores': false,
         'bloqueado': false,
         'asignado_en': FieldValue.serverTimestamp(),

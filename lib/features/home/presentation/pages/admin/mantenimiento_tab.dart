@@ -632,9 +632,15 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           final chunk = tarjetasSnap.docs.skip(i).take(100).toList();
           WriteBatch batch = FirebaseFirestore.instance.batch();
           for (final tarjeta in chunk) {
+            final tData = tarjeta.data() as Map<String, dynamic>;
             batch.update(tarjeta.reference, {
+              // Guardar historial del mes anterior
+              'mes_anterior_asignado_a': tData['asignado_a'],
+              'mes_anterior': mesAnterior,
+              // Limpiar para el nuevo mes
               'asignado_a': null,
               'asignado_en': null,
+              'mes_asignacion': null,
               'completada': false,
               'fecha_completada': null,
               'enviado_a': null,
