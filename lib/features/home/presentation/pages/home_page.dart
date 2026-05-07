@@ -4303,13 +4303,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   Future<void> _resetearDireccionesGlobales() async {
     debugPrint('📍 Reseteando direcciones globales...');
 
-    // Solo resetear direcciones activas (eliminado_at == null)
     final snapshot = await FirebaseFirestore.instance
         .collection('direcciones_globales')
         .where('eliminado_at', isNull: true)
         .get();
 
-    // Procesar en lotes de 500 para evitar límites de Firestore
     final totalDocs = snapshot.docs.length;
     int procesados = 0;
 
@@ -4320,13 +4318,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       for (int i = procesados; i < finLote; i++) {
         final doc = snapshot.docs[i];
         batch.update(doc.reference, {
-          'tarjeta_id': null,
+          // ⚠️ NUNCA tocar tarjeta_id — es el vínculo permanente dirección-tarjeta
           'visitado': false,
           'estado': 'disponible',
           'publicador_email': null,
           'fecha_visita': null,
-          'estado_predicacion': null,
+          'estado_predicacion': 'pendiente',
           'predicado': false,
+          'asignado_a': null,
+          'mes_predicacion': null,
+          'fecha_predicacion': null,
+          'motivo_temporal': null,
         });
       }
 
