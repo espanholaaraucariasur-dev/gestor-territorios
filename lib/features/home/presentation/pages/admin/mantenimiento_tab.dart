@@ -260,12 +260,11 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         title: const Text('🔄 Limpiar datos dinámicos'),
         content: const Text(
           'Esto reiniciará en todas las direcciones:\n\n'
-          '• visitado → false\n'
           '• predicado → false\n'
           '• estado_predicacion → pendiente\n'
-          '• asignado_a → null\n'
-          '• tarjeta_id → null\n\n'
-          'Las direcciones y territorios NO se eliminarán.',
+          '• mes_predicacion → null\n'
+          '• fecha_predicacion → null\n\n'
+          '⚠️ Las direcciones, territorios y vínculos tarjeta_id NO se modifican.',
         ),
         actions: [
           TextButton(
@@ -290,17 +289,11 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         WriteBatch batch = FirebaseFirestore.instance.batch();
         for (final doc in chunk) {
           batch.update(doc.reference, {
-            'visitado': false,
             'predicado': false,
             'estado_predicacion': 'pendiente',
-            'asignado_a': null,
-            'asignado_en': null,
-            'tarjeta_id': null,
-            'entregado_a': null,
-            'entregado_en': null,
-            'devuelto': false,
-            'devuelto_por': null,
-            'devuelto_en': null,
+            'mes_predicacion': null,
+            'fecha_predicacion': null,
+            'motivo_temporal': null,
           });
         }
         await batch.commit();
@@ -482,10 +475,12 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         title: const Text('🗓️ Iniciar nuevo mes'),
         content: const Text(
           'Esto realizará:\n\n'
-          '• Liberar todas las tarjetas (quitar asignaciones)\n'
-          '• Marcar tarjetas como no completadas\n'
-          '• Dejar todo listo para el nuevo ciclo\n\n'
-          '⚠️ Las direcciones NO se modifican ni eliminan.',
+          '• Guardar estadísticas del mes actual\n'
+          '• Liberar todas las tarjetas (cerradas por defecto)\n'
+          '• Limpiar asignaciones de tarjetas y territorios\n'
+          '• Resetear predicaciones del mes\n'
+          '• Limpiar tarjetas temporales\n\n'
+          '⚠️ Las direcciones NO se eliminan.',
         ),
         actions: [
           TextButton(
@@ -508,24 +503,45 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('🔄 Iniciando nuevo mes...'),
-            duration: Duration(seconds: 10),
+            duration: Duration(seconds: 30),
           ),
         );
 
-      // SOLO resetear tarjetas — direcciones intactas
+      // PASO 1: Guardar snapshot estadísticas del mes que termina
+      final ahora = DateTime.now();
+      final mesAnterior =
+          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+      final dirs = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .get();
+      final predicadas =
+          dirs.docs.where((d) => (d.data())['predicado'] == true).length;
+      await FirebaseFirestore.instance
+          .collection('estadisticas')
+          .doc(mesAnterior)
+          .set({
+        'mes': mesAnterior,
+        'total_direcciones': dirs.docs.length,
+        'predicadas': predicadas,
+        'creado_en': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // PASO 2: Resetear todas las tarjetas de todos los territorios
       final territoriosSnap =
           await FirebaseFirestore.instance.collection('territorios').get();
 
       for (final territorio in territoriosSnap.docs) {
+        if (['temporales', 'removidas', 'estadisticas']
+            .contains(territorio.id)) continue;
+
         final tarjetasSnap = await FirebaseFirestore.instance
             .collection('territorios')
             .doc(territorio.id)
             .collection('tarjetas')
             .get();
 
-        final tarjetaDocs = tarjetasSnap.docs;
-        for (int i = 0; i < tarjetaDocs.length; i += 100) {
-          final chunk = tarjetaDocs.skip(i).take(100).toList();
+        for (int i = 0; i < tarjetasSnap.docs.length; i += 100) {
+          final chunk = tarjetasSnap.docs.skip(i).take(100).toList();
           WriteBatch batch = FirebaseFirestore.instance.batch();
           for (final tarjeta in chunk) {
             batch.update(tarjeta.reference, {
@@ -537,78 +553,77 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
               'enviado_nombre': null,
               'enviado_en': null,
               'enviado_tipo': null,
-              'estatus_envio': 'disponible',
-              'bloqueado': true, // ✅ cerrado por defecto
-              'disponible_para_publicadores':
-                  false, // ✅ no visible para publicadores
-              'conductor_email': null,
               'publicador_email': null,
+              'publicador_nombre': null,
+              'conductor_email': null,
+              'estatus_envio': 'disponible',
+              'bloqueado': true,
+              'disponible_para_publicadores': false,
             });
           }
           await batch.commit();
-          await Future.delayed(const Duration(milliseconds: 300));
+          await Future.delayed(const Duration(milliseconds: 200));
         }
-      }
 
-      // PASO 3: Limpiar enviado_a de territorios
-      final territoriosSnap2 =
-          await FirebaseFirestore.instance.collection('territorios').get();
-
-      for (final ter in territoriosSnap2.docs) {
-        // Skip colecciones especiales
-        if (['temporales', 'removidas', 'estadisticas'].contains(ter.id))
-          continue;
-
+        // Resetear el territorio también
         await FirebaseFirestore.instance
             .collection('territorios')
-            .doc(ter.id)
+            .doc(territorio.id)
             .update({
           'enviado_a': null,
           'enviado_nombre': null,
           'enviado_en': null,
           'conductor_email': null,
           'estatus_envio': 'disponible',
+          'disponible_para_publicadores': false,
         });
       }
 
-// PASO 4: Resetear asignado_a en direcciones_globales
-      final dirs = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
+      // PASO 3: Limpiar tarjetas temporales
+      final temporalesSnap = await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc('temporales')
+          .collection('tarjetas')
           .get();
 
+      if (temporalesSnap.docs.isNotEmpty) {
+        for (int i = 0; i < temporalesSnap.docs.length; i += 100) {
+          final chunk = temporalesSnap.docs.skip(i).take(100).toList();
+          WriteBatch batch = FirebaseFirestore.instance.batch();
+          for (final t in chunk) {
+            batch.update(t.reference, {
+              'asignado_a': null,
+              'completada': false,
+              'enviado_a': null,
+              'estatus_envio': 'disponible',
+              'bloqueado': true,
+              'disponible_para_publicadores': false,
+            });
+          }
+          await batch.commit();
+        }
+      }
+
+      // PASO 4: Resetear predicaciones en direcciones
       for (int i = 0; i < dirs.docs.length; i += 100) {
         final chunk = dirs.docs.skip(i).take(100).toList();
         WriteBatch batch = FirebaseFirestore.instance.batch();
         for (final doc in chunk) {
           batch.update(doc.reference, {
-            'asignado_a': null,
             'predicado': false,
             'estado_predicacion': 'pendiente',
             'fecha_predicacion': null,
             'mes_predicacion': null,
+            'motivo_temporal': null,
+            'asignado_a': null,
           });
         }
         await batch.commit();
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(milliseconds: 200));
       }
 
-// PASO 5: Guardar snapshot en estadisticas antes de limpiar
-      final mesAnterior =
-          '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
-      await FirebaseFirestore.instance
-          .collection('estadisticas')
-          .doc(mesAnterior)
-          .set({
-        'mes': mesAnterior,
-        'total_direcciones': dirs.docs.length,
-        'predicadas': dirs.docs.where((d) {
-          final data = (d.data() as Map<String, dynamic>?) ?? {};
-          return data['predicado'] == true;
-        }).length,
-        'creado_en': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Row(
@@ -624,13 +639,15 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         );
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('❌ Error: $e'),
             backgroundColor: Colors.red,
           ),
         );
+      }
     }
   }
 
