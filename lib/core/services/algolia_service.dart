@@ -1,13 +1,14 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../config/app_secrets.dart';
 
 /// Servicio de Algolia para búsqueda robusta de direcciones.
 /// Plan Free: 10,000 búsquedas/mes — suficiente para uso congregacional.
 class AlgoliaService {
-  static const String _appId = '0DXT0ACC9Z';
-  static const String _searchKey = '6fba0df3111fb7a9e6ade60c81d86316';
-  static const String _adminKey = 'ea89a21cffb75ebbc13deacc8c7e01c8';
+  static const String _appId = AppSecrets.algoliaAppId;
+  static const String _searchKey = AppSecrets.algoliaSearchKey;
+  static const String _adminKey = AppSecrets.algoliaAdminKey;
   static const String _indexName = 'direcciones';
 
   static const String _baseUrl = 'https://$_appId-dsn.algolia.net';

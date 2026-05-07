@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
+// Servicios
+import '../../../../../core/services/mapbox_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 
@@ -705,18 +707,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
   Future<void> _abrirRutaGoogleMaps(List<QueryDocumentSnapshot> direcciones) async {
     if (direcciones.isEmpty) return;
 
-    // Mostrar loading
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('📍 Obteniendo ubicación...'),
-          duration: Duration(seconds: 3),
+          content: Text('📍 Preparando ruta...'),
+          duration: Duration(seconds: 10),
         ),
       );
     }
 
-    // Obtener ubicación actual del usuario
-    String? origenStr;
+    // 1. Obtener ubicación del usuario
+    String? origenCoords;
     try {
       final permiso = await Geolocator.requestPermission();
       if (permiso == LocationPermission.always ||
@@ -724,57 +725,76 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
-            timeLimit: Duration(seconds: 10),
+            timeLimit: Duration(seconds: 8),
           ),
         );
-        origenStr = '${pos.latitude},${pos.longitude}';
+        origenCoords = '${pos.latitude},${pos.longitude}';
       }
-    } catch (_) {
-      // Sin ubicación — Maps usará la ubicación actual por defecto
-    }
+    } catch (_) {}
 
-    // Construir lista de direcciones
-    final List<String> dirs = direcciones.map((doc) {
+    // 2. Obtener coordenadas de cada dirección
+    // Primero intentar desde Firestore (ya guardadas), sino geocodificar
+    final List<String> coordsDirecciones = [];
+
+    for (final doc in direcciones) {
       final data = doc.data() as Map<String, dynamic>;
-      final calle = (data['calle'] as String? ?? '').trim();
-      final comp = (data['complemento'] as String? ?? '').trim();
-      final full = comp.isNotEmpty
-          ? '$calle, $comp, Araucária, PR'
-          : '$calle, Araucária, PR';
-      return full;
-    }).where((d) => d.isNotEmpty).toList();
+      final lat = data['lat'];
+      final lng = data['lng'];
 
-    if (dirs.isEmpty) return;
+      if (lat != null && lng != null &&
+          lat.toString() != '0' && lng.toString() != '0') {
+        // Coordenadas ya guardadas en Firestore
+        coordsDirecciones.add('$lat,$lng');
+      } else {
+        // Geocodificar con Mapbox
+        final calle = (data['calle'] as String? ?? '').trim();
+        final comp = (data['complemento'] as String? ?? '').trim();
+        final texto = comp.isNotEmpty ? '$calle, $comp' : calle;
+
+        final coords = await MapboxService.geocodificar(texto);
+        if (coords != null) {
+          // Guardar en Firestore para la próxima vez
+          FirebaseFirestore.instance
+              .collection('direcciones_globales')
+              .doc(doc.id)
+              .update({'lat': coords[0], 'lng': coords[1]});
+          coordsDirecciones.add('${coords[0]},${coords[1]}');
+        } else {
+          // Fallback: usar texto si no se pudo geocodificar
+          final full = comp.isNotEmpty
+              ? '$calle, $comp, Araucária, PR'
+              : '$calle, Araucária, PR';
+          coordsDirecciones.add(Uri.encodeQueryComponent(full).replaceAll('+', '%20'));
+        }
+      }
+    }
 
     if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
 
-    // Construir URL — codificar cada dirección individualmente
-    // El separador | debe ir LITERAL (no como %7C) para que Maps lo interprete
+    if (coordsDirecciones.isEmpty) return;
+
+    // 3. Construir URL de Google Maps con coordenadas exactas
     String urlString;
+    final origen = origenCoords != null ? '&origin=$origenCoords' : '';
 
-    // Función que codifica solo los caracteres especiales de la dirección
-    // pero preserva el | como separador de waypoints
-    String enc(String s) => Uri.encodeQueryComponent(s).replaceAll('+', '%20');
-
-    if (dirs.length == 1) {
-      final destino = enc(dirs.first);
-      final origem = origenStr != null ? '&origin=${enc(origenStr)}' : '';
-      urlString = 'https://www.google.com/maps/dir/?api=1$origem&destination=$destino&travelmode=walking';
+    if (coordsDirecciones.length == 1) {
+      urlString = 'https://www.google.com/maps/dir/?api=1$origen'
+          '&destination=${coordsDirecciones.first}'
+          '&travelmode=walking';
     } else {
-      final destino = enc(dirs.last);
-      // Waypoints separados por | literal — NO usar Uri.encodeComponent que lo convierte en %7C
-      final waypoints = dirs
-          .sublist(0, dirs.length - 1)
-          .map(enc)
+      final destino = coordsDirecciones.last;
+      // Waypoints = todas menos la última, separadas por | LITERAL
+      final waypoints = coordsDirecciones
+          .sublist(0, coordsDirecciones.length - 1)
           .join('|');
-      final origem = origenStr != null ? '&origin=${enc(origenStr)}' : '';
-      urlString = 'https://www.google.com/maps/dir/?api=1$origem&destination=$destino&waypoints=$waypoints&travelmode=walking';
+
+      urlString = 'https://www.google.com/maps/dir/?api=1$origen'
+          '&destination=$destino'
+          '&waypoints=$waypoints'
+          '&travelmode=walking';
     }
 
-    // Usar Uri.parse con allowMalformed para evitar que re-codifique el |
-    // O mejor — usar launchUrl con el string directo via Uri.parse del scheme solamente
     final uri = Uri.parse(urlString);
-
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
