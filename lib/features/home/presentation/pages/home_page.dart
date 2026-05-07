@@ -1175,14 +1175,15 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         'conductor_email': tipo == 'conductor' ? destinatarioEmail : null,
         'publicador_email': tipo == 'publicador' ? destinatarioEmail : null,
         'publicador_id': tipo == 'publicador' ? publicadorId : null,
+        'asignado_a': tipo == 'publicador' ? nombreDestinatario : null,
         'estatus_envio': 'enviado',
         'enviado_a': destinatarioEmail,
         'enviado_nombre': nombreDestinatario,
         'enviado_tipo': tipo,
         'enviado_en': FieldValue.serverTimestamp(),
         'nombre': nombre,
-        // Asegurar que la tarjeta NO esté bloqueada al enviarse
         'bloqueado': false,
+        'completada': false,
         'disponible_para_publicadores': tipo == 'publicador' ? true : false,
       };
 

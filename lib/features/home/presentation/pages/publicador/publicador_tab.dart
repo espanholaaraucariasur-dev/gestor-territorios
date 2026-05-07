@@ -84,14 +84,51 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // ───────────────────────────────────────────────────────────
 
   // ─────────────────────────────────────────────────────────
-  // STREAM DE TARJETAS
+  // STREAM DE TARJETAS — sin collectionGroup (no requiere indice)
   // ─────────────────────────────────────────────────────────
 
   Stream<QuerySnapshot> _buildTarjetasStream() {
+    // Usar asignado_a que tiene indice habilitado en Firestore
+    final nombre = widget.usuarioData['nombre']?.toString() ?? '';
     return FirebaseFirestore.instance
         .collectionGroup('tarjetas')
-        .where('publicador_email', isEqualTo: widget.usuarioEmail)
+        .where('asignado_a', isEqualTo: nombre)
+        .where('completada', isEqualTo: false)
         .snapshots();
+  }
+
+  // Stream alternativo por territorio específico
+  Future<List<Map<String, dynamic>>> _cargarMisTarjetas() async {
+    final List<Map<String, dynamic>> resultado = [];
+    try {
+      // Buscar en todos los territorios
+      final territoriosSnap = await FirebaseFirestore.instance
+          .collection('territorios')
+          .get();
+
+      for (final ter in territoriosSnap.docs) {
+        final tarjetasSnap = await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(ter.id)
+            .collection('tarjetas')
+            .where('publicador_email', isEqualTo: widget.usuarioEmail)
+            .get();
+
+        for (final t in tarjetasSnap.docs) {
+          final data = t.data() as Map<String, dynamic>;
+          if (data['completada'] == true) continue;
+          resultado.add({
+            ...data,
+            '_id': t.id,
+            '_territorioId': ter.id,
+            '_ref': t.reference,
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error cargando tarjetas: $e');
+    }
+    return resultado;
   }
 
   String _normalizarDireccion(String direccion) {
@@ -1286,8 +1323,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collectionGroup('tarjetas')
-                    .where('publicador_email',
-                        isEqualTo: widget.usuarioEmail)
+                    .where('asignado_a',
+                        isEqualTo: widget.usuarioData['nombre'] ?? '')
+                    .where('completada', isEqualTo: false)
                     .snapshots(),
                 builder: (context, tarjetasSnap) {
                   int totalDirAsignadas = 0;
@@ -1466,32 +1504,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  StreamBuilder<QuerySnapshot>(
-                    stream: _buildTarjetasStream(),
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _cargarMisTarjetas(),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                        return Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Center(
-                            child: Text(
-                              context.t('no_cards_assigned'),
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                          ),
-                        );
-                      }
-
-                      // Ocultar solo completadas
-                      final tarjetasVisibles = snapshot.data!.docs.where((doc) {
-                        if (_tarjetasCompletadas.contains(doc.id)) return false;
-                        final d = _safeData(doc);
+                      final tarjetas = snapshot.data ?? [];
+                      final tarjetasVisibles = tarjetas.where((d) {
+                        if (_tarjetasCompletadas.contains(d['_id'])) return false;
                         if (d['completada'] == true) return false;
                         return true;
                       }).toList();
@@ -1527,12 +1548,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       return Column(
                         children:
                             List.generate(tarjetasVisibles.length, (index) {
-                          final tarjetaDoc = tarjetasVisibles[index];
-                          final data = _safeData(tarjetaDoc);
+                          final tarjetaMap = tarjetasVisibles[index];
+                          final data = tarjetaMap;
                           final nombre =
-                              (data['nombre'] as String?) ?? tarjetaDoc.id;
-                          final territorioId =
-                              tarjetaDoc.reference.parent.parent?.id ?? '';
+                              (data['nombre'] as String?) ?? (data['_id'] as String? ?? '');
+                          final territorioId = data['_territorioId'] as String? ?? '';
+                          final tarjetaId = data['_id'] as String? ?? '';
 
                           // Color aleatorio pero estable por índice
                           final color =
