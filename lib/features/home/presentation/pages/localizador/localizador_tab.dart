@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
-// Algolia
-import '../../../../../core/services/algolia_service.dart';
+// Mapbox
+import '../../../../../core/services/mapbox_service.dart';
 
 class LocalizadorTab extends StatefulWidget {
   final String usuarioEmail;
@@ -72,7 +72,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   }
 
   // ─────────────────────────────────────────────────────────
-  // BUSCAR CON ALGOLIA
+  // BUSCAR CON MAPBOX + FIRESTORE
   // ─────────────────────────────────────────────────────────
 
   Future<void> _buscar() async {
@@ -100,24 +100,85 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     });
 
     try {
-      // 1. Buscar en Algolia
-      final resultado = await AlgoliaService.buscar(consulta);
+      // 1. Geocodificar con Mapbox para obtener coordenadas y nombre normalizado
+      final coords = await MapboxService.geocodificar(consulta);
 
-      if (resultado != null) {
-        final calle = resultado['calle']?.toString() ?? '';
-        final comp  = resultado['complemento']?.toString() ?? '';
+      // 2. Buscar en Firestore usando normalización robusta
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .limit(500)
+          .get();
+
+      Map<String, dynamic>? encontrada;
+      int mejorScore = -1;
+
+      final consultaNorm = _normalizar(consulta);
+
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final calle = data['calle']?.toString() ?? '';
+        final comp = data['complemento']?.toString() ?? '';
+        final norm = _normalizar('$calle $comp');
+
+        int score = 0;
+
+        // Si Mapbox devolvió coordenadas, comparar con las guardadas
+        if (coords != null) {
+          final lat = data['lat'];
+          final lng = data['lng'];
+          if (lat != null && lng != null) {
+            final distancia = _distanciaKm(
+              coords[0], coords[1],
+              (lat as num).toDouble(), (lng as num).toDouble(),
+            );
+            if (distancia < 0.05) {
+              // Menos de 50 metros — coincidencia muy alta
+              score = 100;
+            } else if (distancia < 0.15) {
+              score = 80;
+            }
+          }
+        }
+
+        // Complementar con comparación de texto normalizado
+        final tokens = RegExp(r'[a-z]+|\d+')
+            .allMatches(consultaNorm)
+            .map((m) => m.group(0)!)
+            .where((t) => t.length >= 2)
+            .toList();
+
+        int tokensCoinciden = 0;
+        for (final token in tokens) {
+          if (norm.contains(token)) tokensCoinciden++;
+        }
+
+        if (tokens.isNotEmpty) {
+          final pct = (tokensCoinciden / tokens.length * 50).round();
+          score += pct;
+        }
+
+        if (score > mejorScore) {
+          mejorScore = score;
+          encontrada = data;
+        }
+      }
+
+      // Umbral mínimo para considerar encontrada
+      if (encontrada != null && mejorScore >= 50) {
+        final calle = encontrada['calle']?.toString() ?? '';
+        final comp = encontrada['complemento']?.toString() ?? '';
         setState(() {
           _buscando = false;
           _buscado = true;
           _encontrada = true;
-          _direccionEncontrada = resultado;
+          _direccionEncontrada = encontrada;
           _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
           _mostrarFormulario = false;
         });
         return;
       }
 
-      // 2. No encontrada — verificar si ya fue solicitada
+      // 3. No encontrada — verificar si ya fue solicitada
       final normalizada = _normalizar(consulta);
       final pendientes = await FirebaseFirestore.instance
           .collection('solicitudes_localizador')
@@ -153,6 +214,17 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         _mensaje = context.t('address_not_found');
       });
     }
+  }
+
+  /// Calcula distancia aproximada en km entre dos coordenadas (fórmula de Haversine simplificada)
+  double _distanciaKm(double lat1, double lon1, double lat2, double lon2) {
+    const p = 0.017453292519943295;
+    final a = 0.5 -
+        ((lat2 - lat1) * p / 2).abs() +
+        ((lat1 * p).abs()) *
+            ((lat2 * p).abs()) *
+            ((lon2 - lon1) * p / 2).abs();
+    return 12742 * (a < 0 ? -a : a);
   }
 
 
