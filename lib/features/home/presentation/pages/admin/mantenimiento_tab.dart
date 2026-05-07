@@ -128,9 +128,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       builder: (c) => AlertDialog(
         title: const Text('🔧 Restaurar tarjeta_id'),
         content: const Text(
-          'Esto restaurará el campo tarjeta_id en todas las direcciones.\n\n'
-          'Para cada dirección busca la tarjeta correcta en su territorio '
-          'basándose en el campo territorio_id.\n\n'
+          'Restaura el campo tarjeta_id usando el ID del documento.\n\n'
+          'Ejemplo: "IGUAÇU_B02-IGUAÇU_Rua..." → tarjeta_id = "B02-IGUAÇU"\n\n'
           '¿Continuar?',
         ),
         actions: [
@@ -156,14 +155,11 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       );
 
     try {
-      // 1. Cargar todas las tarjetas de todos los territorios
-      // Mapa: territorioId -> lista de {tarjetaId, tarjetaNombre}
-      final Map<String, List<Map<String, String>>> tarjetasPorTerritorio = {};
-
+      // Cargar todas las tarjetas para validar que existen
+      final Set<String> tarjetasValidas = {};
       final territoriosSnap = await FirebaseFirestore.instance
           .collection('territorios')
           .get();
-
       for (final ter in territoriosSnap.docs) {
         if (['temporales', 'removidas', 'estadisticas'].contains(ter.id))
           continue;
@@ -172,68 +168,60 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
             .doc(ter.id)
             .collection('tarjetas')
             .get();
-        tarjetasPorTerritorio[ter.id] = tarjetasSnap.docs.map((t) => {
-          'id': t.id,
-          'nombre': (t.data()['nombre'] as String? ?? t.id),
-        }).toList();
+        for (final t in tarjetasSnap.docs) {
+          tarjetasValidas.add(t.id);
+        }
       }
 
-      // 2. Cargar todas las direcciones
+      // Cargar todas las direcciones con tarjeta_id null
       final direccionesSnap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .get();
 
       int actualizadas = 0;
-      int sinTerritorio = 0;
       int noEncontradas = 0;
-
       WriteBatch batch = FirebaseFirestore.instance.batch();
       int batchCount = 0;
 
-      for (final dir in direccionesSnap.docs) {
-        final data = dir.data();
-        final territorioId = data['territorio_id'] as String?;
+      for (final doc in direccionesSnap.docs) {
+        final data = doc.data();
+        final tarjetaIdActual = data['tarjeta_id'] as String?;
 
         // Si ya tiene tarjeta_id válido, no tocar
-        final tarjetaIdActual = data['tarjeta_id'] as String?;
-        if (tarjetaIdActual != null && tarjetaIdActual.isNotEmpty) {
-          continue;
-        }
+        if (tarjetaIdActual != null && tarjetaIdActual.isNotEmpty) continue;
 
-        if (territorioId == null || territorioId.isEmpty) {
-          sinTerritorio++;
-          continue;
-        }
+        // Extraer tarjeta_id del ID del documento
+        // Formato: "IGUAÇU_B02-IGUAÇU_Rua_..."
+        // La tarjeta es la segunda parte: "B02-IGUAÇU"
+        final docId = doc.id;
+        final parts = docId.split('_');
 
-        final tarjetas = tarjetasPorTerritorio[territorioId];
-        if (tarjetas == null || tarjetas.isEmpty) {
-          noEncontradas++;
-          continue;
-        }
+        String? tarjetaId;
 
-        // Si solo hay una tarjeta en el territorio, asignarla directamente
-        String? tarjetaIdAsignar;
-        if (tarjetas.length == 1) {
-          tarjetaIdAsignar = tarjetas.first['id'];
-        } else {
-          // Buscar por nombre_tarjeta guardado en la dirección
-          final nombreTarjetaGuardado = data['nombre_tarjeta'] as String?;
-          if (nombreTarjetaGuardado != null) {
-            final match = tarjetas.where(
-              (t) => t['nombre'] == nombreTarjetaGuardado || t['id'] == nombreTarjetaGuardado
-            ).firstOrNull;
-            tarjetaIdAsignar = match?['id'];
+        if (parts.length >= 2) {
+          // Intentar con parts[1] (ej: "B02-IGUAÇU")
+          final candidato = parts[1];
+          if (tarjetasValidas.contains(candidato)) {
+            tarjetaId = candidato;
+          } else {
+            // Intentar combinando parts[1]_parts[2] si existe
+            if (parts.length >= 3) {
+              final candidato2 = '${parts[1]}_${parts[2]}';
+              if (tarjetasValidas.contains(candidato2)) {
+                tarjetaId = candidato2;
+              }
+            }
           }
         }
 
-        if (tarjetaIdAsignar != null) {
-          batch.update(dir.reference, {
-            'tarjeta_id': tarjetaIdAsignar,
+        if (tarjetaId != null) {
+          batch.update(doc.reference, {
+            'tarjeta_id': tarjetaId,
+            'nombre_tarjeta': tarjetaId,
             'estado': 'asignada',
           });
           actualizadas++;
           batchCount++;
-
           if (batchCount >= 400) {
             await batch.commit();
             batch = FirebaseFirestore.instance.batch();
@@ -246,19 +234,26 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
 
       if (batchCount > 0) await batch.commit();
 
-      // 3. Actualizar contadores en todas las tarjetas
-      for (final ter in tarjetasPorTerritorio.entries) {
-        for (final tarjeta in ter.value) {
+      // Actualizar contadores en tarjetas
+      for (final ter in territoriosSnap.docs) {
+        if (['temporales', 'removidas', 'estadisticas'].contains(ter.id))
+          continue;
+        final tarjetasSnap = await FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(ter.id)
+            .collection('tarjetas')
+            .get();
+        for (final t in tarjetasSnap.docs) {
           final count = await FirebaseFirestore.instance
               .collection('direcciones_globales')
-              .where('tarjeta_id', isEqualTo: tarjeta['id'])
+              .where('tarjeta_id', isEqualTo: t.id)
               .count()
               .get();
           await FirebaseFirestore.instance
               .collection('territorios')
-              .doc(ter.key)
+              .doc(ter.id)
               .collection('tarjetas')
-              .doc(tarjeta['id']!)
+              .doc(t.id)
               .update({'cantidad_direcciones': count.count});
         }
       }
@@ -268,8 +263,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '✅ $actualizadas direcciones restauradas'
-              '${noEncontradas > 0 ? " · $noEncontradas sin tarjeta" : ""}',
+              '✅ $actualizadas restauradas'
+              '${noEncontradas > 0 ? ' · $noEncontradas sin tarjeta' : ''}',
             ),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 5),
@@ -280,7 +275,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('❌ Error: $e'), backgroundColor: Colors.red),
         );
       }
     }
