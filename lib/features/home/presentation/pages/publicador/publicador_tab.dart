@@ -1275,8 +1275,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collectionGroup('tarjetas')
-                    .where('asignado_a',
-                        isEqualTo: widget.usuarioData['nombre'] ?? '')
+                    .where('publicador_email',
+                        isEqualTo: widget.usuarioEmail)
                     .snapshots(),
                 builder: (context, tarjetasSnap) {
                   int totalDirAsignadas = 0;
@@ -1457,8 +1457,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collectionGroup('tarjetas')
-                        .where('asignado_a',
-                            isEqualTo: widget.usuarioData['nombre'] ?? '')
+                        .where('publicador_email',
+                            isEqualTo: widget.usuarioEmail)
                         .snapshots(),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {

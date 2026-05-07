@@ -1159,7 +1159,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     required String tipo, // 'conductor' o 'publicador'
   }) async {
     try {
-      // Buscar nombre del destinatario por email
+      // Buscar ID del documento del destinatario
       final usuarioSnap = await FirebaseFirestore.instance
           .collection('usuarios')
           .where('email', isEqualTo: destinatarioEmail)
@@ -1167,13 +1167,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       final nombreDestinatario = usuarioSnap.docs.isNotEmpty
           ? (usuarioSnap.docs.first.data()['nombre'] ?? destinatarioEmail)
           : destinatarioEmail;
+      final publicadorId = usuarioSnap.docs.isNotEmpty
+          ? usuarioSnap.docs.first.id
+          : destinatarioEmail;
 
       final payload = {
         'conductor_email': tipo == 'conductor' ? destinatarioEmail : null,
         'publicador_email': tipo == 'publicador' ? destinatarioEmail : null,
+        'publicador_id': tipo == 'publicador' ? publicadorId : null,
         'estatus_envio': 'enviado',
         'enviado_a': destinatarioEmail,
-        'enviado_nombre': nombreDestinatario, // ✅ nombre real del usuario
+        'enviado_nombre': nombreDestinatario,
         'enviado_tipo': tipo,
         'enviado_en': FieldValue.serverTimestamp(),
         'nombre': nombre,
