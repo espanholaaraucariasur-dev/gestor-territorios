@@ -112,7 +112,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                 });
                               }
                             }
-                            await batch.update(
+                            batch.update(
                               FirebaseFirestore.instance
                                   .collection('territorios')
                                   .doc(terId),
