@@ -92,7 +92,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
     return FirebaseFirestore.instance
         .collectionGroup('tarjetas')
         .where('asignado_a', isEqualTo: nombre)
-        .where('completada', isEqualTo: false)
         .snapshots();
   }
 
@@ -1324,7 +1323,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                     .collectionGroup('tarjetas')
                     .where('asignado_a',
                         isEqualTo: widget.usuarioData['nombre'] ?? '')
-                    .where('completada', isEqualTo: false)
                     .snapshots(),
                 builder: (context, tarjetasSnap) {
                   int totalDirAsignadas = 0;
