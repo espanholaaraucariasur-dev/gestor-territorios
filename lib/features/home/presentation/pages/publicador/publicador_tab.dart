@@ -1602,7 +1602,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                       future: FirebaseFirestore.instance
                                           .collection('direcciones_globales')
                                           .where('tarjeta_id',
-                                              isEqualTo: tarjetaDoc.id)
+                                              isEqualTo: tarjetaId)
                                           .where('estado',
                                               isNotEqualTo: 'removida')
                                           .get(),
@@ -1665,7 +1665,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         );
                                         if (confirmar == true) {
                                           await _devolverTarjeta(
-                                              territorioId, tarjetaDoc.id);
+                                              territorioId, tarjetaId);
                                         }
                                       },
                                       child: const Text('Devolver',
@@ -1674,7 +1674,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     ),
                                     children: [
                                       _buildDireccionesTarjeta(
-                                          tarjetaDoc.id, territorioId, nombre),
+                                          tarjetaId, territorioId, nombre),
                                     ],
                                   ),
                                 ),
