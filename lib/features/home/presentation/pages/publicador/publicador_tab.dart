@@ -1480,14 +1480,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         );
                       }
 
-                      // Ocultar completadas y BLOQUEADAS
+                      // Ocultar solo completadas
                       final tarjetasVisibles = snapshot.data!.docs.where((doc) {
-                        if (_tarjetasCompletadas.contains(doc.id)) {
-                          return false;
-                        }
+                        if (_tarjetasCompletadas.contains(doc.id)) return false;
                         final d = _safeData(doc);
                         if (d['completada'] == true) return false;
-                        if (d['bloqueado'] == true) return false;
                         return true;
                       }).toList();
 

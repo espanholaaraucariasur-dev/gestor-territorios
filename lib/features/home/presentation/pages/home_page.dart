@@ -3706,6 +3706,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         'publicador_email': _usuarioEmail,
         'publicador_id': widget.usuarioData['uid'] ?? '',
         'disponible_para_publicadores': false,
+        'bloqueado': false,
         'asignado_en': FieldValue.serverTimestamp(),
         'tomado_en': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
