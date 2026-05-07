@@ -3703,7 +3703,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           .doc(tarjetaId)
           .set({
         'asignado_a': widget.usuarioData['nombre'] ?? '',
-        'publicador_email': widget.usuarioEmail,
+        'publicador_email': _usuarioEmail,
         'publicador_id': widget.usuarioData['uid'] ?? '',
         'disponible_para_publicadores': false,
         'asignado_en': FieldValue.serverTimestamp(),
