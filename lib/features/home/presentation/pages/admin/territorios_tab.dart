@@ -757,7 +757,8 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                     .add({
                   'calle': calle,
                   'complemento': complemento,
-                  'tarjeta_id': tarjetaId, // ✅ vínculo tarjeta
+                  'tarjeta_id': tarjetaId, // ✅ vínculo tarjeta (doc ID)
+                  'nombre_tarjeta': tarjetaId, // ✅ respaldo nombre para restauración
                   'territorio_id': terId, // ✅ vínculo territorio
                   'territorio_nombre': terNombre,
                   'barrio': terNombre,

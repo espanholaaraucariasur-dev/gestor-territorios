@@ -128,9 +128,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       builder: (c) => AlertDialog(
         title: const Text('🔧 Restaurar tarjeta_id'),
         content: const Text(
-          'Esto restaurará el campo tarjeta_id en todas las direcciones '
-          'basándose en el ID del documento.\n\n'
-          'Ejemplo: "Costeira_D02_Rua_..." → tarjeta_id = "D02"\n\n'
+          'Esto restaurará el campo tarjeta_id en todas las direcciones.\n\n'
+          'Para cada dirección busca la tarjeta correcta en su territorio '
+          'basándose en el campo territorio_id.\n\n'
           '¿Continuar?',
         ),
         actions: [
@@ -146,110 +146,143 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       ),
     );
     if (confirmar != true) return;
-    try {
-      // Get all territorios and their tarjetas to build a lookup map
-      // Map: tarjetaNombre -> tarjetaId (Firestore doc id)
-      final territoriosSnap =
-          await FirebaseFirestore.instance.collection('territorios').get();
 
-      // Build map of tarjetaNombre -> tarjetaDocId
-      // e.g. {'D02': 'abc123firebaseid', 'D03': 'def456...'}
-      final Map<String, String> nombreToId = {};
-      for (final territorio in territoriosSnap.docs) {
+    if (mounted)
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🔄 Restaurando vínculos...'),
+          duration: Duration(seconds: 30),
+        ),
+      );
+
+    try {
+      // 1. Cargar todas las tarjetas de todos los territorios
+      // Mapa: territorioId -> lista de {tarjetaId, tarjetaNombre}
+      final Map<String, List<Map<String, String>>> tarjetasPorTerritorio = {};
+
+      final territoriosSnap = await FirebaseFirestore.instance
+          .collection('territorios')
+          .get();
+
+      for (final ter in territoriosSnap.docs) {
+        if (['temporales', 'removidas', 'estadisticas'].contains(ter.id))
+          continue;
         final tarjetasSnap = await FirebaseFirestore.instance
             .collection('territorios')
-            .doc(territorio.id)
+            .doc(ter.id)
             .collection('tarjetas')
             .get();
-        for (final tarjeta in tarjetasSnap.docs) {
-          final nombre = (tarjeta.data()['nombre'] as String? ?? '').trim();
-          if (nombre.isNotEmpty) {
-            nombreToId[nombre] = tarjeta.id;
-          }
-        }
+        tarjetasPorTerritorio[ter.id] = tarjetasSnap.docs.map((t) => {
+          'id': t.id,
+          'nombre': (t.data()['nombre'] as String? ?? t.id),
+        }).toList();
       }
 
-      debugPrint('Mapa de tarjetas: $nombreToId');
-
-      // Update all direcciones with proper tarjeta_id based on document ID
+      // 2. Cargar todas las direcciones
       final direccionesSnap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .get();
 
-      int batchCount = 0;
-      WriteBatch currentBatch = FirebaseFirestore.instance.batch();
       int actualizadas = 0;
+      int sinTerritorio = 0;
       int noEncontradas = 0;
 
-      for (final doc in direccionesSnap.docs) {
-        final data = doc.data();
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+      int batchCount = 0;
+
+      for (final dir in direccionesSnap.docs) {
+        final data = dir.data();
         final territorioId = data['territorio_id'] as String?;
-        if (territorioId == null) continue;
 
-        // Extract tarjeta name from doc ID - second segment
-        final docId = doc.id;
-        final parts = docId.split('_');
-        if (parts.length < 2) continue;
+        // Si ya tiene tarjeta_id válido, no tocar
+        final tarjetaIdActual = data['tarjeta_id'] as String?;
+        if (tarjetaIdActual != null && tarjetaIdActual.isNotEmpty) {
+          continue;
+        }
 
-        // Try parts[1] first (e.g. "D02"), then parts[1]+parts[2] for compound names (e.g. "F01-São")
-        String? tarjetaId;
-        for (final entry in nombreToId.entries) {
-          if ((doc.data() as Map<String, dynamic>)['calle']
-              .toString()
-              .toLowerCase()
-              .contains(entry.key.toLowerCase())) {
-            tarjetaId = entry.value;
-            break;
+        if (territorioId == null || territorioId.isEmpty) {
+          sinTerritorio++;
+          continue;
+        }
+
+        final tarjetas = tarjetasPorTerritorio[territorioId];
+        if (tarjetas == null || tarjetas.isEmpty) {
+          noEncontradas++;
+          continue;
+        }
+
+        // Si solo hay una tarjeta en el territorio, asignarla directamente
+        String? tarjetaIdAsignar;
+        if (tarjetas.length == 1) {
+          tarjetaIdAsignar = tarjetas.first['id'];
+        } else {
+          // Buscar por nombre_tarjeta guardado en la dirección
+          final nombreTarjetaGuardado = data['nombre_tarjeta'] as String?;
+          if (nombreTarjetaGuardado != null) {
+            final match = tarjetas.where(
+              (t) => t['nombre'] == nombreTarjetaGuardado || t['id'] == nombreTarjetaGuardado
+            ).firstOrNull;
+            tarjetaIdAsignar = match?['id'];
           }
         }
 
-        debugPrint(
-            'DocId: ${doc.id}, parts: $parts, tarjetaNombre: ${parts.length >= 2 ? parts[1] : "N/A"}');
-
-        if (tarjetaId != null) {
-          currentBatch.update(doc.reference, {
-            'tarjeta_id': tarjetaId,
+        if (tarjetaIdAsignar != null) {
+          batch.update(dir.reference, {
+            'tarjeta_id': tarjetaIdAsignar,
             'estado': 'asignada',
           });
           actualizadas++;
           batchCount++;
 
-          // Commit every 400 operations for performance
           if (batchCount >= 400) {
-            await currentBatch.commit();
-            currentBatch = FirebaseFirestore.instance.batch();
+            await batch.commit();
+            batch = FirebaseFirestore.instance.batch();
             batchCount = 0;
           }
         } else {
-          // Mark as orphan - territory or tarjeta no longer exists
           noEncontradas++;
-          debugPrint(
-              'Huérfana: ${doc.id} - territorioId: $territorioId - parte: ${parts[1]}');
         }
       }
 
-      // Commit any remaining operations
-      if (batchCount > 0) {
-        await currentBatch.commit();
+      if (batchCount > 0) await batch.commit();
+
+      // 3. Actualizar contadores en todas las tarjetas
+      for (final ter in tarjetasPorTerritorio.entries) {
+        for (final tarjeta in ter.value) {
+          final count = await FirebaseFirestore.instance
+              .collection('direcciones_globales')
+              .where('tarjeta_id', isEqualTo: tarjeta['id'])
+              .count()
+              .get();
+          await FirebaseFirestore.instance
+              .collection('territorios')
+              .doc(ter.key)
+              .collection('tarjetas')
+              .doc(tarjeta['id']!)
+              .update({'cantidad_direcciones': count.count});
+        }
       }
 
       if (mounted) {
-        String mensaje = actualizadas > 0
-            ? '✅ $actualizadas direcciones actualizadas con tarjeta_id'
-            : '⚠️ $noEncontradas direcciones no pudieron asociarse (no se encontró tarjeta coincidente)';
-
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(mensaje),
-            backgroundColor: actualizadas > 0 ? Colors.green : Colors.orange,
+            content: Text(
+              '✅ $actualizadas direcciones restauradas'
+              '${noEncontradas > 0 ? " · $noEncontradas sin tarjeta" : ""}',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
         );
+      }
     }
   }
 
