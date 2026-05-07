@@ -80,7 +80,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
   Widget _statCard(String title, int value, IconData icon) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -93,9 +93,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: const Color(0xFF1B5E20)),
-          const SizedBox(height: 8),
+          Icon(icon, color: const Color(0xFF1B5E20), size: 22),
+          const SizedBox(height: 6),
           Text(
             value.toString(),
             style: const TextStyle(
@@ -104,7 +105,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
               color: Color(0xFF1B5E20),
             ),
           ),
-          Text(title, style: TextStyle(color: Colors.grey[600])),
+          const SizedBox(height: 2),
+          Text(
+            title,
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 11,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
@@ -1244,18 +1255,18 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       return Row(
                         children: [
                           Expanded(
-                            child: _statCard('Dir Asignadas', totalDirAsignadas,
+                            child: _statCard('Asignadas', totalDirAsignadas,
                                 Icons.home_work_outlined),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: _statCard('Dir Completadas', completadas,
+                            child: _statCard('Completadas', completadas,
                                 Icons.check_circle_outline),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: _statCard(
-                                'Dir Pendientes',
+                                'Pendientes',
                                 pendientes < 0 ? 0 : pendientes,
                                 Icons.schedule_outlined),
                           ),
