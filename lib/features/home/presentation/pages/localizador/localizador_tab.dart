@@ -71,8 +71,30 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     return t;
   }
 
+  String _normalizarBusqueda(String s) {
+    return s.toLowerCase()
+        .replaceAll(RegExp(r'[áàâã]'), 'a')
+        .replaceAll(RegExp(r'[éèê]'), 'e')
+        .replaceAll(RegExp(r'[íìî]'), 'i')
+        .replaceAll(RegExp(r'[óòôõ]'), 'o')
+        .replaceAll(RegExp(r'[úùû]'), 'u')
+        .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  double _distanciaKm(double lat1, double lon1, double lat2, double lon2) {
+    const p = 0.017453292519943295;
+    final a = 0.5 -
+        ((lat2 - lat1) * p / 2).abs() +
+        ((lat1 * p).abs()) *
+            ((lat2 * p).abs()) *
+            ((lon2 - lon1) * p / 2).abs();
+    return 12742 * (a < 0 ? -a : a);
+  }
+
   // ─────────────────────────────────────────────────────────
-  // BUSCAR CON MAPBOX + FIRESTORE
+  // BUSCAR CON FIRESTORE RANGE QUERY + MAPBOX
   // ─────────────────────────────────────────────────────────
 
   Future<void> _buscar() async {
@@ -100,85 +122,102 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     });
 
     try {
-      // 1. Geocodificar con Mapbox para obtener coordenadas y nombre normalizado
-      final coords = await MapboxService.geocodificar(consulta);
+      final consultaNorm = _normalizarBusqueda(consulta);
 
-      // 2. Buscar en Firestore usando normalización robusta
-      final snap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .limit(500)
-          .get();
+      // Extraer primer token significativo para range query
+      // Ej: "rua das flores 123" → buscar por "rua das"
+      final tokens = consultaNorm.split(' ')
+          .where((t) => t.length >= 2)
+          .toList();
 
       Map<String, dynamic>? encontrada;
-      int mejorScore = -1;
 
-      final consultaNorm = _normalizar(consulta);
+      if (tokens.isNotEmpty) {
+        // Buscar por range query en calle_normalizada
+        final prefijo = tokens.take(2).join(' ');
+        final prefijoFin = prefijo + '\uf8ff';
 
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        final calle = data['calle']?.toString() ?? '';
-        final comp = data['complemento']?.toString() ?? '';
-        final norm = _normalizar('$calle $comp');
+        final snap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('calle_normalizada', isGreaterThanOrEqualTo: prefijo)
+            .where('calle_normalizada', isLessThanOrEqualTo: prefijoFin)
+            .limit(20)
+            .get();
 
-        int score = 0;
+        if (snap.docs.isNotEmpty) {
+          // Encontró por prefijo — buscar mejor match por tokens
+          int mejorScore = -1;
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final calleNorm = (data['calle_normalizada'] as String?) ??
+                _normalizarBusqueda(data['calle']?.toString() ?? '');
+            final compNorm = _normalizarBusqueda(data['complemento']?.toString() ?? '');
+            final textoNorm = '$calleNorm $compNorm';
 
-        // Si Mapbox devolvió coordenadas, comparar con las guardadas
-        if (coords != null) {
-          final lat = data['lat'];
-          final lng = data['lng'];
+            int score = 0;
+            int coinciden = 0;
+            for (final t in tokens) {
+              if (textoNorm.contains(t)) coinciden++;
+            }
+            score = (coinciden / tokens.length * 100).round();
+
+            if (score > mejorScore) {
+              mejorScore = score;
+              encontrada = data;
+            }
+          }
+
+          if (encontrada != null && mejorScore >= 50) {
+            final calle = encontrada!['calle']?.toString() ?? '';
+            final comp = encontrada!['complemento']?.toString() ?? '';
+            setState(() {
+              _buscando = false;
+              _buscado = true;
+              _encontrada = true;
+              _direccionEncontrada = encontrada;
+              _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
+              _mostrarFormulario = false;
+            });
+            return;
+          }
+        }
+      }
+
+      // Fallback: Mapbox geocoding + comparar coordenadas
+      final coords = await MapboxService.geocodificar(consulta);
+      if (coords != null) {
+        // Buscar por coordenadas cercanas
+        final snap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('lat', isGreaterThan: coords[0] - 0.001)
+            .where('lat', isLessThan: coords[0] + 0.001)
+            .limit(10)
+            .get();
+
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          final lat = (data['lat'] as num?)?.toDouble();
+          final lng = (data['lng'] as num?)?.toDouble();
           if (lat != null && lng != null) {
-            final distancia = _distanciaKm(
-              coords[0], coords[1],
-              (lat as num).toDouble(), (lng as num).toDouble(),
-            );
-            if (distancia < 0.05) {
-              // Menos de 50 metros — coincidencia muy alta
-              score = 100;
-            } else if (distancia < 0.15) {
-              score = 80;
+            final dist = _distanciaKm(coords[0], coords[1], lat, lng);
+            if (dist < 0.05) {
+              final calle = data['calle']?.toString() ?? '';
+              final comp = data['complemento']?.toString() ?? '';
+              setState(() {
+                _buscando = false;
+                _buscado = true;
+                _encontrada = true;
+                _direccionEncontrada = data;
+                _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
+                _mostrarFormulario = false;
+              });
+              return;
             }
           }
         }
-
-        // Complementar con comparación de texto normalizado
-        final tokens = RegExp(r'[a-z]+|\d+')
-            .allMatches(consultaNorm)
-            .map((m) => m.group(0)!)
-            .where((t) => t.length >= 2)
-            .toList();
-
-        int tokensCoinciden = 0;
-        for (final token in tokens) {
-          if (norm.contains(token)) tokensCoinciden++;
-        }
-
-        if (tokens.isNotEmpty) {
-          final pct = (tokensCoinciden / tokens.length * 50).round();
-          score += pct;
-        }
-
-        if (score > mejorScore) {
-          mejorScore = score;
-          encontrada = data;
-        }
       }
 
-      // Umbral mínimo para considerar encontrada
-      if (encontrada != null && mejorScore >= 50) {
-        final calle = encontrada['calle']?.toString() ?? '';
-        final comp = encontrada['complemento']?.toString() ?? '';
-        setState(() {
-          _buscando = false;
-          _buscado = true;
-          _encontrada = true;
-          _direccionEncontrada = encontrada;
-          _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
-          _mostrarFormulario = false;
-        });
-        return;
-      }
-
-      // 3. No encontrada — verificar si ya fue solicitada
+      // No encontrada — verificar si ya fue solicitada
       final normalizada = _normalizar(consulta);
       final pendientes = await FirebaseFirestore.instance
           .collection('solicitudes_localizador')
@@ -215,19 +254,6 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       });
     }
   }
-
-  /// Calcula distancia aproximada en km entre dos coordenadas (fórmula de Haversine simplificada)
-  double _distanciaKm(double lat1, double lon1, double lat2, double lon2) {
-    const p = 0.017453292519943295;
-    final a = 0.5 -
-        ((lat2 - lat1) * p / 2).abs() +
-        ((lat1 * p).abs()) *
-            ((lat2 * p).abs()) *
-            ((lon2 - lon1) * p / 2).abs();
-    return 12742 * (a < 0 ? -a : a);
-  }
-
-
   String _tiempoRelativo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
     if (diff.inSeconds < 60) return 'hace unos segundos';

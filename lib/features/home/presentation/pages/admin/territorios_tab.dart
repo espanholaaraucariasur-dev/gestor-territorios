@@ -752,14 +752,24 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                 final terNombre = (terDoc.data()?['nombre'] as String?) ?? '';
 
                 // ✅ Guardar en direcciones_globales con vínculo a tarjeta
+                final calleNorm = calle.toLowerCase()
+                    .replaceAll(RegExp(r'[áàâã]'), 'a')
+                    .replaceAll(RegExp(r'[éèê]'), 'e')
+                    .replaceAll(RegExp(r'[íìî]'), 'i')
+                    .replaceAll(RegExp(r'[óòôõ]'), 'o')
+                    .replaceAll(RegExp(r'[úùû]'), 'u')
+                    .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+                    .replaceAll(RegExp(r'\s+'), ' ')
+                    .trim();
                 await FirebaseFirestore.instance
                     .collection('direcciones_globales')
                     .add({
                   'calle': calle,
+                  'calle_normalizada': calleNorm,
                   'complemento': complemento,
-                  'tarjeta_id': tarjetaId, // ✅ vínculo tarjeta (doc ID)
-                  'nombre_tarjeta': tarjetaId, // ✅ respaldo nombre para restauración
-                  'territorio_id': terId, // ✅ vínculo territorio
+                  'tarjeta_id': tarjetaId,
+                  'nombre_tarjeta': tarjetaId,
+                  'territorio_id': terId,
                   'territorio_nombre': terNombre,
                   'barrio': terNombre,
                   'estado': 'asignada',
