@@ -632,32 +632,24 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           final chunk = tarjetasSnap.docs.skip(i).take(100).toList();
           WriteBatch batch = FirebaseFirestore.instance.batch();
           for (final tarjeta in chunk) {
-            final tData = tarjeta.data() as Map<String, dynamic>;
-            final estaAsignada = (tData['asignado_a'] as String?)?.isNotEmpty == true;
-
-            if (estaAsignada) {
-              // Tarjeta activa con publicador — solo guardar historial del mes
-              batch.update(tarjeta.reference, {
-                'mes_anterior': mesAnterior,
-              });
-            } else {
-              // Tarjeta sin asignar — resetear completamente para nuevo mes
-              batch.update(tarjeta.reference, {
-                'mes_anterior': mesAnterior,
-                'completada': false,
-                'fecha_completada': null,
-                'enviado_a': null,
-                'enviado_nombre': null,
-                'enviado_en': null,
-                'enviado_tipo': null,
-                'publicador_email': null,
-                'publicador_nombre': null,
-                'conductor_email': null,
-                'estatus_envio': 'disponible',
-                'bloqueado': true,
-                'disponible_para_publicadores': false,
-              });
-            }
+            batch.update(tarjeta.reference, {
+              'mes_anterior': mesAnterior,
+              'asignado_a': null,
+              'asignado_en': null,
+              'mes_asignacion': null,
+              'completada': false,
+              'fecha_completada': null,
+              'enviado_a': null,
+              'enviado_nombre': null,
+              'enviado_en': null,
+              'enviado_tipo': null,
+              'publicador_email': null,
+              'publicador_nombre': null,
+              'conductor_email': null,
+              'estatus_envio': 'disponible',
+              'bloqueado': true,
+              'disponible_para_publicadores': false,
+            });
           }
           await batch.commit();
           await Future.delayed(const Duration(milliseconds: 200));
