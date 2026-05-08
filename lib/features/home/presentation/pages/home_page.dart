@@ -3709,6 +3709,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         'publicador_email': _usuarioEmail,
         'publicador_id': widget.usuarioData['uid'] ?? '',
         'mes_asignacion': '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}',
+        'completada': false,
         'disponible_para_publicadores': false,
         'bloqueado': false,
         'asignado_en': FieldValue.serverTimestamp(),

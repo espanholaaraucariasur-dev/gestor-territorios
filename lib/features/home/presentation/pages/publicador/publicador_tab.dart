@@ -92,6 +92,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
     return FirebaseFirestore.instance
         .collectionGroup('tarjetas')
         .where('asignado_a', isEqualTo: nombre)
+        .where('completada', isEqualTo: false)
         .snapshots();
   }
 
