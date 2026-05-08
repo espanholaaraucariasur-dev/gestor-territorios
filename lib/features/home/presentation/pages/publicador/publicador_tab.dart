@@ -1502,15 +1502,19 @@ class _PublicadorTabState extends State<PublicadorTab> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  FutureBuilder<List<Map<String, dynamic>>>(
-                    future: _cargarMisTarjetas(),
+                  StreamBuilder<QuerySnapshot>(
+                    stream: _buildTarjetasStream(),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      final tarjetas = snapshot.data ?? [];
-                      final tarjetasVisibles = tarjetas.where((d) {
-                        if (_tarjetasCompletadas.contains(d['_id'])) return false;
+                      if (!snapshot.hasData) {
+                        return const SizedBox();
+                      }
+
+                      final tarjetasVisibles = snapshot.data!.docs.where((doc) {
+                        if (_tarjetasCompletadas.contains(doc.id)) return false;
+                        final d = (doc.data() as Map<String, dynamic>?) ?? {};
                         if (d['completada'] == true) return false;
                         return true;
                       }).toList();
@@ -1546,12 +1550,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       return Column(
                         children:
                             List.generate(tarjetasVisibles.length, (index) {
-                          final tarjetaMap = tarjetasVisibles[index];
-                          final data = tarjetaMap;
-                          final nombre =
-                              (data['nombre'] as String?) ?? (data['_id'] as String? ?? '');
-                          final territorioId = data['_territorioId'] as String? ?? '';
-                          final tarjetaId = data['_id'] as String? ?? '';
+                          final tarjetaDoc = tarjetasVisibles[index];
+                          final data = (tarjetaDoc.data() as Map<String, dynamic>?) ?? {};
+                          final nombre = (data['nombre'] as String?) ?? tarjetaDoc.id;
+                          final territorioId = tarjetaDoc.reference.parent.parent?.id ?? '';
+                          final tarjetaId = tarjetaDoc.id;
 
                           // Color aleatorio pero estable por índice
                           final color =
