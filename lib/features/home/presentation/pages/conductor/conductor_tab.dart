@@ -517,41 +517,38 @@ class _ConductorTabState extends State<ConductorTab> {
                                   );
                                 }
                                 final todasTarjetas = tarjSnap.data!.docs;
-                                final pendientes = todasTarjetas.where((t) {
-                                  final td =
-                                      (t.data() as Map<String, dynamic>?) ?? {};
-                                  // Tarjeta pendiente = no tiene asignado_a NI enviado_nombre
-                                  final asignadoA =
-                                      (td['asignado_a'] as String?) ?? '';
-                                  final enviadoNombre =
-                                      (td['enviado_nombre'] as String?) ?? '';
-                                  return asignadoA.isEmpty &&
-                                      enviadoNombre.isEmpty;
+                                // Tarjetas relevantes para el conductor:
+                                // - Sin asignar (disponibles para enviar)
+                                // - Con asignado_a (enviadas a publicador — conductor ve su estado)
+                                // Excluir solo las completadas
+                                final tarjetasRelevantes = todasTarjetas.where((t) {
+                                  final td = (t.data() as Map<String, dynamic>?) ?? {};
+                                  if (td['completada'] == true) return false;
+                                  return true;
                                 }).toList();
 
-                                // Si todas las tarjetas están enviadas, ocultar el territorio
-                                if (todasTarjetas.isNotEmpty &&
-                                    pendientes.isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
+                                final pendientes = tarjetasRelevantes.where((t) {
+                                  final td = (t.data() as Map<String, dynamic>?) ?? {};
+                                  final asignadoA = (td['asignado_a'] as String?) ?? '';
+                                  return asignadoA.isEmpty;
+                                }).toList();
 
-                                // Sin tarjetas — ocultar territorio también
+                                // Ocultar territorio solo si no hay tarjetas en absoluto
                                 if (todasTarjetas.isEmpty) {
                                   return const SizedBox.shrink();
                                 }
 
                                 return Column(
-                                  children: pendientes.map((tarjDoc) {
+                                  children: tarjetasRelevantes.map((tarjDoc) {
                                     final td =
                                         tarjDoc.data() as Map<String, dynamic>;
                                     final tarjNombre =
                                         (td['nombre'] as String?) ?? tarjDoc.id;
-                                    final yaEnviada =
-                                        (td['asignado_a'] as String?)
-                                                ?.isNotEmpty ==
-                                            true;
                                     final asignadoA =
                                         (td['asignado_a'] as String?) ?? '';
+                                    final enviadoNombre =
+                                        (td['enviado_nombre'] as String?) ?? asignadoA;
+                                    final yaEnviada = asignadoA.isNotEmpty;
 
                                     return Container(
                                       margin: const EdgeInsets.fromLTRB(
@@ -612,7 +609,7 @@ class _ConductorTabState extends State<ConductorTab> {
                                                 ),
                                                 if (yaEnviada)
                                                   Text(
-                                                    'Enviada a: $asignadoA',
+                                                    'Enviada a: $enviadoNombre',
                                                     style: TextStyle(
                                                         fontSize: 11,
                                                         color: Colors

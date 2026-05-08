@@ -1520,27 +1520,46 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       }).toList();
 
                       if (tarjetasVisibles.isEmpty) {
+                        // Verificar si hay tarjetas completadas o simplemente no hay tarjetas
+                        final hayCompletadas = snapshot.data!.docs.any((doc) {
+                          final d = (doc.data() as Map<String, dynamic>?) ?? {};
+                          return d['completada'] == true;
+                        });
                         return Container(
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE8F5E9),
+                            color: hayCompletadas
+                                ? const Color(0xFFE8F5E9)
+                                : Colors.grey.shade50,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                                color:
-                                    const Color(0xFF1B5E20).withOpacity(0.3)),
+                                color: hayCompletadas
+                                    ? const Color(0xFF1B5E20).withOpacity(0.3)
+                                    : Colors.grey.shade200),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.check_circle,
-                                  color: Color(0xFF1B5E20)),
-                              SizedBox(width: 8),
+                              Icon(
+                                hayCompletadas
+                                    ? Icons.check_circle
+                                    : Icons.inbox_outlined,
+                                color: hayCompletadas
+                                    ? const Color(0xFF1B5E20)
+                                    : Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
                               Text(
-                                '¡Todas las tarjetas completadas!',
+                                hayCompletadas
+                                    ? '¡Todas las tarjetas completadas!'
+                                    : 'No tienes tarjetas asignadas este mes.\nToca "Solicitar territorio" para comenzar.',
                                 style: TextStyle(
-                                  color: Color(0xFF1B5E20),
+                                  color: hayCompletadas
+                                      ? const Color(0xFF1B5E20)
+                                      : Colors.grey,
                                   fontWeight: FontWeight.w600,
                                 ),
+                                textAlign: TextAlign.center,
                               ),
                             ],
                           ),
