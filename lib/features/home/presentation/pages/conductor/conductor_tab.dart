@@ -182,9 +182,13 @@ class _ConductorTabState extends State<ConductorTab> {
           .update({
         'asignado_a': nombreElegido,
         'enviado_nombre': nombreElegido,
+        'publicador_email': selectedPublicador['email'] ?? '',
         'enviado_en': FieldValue.serverTimestamp(),
+        'completada': false,
+        'bloqueado': false,
         'disponible_para_publicadores': false,
         'territorio_nombre': territorioNombre,
+        'enviado_tipo': 'publicador',
       });
 
       // Contar direcciones reales
