@@ -291,12 +291,13 @@ class _ConductorTabState extends State<ConductorTab> {
                                     widget.usuarioEmail ||
                                 data['enviado_a'] == widget.usuarioEmail;
                             if (!esDelConductor) return false;
-                            final enviadoNombre =
-                                (data['enviado_nombre'] as String?) ?? '';
-                            final asignadoA =
-                                (data['asignado_a'] as String?) ?? '';
-                            return enviadoNombre.isNotEmpty ||
-                                asignadoA.isNotEmpty;
+                            // Contar como enviada si tiene publicador_email asignado por el conductor
+                            final asignadoA = (data['asignado_a'] as String?) ?? '';
+                            final enviadoNombre = (data['enviado_nombre'] as String?) ?? '';
+                            // Solo tarjetas que el conductor envió activamente (tienen enviado_tipo publicador)
+                            final enviadoTipo = (data['enviado_tipo'] as String?) ?? '';
+                            return asignadoA.isNotEmpty ||
+                                (enviadoNombre.isNotEmpty && enviadoTipo == 'publicador');
                           }).length;
                           final devueltas = todas.where((d) {
                             final data = d.data() as Map<String, dynamic>;
@@ -497,7 +498,7 @@ class _ConductorTabState extends State<ConductorTab> {
                                   fontWeight: FontWeight.bold, fontSize: 15)),
                           subtitle: enviadoNombre.isNotEmpty
                               ? Text(
-                                  'Enviado por: $enviadoNombre${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
+                                  'Cond: $enviadoNombre${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
                                   style: const TextStyle(fontSize: 11),
                                 )
                               : null,
