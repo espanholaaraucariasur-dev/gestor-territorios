@@ -76,16 +76,34 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
   Future<void> _loginBiometrico() async {
     try {
+      // Verificar disponibilidad antes de intentar
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final isSupported = await _localAuth.isDeviceSupported();
+      if (!canCheck || !isSupported) {
+        _snack('Biometría no disponible en este dispositivo', Colors.orange);
+        return;
+      }
+
       final ok = await _localAuth.authenticate(
-        localizedReason: 'Autentícate para ingresar',
-        options:
-            const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+        localizedReason: 'Autentícate para ingresar a Araucaria Sur',
+        options: const AuthenticationOptions(
+          biometricOnly: false, // false permite PIN como fallback
+          stickyAuth: true,
+          sensitiveTransaction: false,
+        ),
       );
       if (!ok) return;
       final email = await _secureStorage.read(key: 'biometric_email');
       if (email != null) await _loginConEmail(email);
     } catch (e) {
-      _snack('Error biométrico: $e', Colors.red);
+      final msg = e.toString();
+      if (msg.contains('NotEnrolled')) {
+        _snack('No hay huella registrada en el dispositivo', Colors.orange);
+      } else if (msg.contains('LockedOut')) {
+        _snack('Demasiados intentos. Intenta más tarde', Colors.red);
+      } else {
+        _snack('${context.t('biometric_error')}: $e', Colors.red);
+      }
     }
   }
 

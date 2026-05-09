@@ -10,5 +10,14 @@
 -dontwarn com.google.android.play.core.**
 -keep class com.google.android.play.core.** { *; }
 
+# Biometría — local_auth
+-keep class androidx.biometric.** { *; }
+-keep class android.hardware.biometrics.** { *; }
+-dontwarn androidx.biometric.**
+
+# flutter_secure_storage
+-keep class com.it_nomads.fluttersecurestorage.** { *; }
+-dontwarn com.it_nomads.fluttersecurestorage.**
+
 # Keep R class
 -keepclassmembers class **.R$* { public static <fields>; }
