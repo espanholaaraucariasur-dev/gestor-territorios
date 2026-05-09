@@ -1504,14 +1504,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              context.t('monthly_progress'),
+                            Builder(builder: (ctx) => Text(
+                              ctx.t('monthly_progress'),
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
                                 color: Color(0xFF263238),
                               ),
-                            ),
+                            )),
                             Text(
                               '${(avance * 100).toStringAsFixed(0)}%',
                               style: const TextStyle(
