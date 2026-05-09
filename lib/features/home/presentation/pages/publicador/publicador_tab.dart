@@ -1228,7 +1228,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
         nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
           // ── HEADER ─────────────────────────────────────
@@ -1488,15 +1488,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   return Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
+                      color: context.cardBg,
                       borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      border: Border.all(color: context.borderColor),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1504,12 +1498,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text(
+                            Text(
                               'Progreso mensual',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
-                                color: Color(0xFF263238),
+                                color: context.textPrimary,
                               ),
                             ),
                             Text(
@@ -1607,13 +1601,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
                             color: hayCompletadas
-                                ? const Color(0xFFE8F5E9)
-                                : Colors.grey.shade50,
+                                ? context.statGreenBg
+                                : context.surfaceMid,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                                 color: hayCompletadas
-                                    ? const Color(0xFF1B5E20).withOpacity(0.3)
-                                    : Colors.grey.shade200),
+                                    ? context.statGreenText.withOpacity(0.3)
+                                    : context.borderColor),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -1625,19 +1619,23 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                 color: hayCompletadas
                                     ? const Color(0xFF1B5E20)
                                     : Colors.grey,
+                                size: 20,
                               ),
                               const SizedBox(width: 8),
-                              Text(
-                                hayCompletadas
-                                    ? context.t('all_cards_completed')
-                                    : context.t('no_cards_this_month'),
-                                style: TextStyle(
-                                  color: hayCompletadas
-                                      ? const Color(0xFF1B5E20)
-                                      : Colors.grey,
-                                  fontWeight: FontWeight.w600,
+                              Flexible(
+                                child: Text(
+                                  hayCompletadas
+                                      ? context.t('all_cards_completed')
+                                      : context.t('no_cards_this_month'),
+                                  style: TextStyle(
+                                    color: hayCompletadas
+                                        ? const Color(0xFF1B5E20)
+                                        : Colors.grey,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                  textAlign: TextAlign.center,
                                 ),
-                                textAlign: TextAlign.center,
                               ),
                             ],
                           ),
