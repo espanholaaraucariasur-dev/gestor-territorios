@@ -122,15 +122,15 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
             final docs = snapshot.data!.docs;
             if (docs.isEmpty) {
-              return const Center(
+              return Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.notifications_none_outlined,
+                    const Icon(Icons.notifications_none_outlined,
                         size: 48, color: Colors.grey),
-                    SizedBox(height: 16),
+                    const SizedBox(height: 16),
                     Text(context.t('no_new_notifications'),
-                        style: TextStyle(color: Colors.grey)),
+                        style: const TextStyle(color: Colors.grey)),
                   ],
                 ),
               );
