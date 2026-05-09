@@ -1628,8 +1628,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                               const SizedBox(width: 8),
                               Text(
                                 hayCompletadas
-                                    ? '¡Todas las tarjetas completadas!'
-                                    : 'No tienes tarjetas asignadas este mes.\nToca "Solicitar territorio" para comenzar.',
+                                    ? context.t('all_cards_completed')
+                                    : context.t('no_cards_this_month'),
                                 style: TextStyle(
                                   color: hayCompletadas
                                       ? const Color(0xFF1B5E20)

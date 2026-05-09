@@ -11,7 +11,7 @@ class MantenimientoTab extends StatefulWidget {
 class _MantenimientoTabState extends State<MantenimientoTab> {
   bool _desbloqueado = false;
   final TextEditingController _pinCtrl = TextEditingController();
-  static const String _pin = '1234'; // PIN por defecto — cambiar en producción
+  static const String _pin = '272700';
 
   @override
   void dispose() {
@@ -45,7 +45,6 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                 controller: _pinCtrl,
                 keyboardType: TextInputType.number,
                 maxLength: 6,
-                obscureText: true,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 8),
                 decoration: InputDecoration(
@@ -392,12 +391,14 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       builder: (c) => AlertDialog(
         title: const Text('🔄 Limpiar datos dinámicos'),
         content: const Text(
-          'Esto reiniciará:\n\n'
+          'Esto limpiará:\n\n'
           '• predicado → false en todas las direcciones\n'
           '• estado_predicacion → pendiente\n'
-          '• mes_predicacion / fecha_predicacion → null\n'
-          '• Tarjetas temporales → eliminadas\n\n'
-          '⚠️ Las direcciones, territorios y vínculos tarjeta_id NO se modifican.',
+          '• Notificaciones leídas → eliminadas\n'
+          '• Tarjetas temporales → eliminadas\n'
+          '• Direcciones temporales en direcciones_globales → eliminadas\n'
+          '• Direcciones huérfanas → eliminadas\n\n'
+          '⚠️ Las direcciones activas y vínculos tarjeta_id NO se modifican.',
         ),
         actions: [
           TextButton(
@@ -417,17 +418,17 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('🔄 Limpiando datos...'),
-            duration: Duration(seconds: 30),
+            duration: Duration(seconds: 60),
           ),
         );
 
+      final db = FirebaseFirestore.instance;
+
       // 1. Resetear predicaciones en direcciones
-      final snap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .get();
+      final snap = await db.collection('direcciones_globales').get();
       for (int i = 0; i < snap.docs.length; i += 100) {
         final chunk = snap.docs.skip(i).take(100).toList();
-        WriteBatch batch = FirebaseFirestore.instance.batch();
+        WriteBatch batch = db.batch();
         for (final doc in chunk) {
           batch.update(doc.reference, {
             'predicado': false,
@@ -442,26 +443,85 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       }
 
       // 2. Eliminar tarjetas temporales
-      final temporalesSnap = await FirebaseFirestore.instance
+      final temporalesSnap = await db
           .collection('territorios')
           .doc('temporales')
           .collection('tarjetas')
           .get();
       for (int i = 0; i < temporalesSnap.docs.length; i += 100) {
         final chunk = temporalesSnap.docs.skip(i).take(100).toList();
-        WriteBatch batch = FirebaseFirestore.instance.batch();
-        for (final t in chunk) {
-          batch.delete(t.reference);
-        }
+        WriteBatch batch = db.batch();
+        for (final t in chunk) batch.delete(t.reference);
         await batch.commit();
+      }
+
+      // 3. Eliminar direcciones temporales de direcciones_globales
+      final dirsTemporales = await db
+          .collection('direcciones_globales')
+          .where('territorio_id', isEqualTo: 'temporales')
+          .get();
+      for (int i = 0; i < dirsTemporales.docs.length; i += 100) {
+        final chunk = dirsTemporales.docs.skip(i).take(100).toList();
+        WriteBatch batch = db.batch();
+        for (final d in chunk) batch.delete(d.reference);
+        await batch.commit();
+      }
+
+      // 4. Eliminar notificaciones leídas
+      final notifSnap = await db
+          .collection('notificaciones')
+          .where('leida', isEqualTo: true)
+          .get();
+      for (int i = 0; i < notifSnap.docs.length; i += 100) {
+        final chunk = notifSnap.docs.skip(i).take(100).toList();
+        WriteBatch batch = db.batch();
+        for (final n in chunk) batch.delete(n.reference);
+        await batch.commit();
+      }
+
+      // 5. Limpiar direcciones huérfanas (tarjeta_id apunta a tarjeta inexistente)
+      final todasTarjetas = <String>{};
+      final terSnap = await db.collection('territorios').get();
+      for (final ter in terSnap.docs) {
+        if (['removidas', 'estadisticas'].contains(ter.id)) continue;
+        final tarjSnap = await db
+            .collection('territorios')
+            .doc(ter.id)
+            .collection('tarjetas')
+            .get();
+        for (final t in tarjSnap.docs) todasTarjetas.add(t.id);
+      }
+
+      int huerfanas = 0;
+      for (int i = 0; i < snap.docs.length; i += 100) {
+        final chunk = snap.docs.skip(i).take(100).toList();
+        WriteBatch batch = db.batch();
+        bool hasOp = false;
+        for (final doc in chunk) {
+          final tarjetaId = (doc.data()['tarjeta_id'] as String?) ?? '';
+          if (tarjetaId.isNotEmpty && !todasTarjetas.contains(tarjetaId)) {
+            batch.delete(doc.reference);
+            huerfanas++;
+            hasOp = true;
+          }
+        }
+        if (hasOp) await batch.commit();
       }
 
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('✅ Datos dinámicos limpiados'),
-              backgroundColor: Colors.green),
+          SnackBar(
+            content: Text(
+              '✅ Limpieza completa\n'
+              '• ${temporalesSnap.docs.length} tarjetas temporales\n'
+              '• ${dirsTemporales.docs.length} dirs temporales\n'
+              '• ${notifSnap.docs.length} notificaciones\n'
+              '• $huerfanas dirs huérfanas',
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 6),
+          ),
         );
       }
     } catch (e) {
