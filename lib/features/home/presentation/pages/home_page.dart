@@ -923,9 +923,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         ),
         title: Column(
           children: [
-            const Text(
-              'Congregación Araucaria Sur',
-              style: TextStyle(
+            Text(
+              context.t('app_name'),
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
@@ -933,7 +933,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
               ),
             ),
             Text(
-              'Congregación de Español',
+              context.t('app_subtitle'),
               style: TextStyle(
                 color: Colors.white.withOpacity(0.75),
                 fontSize: 10,

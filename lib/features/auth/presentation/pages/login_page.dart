@@ -528,7 +528,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Congregación de Español · Gestión Territorial',
+                      context.t('app_subtitle'),
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.8),
                         fontSize: 12,
