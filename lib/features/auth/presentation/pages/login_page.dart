@@ -236,6 +236,80 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   // ─────────────────────────────────────────────────────────
 
   Future<void> _solicitarAcceso() async {
+    // PASO 1: Verificar código de 4 dígitos
+    final codigoCtrl = TextEditingController();
+    bool codigoValido = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => StatefulBuilder(
+        builder: (context, setDlg) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.lock_outline, color: _verde),
+              SizedBox(width: 10),
+              Text('Código de acceso'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Ingresa el código de 4 dígitos proporcionado\npor la congregación.',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: codigoCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 12),
+                decoration: InputDecoration(
+                  counterText: '',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final codigo = codigoCtrl.text.trim();
+                if (codigo.length != 4) {
+                  _snack('Ingresa exactamente 4 dígitos', Colors.orange);
+                  return;
+                }
+                // Verificar contra Firestore
+                final doc = await _db.collection('configuracion').doc('codigo_acceso').get();
+                final codigoCorrecto = (doc.data()?['codigo'] as String?) ?? '';
+                if (codigo == codigoCorrecto) {
+                  codigoValido = true;
+                  Navigator.pop(c);
+                } else {
+                  _snack('Código incorrecto', Colors.red);
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: _verde, foregroundColor: Colors.white),
+              child: const Text('Verificar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!codigoValido) return;
+
+    // PASO 2: Formulario de solicitud de acceso
     final nomCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final passCtrl = TextEditingController();

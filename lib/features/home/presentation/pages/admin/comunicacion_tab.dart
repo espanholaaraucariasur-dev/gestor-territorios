@@ -15,7 +15,9 @@ class ComunicacionTab extends StatefulWidget {
 
 class _ComunicacionTabState extends State<ComunicacionTab> {
   final TextEditingController _anuncioCtrl = TextEditingController();
+  final TextEditingController _codigoAccesoCtrl = TextEditingController();
   bool _enviandoAnuncio = false;
+  bool _guardandoCodigo = false;
 
   static const Color _verde = Color(0xFF1B5E20);
   static const Color _naranja = Color(0xFFE65100);
@@ -29,6 +31,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   @override
   void dispose() {
     _anuncioCtrl.dispose();
+    _codigoAccesoCtrl.dispose();
     super.dispose();
   }
 
@@ -785,6 +788,103 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           _seccionTitulo('DIRECCIONES ENVIADAS'),
           const SizedBox(height: 10),
           _buildSolicitudes(),
+
+          const SizedBox(height: 20),
+
+          // ── Código de acceso ─────────────────────────────
+          _seccionTitulo('CÓDIGO DE ACCESO'),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Código de 4 dígitos para solicitar acceso a la app.\nCompártelo en el grupo de WhatsApp de la congregación.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                StreamBuilder<DocumentSnapshot>(
+                  stream: FirebaseFirestore.instance.collection('configuracion').doc('codigo_acceso').snapshots(),
+                  builder: (context, snap) {
+                    final codigoActual = (snap.data?.data() as Map<String, dynamic>?)?['codigo'] as String? ?? '----';
+                    return Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1B5E20).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
+                          ),
+                          child: Text(
+                            codigoActual,
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1B5E20),
+                              letterSpacing: 8,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Text('Código actual', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _codigoAccesoCtrl,
+                        keyboardType: TextInputType.number,
+                        maxLength: 4,
+                        decoration: InputDecoration(
+                          labelText: 'Nuevo código (4 dígitos)',
+                          counterText: '',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      onPressed: _guardandoCodigo ? null : () async {
+                        final codigo = _codigoAccesoCtrl.text.trim();
+                        if (codigo.length != 4 || int.tryParse(codigo) == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('El código debe ser de exactamente 4 dígitos'), backgroundColor: Colors.red),
+                          );
+                          return;
+                        }
+                        setState(() => _guardandoCodigo = true);
+                        await FirebaseFirestore.instance.collection('configuracion').doc('codigo_acceso').set({
+                          'codigo': codigo,
+                          'actualizado_en': FieldValue.serverTimestamp(),
+                        });
+                        _codigoAccesoCtrl.clear();
+                        setState(() => _guardandoCodigo = false);
+                        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('✅ Código actualizado'), backgroundColor: Colors.green),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white),
+                      child: _guardandoCodigo
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Text('Guardar'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
 
           const SizedBox(height: 20),
         ],

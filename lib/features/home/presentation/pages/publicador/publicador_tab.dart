@@ -972,16 +972,19 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
       final batch = db.batch();
 
+      // Nombre del territorio consistente para toda la tarjeta
+      final terDoc = await db.collection('territorios').doc(territorioId).get();
+      final territorioNombreGlobal = (terDoc.data()?['nombre'] as String?)?.isNotEmpty == true
+          ? terDoc.data()!['nombre'] as String
+          : territorioId;
+
       for (final dir in direcciones) {
         final estado = estados[dir.id] ?? 'pendiente';
         final motivo = textos[dir.id]?.trim() ?? '';
         final data = _safeData(dir);
         final calle = (data['calle'] as String?) ?? '';
         final complemento = (data['complemento'] as String?) ?? '';
-        final territorioNombre =
-            (data['territorio_nombre'] as String?)?.isNotEmpty == true
-                ? data['territorio_nombre'] as String
-                : (data['barrio'] as String?) ?? territorioId;
+        final territorioNombre = territorioNombreGlobal;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
 
         // ── Verificar campañas activas ──────────────────
@@ -1106,7 +1109,35 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
       await batch.commit();
 
-      // Si es tarjeta temporal → eliminar sus direcciones de direcciones_globales
+      // Notificar al admin de territorios si hay "no_predicado" o "no_hispano"
+      final dirNoPredicadas = direcciones.where((dir) {
+        final estado = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? 'pendiente';
+        return estado == 'no_predicado' || estado == 'no_hispano';
+      }).toList();
+
+      if (dirNoPredicadas.isNotEmpty) {
+        final nombre = widget.usuarioData['nombre'] ?? 'Publicador';
+        final resumen = dirNoPredicadas.map((dir) {
+          final data = dir.data() as Map<String, dynamic>;
+          final estado = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? '';
+          final calle = data['calle']?.toString() ?? '';
+          final motivo = estado == 'no_hispano' ? 'No vive hispanohablante' : 'No se predicó';
+          return '$calle — $motivo';
+        }).join('\n');
+
+        // Guardar notificación en Firestore para el admin
+        await db.collection('notificaciones').add({
+          'tipo': 'alerta_predicacion',
+          'titulo': '⚠️ Atención requerida',
+          'mensaje': '$nombre reportó ${dirNoPredicadas.length} dirección(es) en $tarjetaId:\n$resumen',
+          'tarjeta_id': tarjetaId,
+          'territorio_id': territorioId,
+          'publicador': nombre,
+          'leida': false,
+          'destino_rol': 'admin_territorios',
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }
       // Las direcciones temporales no deben persistir en la BD
       final esTemporal = territorioId == 'temporales' ||
           (await db.collection('territorios')
@@ -1314,6 +1345,42 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 ]),
               ),
             ),
+
+          // ── ANUNCIO GENERAL ──────────────────────────────
+          SliverToBoxAdapter(
+            child: StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('configuracion')
+                  .doc('anuncio_general')
+                  .snapshots(),
+              builder: (context, snap) {
+                final data = (snap.data?.data() as Map<String, dynamic>?) ?? {};
+                final texto = (data['texto'] as String?) ?? '';
+                if (texto.isEmpty) return const SizedBox.shrink();
+                return Container(
+                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1565C0).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF1565C0).withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.campaign, color: Color(0xFF1565C0), size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          texto,
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF1565C0)),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
 
           // ── STATS ──────────────────────────────────────
           SliverPadding(
