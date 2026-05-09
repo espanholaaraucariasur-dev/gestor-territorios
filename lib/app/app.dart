@@ -12,7 +12,7 @@ class AraucariaApp extends StatelessWidget {
       initialLanguage: 'ES',
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Congregación Araucaria Sur',
+        title: 'Araucaria Sur',
         theme: AppTheme.light,
         home: const SplashPage(),
       ),
