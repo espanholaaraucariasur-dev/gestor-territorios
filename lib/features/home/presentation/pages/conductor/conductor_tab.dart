@@ -18,6 +18,31 @@ class ConductorTab extends StatefulWidget {
 }
 
 class _ConductorTabState extends State<ConductorTab> {
+
+  Widget _barraProgreso(String label, int valor, int total, Color color, double pct) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 80,
+          child: Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: pct.clamp(0.0, 1.0),
+              minHeight: 8,
+              backgroundColor: Colors.grey.shade100,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text('$valor/$total', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color)),
+      ],
+    );
+  }
+
   Widget _statCard(String title, int value, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -318,54 +343,75 @@ class _ConductorTabState extends State<ConductorTab> {
                     },
                   ),
                   const SizedBox(height: 20),
-                  // Simple bar chart simulation
-                  Container(
-                    height: 120,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).cardColor,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.05),
-                          blurRadius: 10,
-                          offset: const Offset(0, 2),
+                  // Resumen del mes actual — datos reales
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collectionGroup('tarjetas')
+                        .snapshots(),
+                    builder: (context, snapTarjetas) {
+                      final mesActual = '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
+                      final todas = snapTarjetas.data?.docs ?? [];
+
+                      // Solo tarjetas del conductor este mes
+                      final delConductor = todas.where((t) {
+                        final d = (t.data() as Map<String, dynamic>?) ?? {};
+                        return d['conductor_email'] == widget.usuarioEmail ||
+                            d['enviado_a'] == widget.usuarioEmail;
+                      }).toList();
+
+                      final total = delConductor.length;
+                      final enviadas = delConductor.where((t) {
+                        final d = (t.data() as Map<String, dynamic>?) ?? {};
+                        return (d['asignado_a'] as String?)?.isNotEmpty == true;
+                      }).length;
+                      final completadas = delConductor.where((t) {
+                        final d = (t.data() as Map<String, dynamic>?) ?? {};
+                        return d['completada'] == true;
+                      }).length;
+                      final disponibles = total - enviadas;
+
+                      final pctEnviadas = total > 0 ? enviadas / total : 0.0;
+                      final pctCompletadas = total > 0 ? completadas / total : 0.0;
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))],
                         ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Actividad Mensual',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey[700],
-                          ),
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Progreso del mes',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[700])),
+                                Text(mesActual,
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            // Barra enviadas
+                            _barraProgreso('Enviadas', enviadas, total, const Color(0xFF1B5E20), pctEnviadas),
+                            const SizedBox(height: 8),
+                            // Barra completadas
+                            _barraProgreso('Completadas', completadas, total, Colors.blue, pctCompletadas),
+                            const SizedBox(height: 8),
+                            // Disponibles
+                            Row(
+                              children: [
+                                Icon(Icons.inbox_outlined, size: 14, color: Colors.grey[400]),
+                                const SizedBox(width: 6),
+                                Text('$disponibles disponibles para enviar',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                              ],
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
-                        Expanded(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: List.generate(6, (index) {
-                              final heights = [0.3, 0.7, 0.5, 0.9, 0.6, 0.8];
-                              return Container(
-                                width: 20,
-                                height: 60 * heights[index],
-                                decoration: BoxDecoration(
-                                  color: const Color(
-                                    0xFF1B5E20,
-                                  ).withValues(alpha: 0.7),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                              );
-                            }),
-                          ),
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
                 ],
               ),
