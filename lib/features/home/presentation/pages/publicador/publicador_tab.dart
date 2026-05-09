@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
+import '../../../../../core/themes/theme_extensions.dart';
 // Servicios
 import '../../../../../core/services/mapbox_service.dart';
 import '../../../../../core/services/auto_return_service.dart';
@@ -158,7 +159,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -394,7 +395,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       return Container(
                         margin: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: Theme.of(context).cardColor,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                               color: accentColor.withOpacity(0.25), width: 1),
@@ -1487,7 +1488,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   return Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).cardColor,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
@@ -1659,7 +1660,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           return Container(
                             margin: const EdgeInsets.only(bottom: 14),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
                                   color: color.withOpacity(0.2), width: 1),

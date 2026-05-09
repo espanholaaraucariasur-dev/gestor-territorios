@@ -860,7 +860,7 @@ class _AdminTabState extends State<AdminTab> {
                       decoration: InputDecoration(
                         hintText: 'Ej: A01 - CENTRO 1',
                         filled: true,
-                        fillColor: const Color(0xFFF5F5F5),
+                        fillColor: Theme.of(context).inputDecorationTheme.fillColor ?? const Color(0xFFF5F5F5),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide.none,

@@ -22,7 +22,7 @@ class _ConductorTabState extends State<ConductorTab> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -322,7 +322,7 @@ class _ConductorTabState extends State<ConductorTab> {
                   Container(
                     height: 120,
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).cardColor,
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: [
                         BoxShadow(
@@ -418,7 +418,7 @@ class _ConductorTabState extends State<ConductorTab> {
                       margin: const EdgeInsets.only(bottom: 20),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).cardColor,
                         borderRadius: BorderRadius.circular(20),
                         border: Border(
                             left: BorderSide(
@@ -469,7 +469,7 @@ class _ConductorTabState extends State<ConductorTab> {
                           return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: Theme.of(context).cardColor,
                           borderRadius: BorderRadius.circular(16),
                           border: Border(
                               left: BorderSide(
@@ -765,7 +765,7 @@ class _ConductorTabState extends State<ConductorTab> {
                       margin: const EdgeInsets.only(bottom: 20),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).cardColor,
                         borderRadius: BorderRadius.circular(20),
                         border: Border(
                           left: BorderSide(color: Colors.blue, width: 4),
@@ -790,7 +790,7 @@ class _ConductorTabState extends State<ConductorTab> {
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: Theme.of(context).cardColor,
                           borderRadius: BorderRadius.circular(20),
                           border: Border(
                             left: BorderSide(color: Colors.blue, width: 4),

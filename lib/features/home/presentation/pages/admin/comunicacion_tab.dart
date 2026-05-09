@@ -451,7 +451,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
+                      color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -701,7 +701,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
@@ -809,7 +809,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(14),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
             ),
@@ -906,7 +906,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(14),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
             ),
@@ -967,7 +967,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: activa ? _naranja.withOpacity(0.4) : Colors.grey.shade200,
@@ -1223,7 +1223,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).cardColor,
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
@@ -1311,7 +1311,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           return Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).cardColor,
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
@@ -1355,7 +1355,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             return Container(
               margin: const EdgeInsets.only(bottom: 10),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).cardColor,
                 borderRadius: BorderRadius.circular(12),
                 border: Border(
                   left: BorderSide(
