@@ -200,7 +200,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
   Widget _miniStat(String title, int value, IconData icon, Color color) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8),
@@ -209,18 +209,18 @@ class _PublicadorTabState extends State<PublicadorTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: color),
+          Icon(icon, size: 14, color: color),
           const SizedBox(height: 4),
           Text(
             title,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: color),
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 2),
           Text(
             value.toString(),
-            style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.bold, color: color),
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color),
           ),
         ],
       ),
