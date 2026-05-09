@@ -3563,9 +3563,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       itemCount: snapshot.data!.docs.length,
                       itemBuilder: (context, i) {
                         final terDoc = snapshot.data!.docs[i];
-                        final terNombre =
-                            (terDoc.data() as Map<String, dynamic>)['nombre'] ??
-                                terDoc.id;
+                        final terData = terDoc.data() as Map<String, dynamic>;
+                        final terNombre = terData['nombre'] ?? terDoc.id;
+
+                        // Ocultar territorios reservados solo para conductores
+                        final soloConductores = (terData['solo_conductores'] as bool?) ?? false;
+                        if (soloConductores) return const SizedBox.shrink();
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -3602,6 +3605,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                   }
 
                                   // Filtra en memoria las que no están asignadas
+                                  // ni son solo para conductores
                                   final tarjetas =
                                       (tarjetasSnap.data?.docs ?? []).where((
                                     doc,
@@ -3610,7 +3614,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                         doc.data() as Map<String, dynamic>;
                                     final asignado =
                                         d['asignado_a']?.toString() ?? '';
-                                    return asignado.isEmpty;
+                                    // Excluir tarjetas reservadas solo para conductores
+                                    final soloConductores = (d['solo_conductores'] as bool?) ?? false;
+                                    return asignado.isEmpty && !soloConductores;
                                   }).toList();
 
                                   if (tarjetas.isEmpty) {

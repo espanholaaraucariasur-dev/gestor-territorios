@@ -1176,24 +1176,57 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                           backgroundColor: Colors.orange),
                                     );
                                   } else {
-                                    // ABRIR — liberar TODAS las tarjetas del territorio
+                                    // ABRIR — preguntar para quién liberar
+                                    if (!mounted) return;
+                                    final opcion = await showDialog<String>(
+                                      context: context,
+                                      builder: (c) => AlertDialog(
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                        title: const Row(children: [
+                                          Icon(Icons.lock_open, color: Color(0xFF1B5E20)),
+                                          SizedBox(width: 8),
+                                          Text('¿Para quién liberar?'),
+                                        ]),
+                                        content: const Text('Selecciona quién puede ver y tomar las tarjetas de este territorio.'),
+                                        actions: [
+                                          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
+                                          OutlinedButton.icon(
+                                            onPressed: () => Navigator.pop(c, 'conductores'),
+                                            icon: const Icon(Icons.directions_car, size: 16),
+                                            label: const Text('Solo conductores'),
+                                            style: OutlinedButton.styleFrom(foregroundColor: Colors.purple),
+                                          ),
+                                          ElevatedButton.icon(
+                                            onPressed: () => Navigator.pop(c, 'todos'),
+                                            icon: const Icon(Icons.people, size: 16),
+                                            label: const Text('Todos'),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFF1B5E20),
+                                              foregroundColor: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (opcion == null) return;
+
+                                    final soloConductores = opcion == 'conductores';
                                     final tarjetasSnap = await FirebaseFirestore
                                         .instance
                                         .collection('territorios')
                                         .doc(territorio.id)
                                         .collection('tarjetas')
                                         .get();
-                                    final batch =
-                                        FirebaseFirestore.instance.batch();
+                                    final batch = FirebaseFirestore.instance.batch();
                                     for (final t in tarjetasSnap.docs) {
                                       final td = t.data() as Map<String, dynamic>;
-                                      // Solo desbloquear tarjetas NO asignadas ni enviadas
                                       final asignado = td['asignado_a']?.toString() ?? '';
                                       final enviado = td['enviado_a']?.toString() ?? '';
                                       if (asignado.isEmpty && enviado.isEmpty) {
                                         batch.update(t.reference, {
                                           'bloqueado': false,
-                                          'disponible_para_publicadores': true,
+                                          'disponible_para_publicadores': !soloConductores,
+                                          'solo_conductores': soloConductores,
                                         });
                                       }
                                     }
@@ -1201,15 +1234,20 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                       FirebaseFirestore.instance
                                           .collection('territorios')
                                           .doc(territorio.id),
-                                      {'disponible_para_publicadores': true},
+                                      {
+                                        'disponible_para_publicadores': !soloConductores,
+                                        'solo_conductores': soloConductores,
+                                      },
                                     );
                                     await batch.commit();
                                     if (!mounted) return;
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content: Text(
-                                              '✅ Territorio abierto — tarjetas liberadas'),
-                                          backgroundColor: Colors.green),
+                                      SnackBar(
+                                        content: Text(soloConductores
+                                            ? '🔓 Territorio liberado solo para conductores'
+                                            : '🔓 Territorio liberado para todos'),
+                                        backgroundColor: Colors.green,
+                                      ),
                                     );
                                   }
                                 },
