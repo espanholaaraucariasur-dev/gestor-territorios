@@ -3633,6 +3633,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                     children: tarjetas.map((tarjetaDoc) {
                                       final data = tarjetaDoc.data()
                                           as Map<String, dynamic>;
+                                      final tarjetaData = data;
                                       final tarjetaNombre =
                                           data['nombre'] ?? tarjetaDoc.id;
 
@@ -3649,16 +3650,70 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                                   0;
 
                                           return ListTile(
-                                            leading: const Icon(
+                                            leading: Icon(
                                               Icons.credit_card,
-                                              color: Colors.blue,
+                                              color: tarjetaData['completada'] == true
+                                                  ? Colors.grey
+                                                  : Colors.blue,
                                             ),
-                                            title: Text(tarjetaNombre),
+                                            title: Text(
+                                              tarjetaNombre,
+                                              style: TextStyle(
+                                                color: tarjetaData['completada'] == true
+                                                    ? Colors.grey
+                                                    : Colors.black,
+                                              ),
+                                            ),
                                             subtitle: Text(
-                                                '$cantDirReal direcciones'), // ✅ Ahora muestra el conteo real
-                                            trailing: ElevatedButton(
-                                              onPressed: cantDirReal >
-                                                      0 // ✅ Solo permite tomar si hay direcciones
+                                              tarjetaData['completada'] == true
+                                                  ? '✅ Completada este mes'
+                                                  : '$cantDirReal direcciones',
+                                            ),
+                                            trailing: tarjetaData['completada'] == true
+                                                ? OutlinedButton(
+                                                    onPressed: () async {
+                                                      final confirmar = await showDialog<bool>(
+                                                        context: context,
+                                                        builder: (c) => AlertDialog(
+                                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                                          title: const Row(children: [
+                                                            Icon(Icons.refresh, color: Color(0xFF1B5E20)),
+                                                            SizedBox(width: 8),
+                                                            Text('Reactivar tarjeta'),
+                                                          ]),
+                                                          content: Text('La tarjeta "$tarjetaNombre" ya fue completada este mes.\n\n¿Deseas reactivarla para que pueda ser tomada nuevamente?'),
+                                                          actions: [
+                                                            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+                                                            ElevatedButton(
+                                                              onPressed: () => Navigator.pop(c, true),
+                                                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white),
+                                                              child: const Text('Reactivar'),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      );
+                                                      if (confirmar == true) {
+                                                        await FirebaseFirestore.instance
+                                                            .collection('territorios')
+                                                            .doc(terDoc.id)
+                                                            .collection('tarjetas')
+                                                            .doc(tarjetaDoc.id)
+                                                            .update({
+                                                          'completada': false,
+                                                          'fecha_completada': null,
+                                                          'asignado_a': null,
+                                                          'publicador_email': null,
+                                                          'bloqueado': false,
+                                                          'disponible_para_publicadores': true,
+                                                        });
+                                                        if (context.mounted) Navigator.pop(context);
+                                                      }
+                                                    },
+                                                    style: OutlinedButton.styleFrom(foregroundColor: Colors.orange, side: const BorderSide(color: Colors.orange)),
+                                                    child: const Text('Reactivar', style: TextStyle(fontSize: 12)),
+                                                  )
+                                                : ElevatedButton(
+                                              onPressed: cantDirReal > 0
                                                   ? () async {
                                                       Navigator.pop(context);
                                                       await _asignarTarjetaAPublicador(

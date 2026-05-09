@@ -9,7 +9,93 @@ class MantenimientoTab extends StatefulWidget {
 }
 
 class _MantenimientoTabState extends State<MantenimientoTab> {
-//borrra datos globales
+  bool _desbloqueado = false;
+  final TextEditingController _pinCtrl = TextEditingController();
+  static const String _pin = '1234'; // PIN por defecto — cambiar en producción
+
+  @override
+  void dispose() {
+    _pinCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _verificarPin() async {
+    _pinCtrl.clear();
+    final ingresado = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => StatefulBuilder(
+        builder: (context, setDlg) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.lock, color: Color(0xFF1B5E20)),
+            SizedBox(width: 8),
+            Text('Área restringida'),
+          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Esta sección es solo para administradores.\nIngresa el PIN de mantenimiento.',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _pinCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                obscureText: true,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 8),
+                decoration: InputDecoration(
+                  counterText: '',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                ),
+                autofocus: true,
+                onSubmitted: (v) => Navigator.pop(c, v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, null),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(c, _pinCtrl.text),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Entrar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (ingresado == null) return;
+
+    // Verificar contra Firestore o PIN local
+    final doc = await FirebaseFirestore.instance
+        .collection('configuracion')
+        .doc('pin_mantenimiento')
+        .get();
+    final pinCorrecto = (doc.data()?['pin'] as String?) ?? _pin;
+
+    if (ingresado == pinCorrecto) {
+      setState(() => _desbloqueado = true);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PIN incorrecto'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
   Future<void> _borrarTodasDirecciones() async {
     final confirmar1 = await showDialog<bool>(
       context: context,
@@ -719,6 +805,46 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Si no está desbloqueado, mostrar pantalla de bloqueo
+    if (!_desbloqueado) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B5E20).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.lock, size: 48, color: Color(0xFF1B5E20)),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Mantenimiento',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20)),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Área restringida — requiere PIN',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _verificarPin,
+              icon: const Icon(Icons.lock_open),
+              label: const Text('Ingresar PIN'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
