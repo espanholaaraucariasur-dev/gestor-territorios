@@ -57,12 +57,62 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                         width: double.infinity,
                         height: 50,
                         child: OutlinedButton.icon(
-                          onPressed: () => _mostrarDialogoEnviar(
-                              terId: terId, nombre: terNombre),
+                          onPressed: () async {
+                            // Verificar si hay tarjetas completadas en el territorio
+                            final tarjetasSnap = await FirebaseFirestore.instance
+                                .collection('territorios')
+                                .doc(terId)
+                                .collection('tarjetas')
+                                .where('completada', isEqualTo: true)
+                                .get();
+
+                            if (tarjetasSnap.docs.isNotEmpty && mounted) {
+                              final accion = await showDialog<String>(
+                                context: context,
+                                builder: (c) => AlertDialog(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  title: const Row(children: [
+                                    Icon(Icons.info_outline, color: Colors.orange),
+                                    SizedBox(width: 8),
+                                    Text('Tarjetas completadas'),
+                                  ]),
+                                  content: Text(
+                                    'Este territorio tiene ${tarjetasSnap.docs.length} tarjeta(s) completada(s) este mes.\n\n¿Deseas reactivarlas y enviar el territorio completo?',
+                                  ),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
+                                    OutlinedButton(
+                                      onPressed: () => Navigator.pop(c, 'enviar_sin_reactivar'),
+                                      child: const Text('Enviar sin reactivar'),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () => Navigator.pop(c, 'reactivar_y_enviar'),
+                                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white),
+                                      child: const Text('Reactivar y enviar'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (accion == null) return;
+                              if (accion == 'reactivar_y_enviar') {
+                                final batch = FirebaseFirestore.instance.batch();
+                                for (final t in tarjetasSnap.docs) {
+                                  batch.update(t.reference, {
+                                    'completada': false,
+                                    'fecha_completada': null,
+                                    'asignado_a': null,
+                                    'publicador_email': null,
+                                    'bloqueado': false,
+                                  });
+                                }
+                                await batch.commit();
+                              }
+                            }
+                            _mostrarDialogoEnviar(terId: terId, nombre: terNombre);
+                          },
                           icon: const Icon(Icons.send, color: Colors.green),
                           label: const Text('Enviar territorio completo',
-                              style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold)),
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.green,
                               side: const BorderSide(color: Colors.green),
@@ -627,6 +677,57 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
 
   Future<void> _enviarTarjetaIndividual(BuildContext context, String terId,
       String tarjetaId, String tarjetaNombre) async {
+    // Verificar si la tarjeta está completada
+    final tarjetaDoc = await FirebaseFirestore.instance
+        .collection('territorios')
+        .doc(terId)
+        .collection('tarjetas')
+        .doc(tarjetaId)
+        .get();
+    final completada = (tarjetaDoc.data()?['completada'] as bool?) ?? false;
+
+    if (completada) {
+      if (!mounted) return;
+      final accion = await showDialog<String>(
+        context: context,
+        builder: (c) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.check_circle, color: Colors.green),
+            SizedBox(width: 8),
+            Text('Tarjeta completada'),
+          ]),
+          content: Text(
+            'La tarjeta "$tarjetaNombre" ya fue completada este mes.\n\n¿Qué deseas hacer?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(c, 'reactivar'),
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.orange, side: const BorderSide(color: Colors.orange)),
+              child: const Text('Reactivar y enviar'),
+            ),
+          ],
+        ),
+      );
+      if (accion != 'reactivar') return;
+
+      // Reactivar primero
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(terId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .update({
+        'completada': false,
+        'fecha_completada': null,
+        'asignado_a': null,
+        'publicador_email': null,
+        'bloqueado': false,
+        'disponible_para_publicadores': true,
+      });
+    }
+
     await _mostrarDialogoEnviar(
         terId: terId, tarjetaId: tarjetaId, nombre: tarjetaNombre);
   }
