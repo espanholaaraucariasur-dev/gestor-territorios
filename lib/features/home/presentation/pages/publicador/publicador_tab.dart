@@ -1228,7 +1228,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
         nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: const Color(0xFFF8F9FA),
       body: CustomScrollView(
         slivers: [
           // ── HEADER ─────────────────────────────────────
@@ -1488,9 +1488,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   return Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: context.cardBg,
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: context.borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1498,12 +1504,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
+                            const Text(
                               'Progreso mensual',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
-                                color: context.textPrimary,
+                                color: Color(0xFF263238),
                               ),
                             ),
                             Text(
@@ -1601,13 +1607,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
                             color: hayCompletadas
-                                ? context.statGreenBg
-                                : context.surfaceMid,
+                                ? const Color(0xFFE8F5E9)
+                                : Colors.grey.shade50,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                                 color: hayCompletadas
-                                    ? context.statGreenText.withOpacity(0.3)
-                                    : context.borderColor),
+                                    ? const Color(0xFF1B5E20).withOpacity(0.3)
+                                    : Colors.grey.shade200),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
