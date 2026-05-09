@@ -101,13 +101,13 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     final consulta = _calleCtrl.text.trim();
     if (consulta.isEmpty) return;
 
-    if (consulta.length < 5) {
+    if (consulta.length < 4) {
       setState(() {
         _buscando = false;
         _buscado = true;
         _encontrada = false;
         _mostrarFormulario = false;
-        _mensaje = 'Dirección demasiado corta para buscar.';
+        _mensaje = 'Ingresa al menos 4 caracteres.';
       });
       return;
     }
@@ -123,75 +123,73 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
     try {
       final consultaNorm = _normalizarBusqueda(consulta);
-
-      // Extraer primer token significativo para range query
-      // Ej: "rua das flores 123" → buscar por "rua das"
       final tokens = consultaNorm.split(' ')
           .where((t) => t.length >= 2)
           .toList();
 
-      Map<String, dynamic>? encontrada;
+      final numRegex = RegExp(r'\d+');
+      final numMatch = numRegex.firstMatch(consulta);
 
-      if (tokens.isNotEmpty) {
-        // Buscar por range query en calle_normalizada
-        final prefijo = tokens.take(2).join(' ');
+      Map<String, dynamic>? encontrada;
+      int mejorScore = -1;
+
+      // Estrategia 1: range query con 1, 2 y 3 tokens
+      for (int nTokens = tokens.length.clamp(1, 3); nTokens >= 1; nTokens--) {
+        final prefijo = tokens.take(nTokens).join(' ');
         final prefijoFin = prefijo + '\uf8ff';
 
         final snap = await FirebaseFirestore.instance
             .collection('direcciones_globales')
             .where('calle_normalizada', isGreaterThanOrEqualTo: prefijo)
             .where('calle_normalizada', isLessThanOrEqualTo: prefijoFin)
-            .limit(20)
+            .limit(30)
             .get();
 
-        if (snap.docs.isNotEmpty) {
-          // Encontró por prefijo — buscar mejor match por tokens
-          int mejorScore = -1;
-          for (final doc in snap.docs) {
-            final data = doc.data();
-            final calleNorm = (data['calle_normalizada'] as String?) ??
-                _normalizarBusqueda(data['calle']?.toString() ?? '');
-            final compNorm = _normalizarBusqueda(data['complemento']?.toString() ?? '');
-            final textoNorm = '$calleNorm $compNorm';
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          final calleNorm = (data['calle_normalizada'] as String?) ??
+              _normalizarBusqueda(data['calle']?.toString() ?? '');
+          final compNorm = _normalizarBusqueda(data['complemento']?.toString() ?? '');
+          final textoNorm = '$calleNorm $compNorm';
 
-            int score = 0;
-            int coinciden = 0;
-            for (final t in tokens) {
-              if (textoNorm.contains(t)) coinciden++;
-            }
-            score = (coinciden / tokens.length * 100).round();
-
-            if (score > mejorScore) {
-              mejorScore = score;
-              encontrada = data;
-            }
+          int coinciden = 0;
+          for (final t in tokens) {
+            if (textoNorm.contains(t)) coinciden++;
           }
+          int score = tokens.isEmpty ? 0 : (coinciden * 100 ~/ tokens.length);
+          if (numMatch != null && textoNorm.contains(numMatch.group(0)!)) score += 20;
+          if (tokens.isNotEmpty && calleNorm.startsWith(tokens.first)) score += 10;
 
-          if (encontrada != null && mejorScore >= 50) {
-            final calle = encontrada!['calle']?.toString() ?? '';
-            final comp = encontrada!['complemento']?.toString() ?? '';
-            setState(() {
-              _buscando = false;
-              _buscado = true;
-              _encontrada = true;
-              _direccionEncontrada = encontrada;
-              _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
-              _mostrarFormulario = false;
-            });
-            return;
+          if (score > mejorScore) {
+            mejorScore = score;
+            encontrada = data;
           }
         }
+        if (encontrada != null && mejorScore >= 70) break;
       }
 
-      // Fallback: Mapbox geocoding + comparar coordenadas
+      if (encontrada != null && mejorScore >= 60) {
+        final calle = encontrada!['calle']?.toString() ?? '';
+        final comp = encontrada!['complemento']?.toString() ?? '';
+        setState(() {
+          _buscando = false;
+          _buscado = true;
+          _encontrada = true;
+          _direccionEncontrada = encontrada;
+          _mensaje = '$calle\${comp.isNotEmpty ? ' · $comp' : ''}';
+          _mostrarFormulario = false;
+        });
+        return;
+      }
+
+      // Estrategia 2: Mapbox geocoding + coordenadas
       final coords = await MapboxService.geocodificar(consulta);
       if (coords != null) {
-        // Buscar por coordenadas cercanas
         final snap = await FirebaseFirestore.instance
             .collection('direcciones_globales')
-            .where('lat', isGreaterThan: coords[0] - 0.001)
-            .where('lat', isLessThan: coords[0] + 0.001)
-            .limit(10)
+            .where('lat', isGreaterThan: coords[0] - 0.002)
+            .where('lat', isLessThan: coords[0] + 0.002)
+            .limit(15)
             .get();
 
         for (final doc in snap.docs) {
@@ -200,7 +198,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           final lng = (data['lng'] as num?)?.toDouble();
           if (lat != null && lng != null) {
             final dist = _distanciaKm(coords[0], coords[1], lat, lng);
-            if (dist < 0.05) {
+            if (dist < 0.08) {
               final calle = data['calle']?.toString() ?? '';
               final comp = data['complemento']?.toString() ?? '';
               setState(() {
@@ -208,7 +206,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                 _buscado = true;
                 _encontrada = true;
                 _direccionEncontrada = data;
-                _mensaje = '$calle${comp.isNotEmpty ? ' · $comp' : ''}';
+                _mensaje = '$calle\${comp.isNotEmpty ? ' · $comp' : ''}';
                 _mostrarFormulario = false;
               });
               return;
@@ -217,7 +215,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         }
       }
 
-      // No encontrada — verificar si ya fue solicitada
+      // No encontrada
       final normalizada = _normalizar(consulta);
       final pendientes = await FirebaseFirestore.instance
           .collection('solicitudes_localizador')
@@ -254,42 +252,6 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       });
     }
   }
-  String _tiempoRelativo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return 'hace unos segundos';
-    if (diff.inMinutes < 60) return 'hace \${diff.inMinutes} min';
-    if (diff.inHours < 24) return 'hace \${diff.inHours}h';
-    if (diff.inDays < 7) return 'hace \${diff.inDays}d';
-    if (diff.inDays < 30) return 'hace \${(diff.inDays / 7).floor()}sem';
-    if (diff.inDays < 365) return 'hace \${(diff.inDays / 30).floor()}m';
-    return 'hace \${(diff.inDays / 365).floor()}a';
-  }
-
-    // ─────────────────────────────────────────────────────────
-  // AGREGAR UNIDAD DE CONDOMINIO
-  // ─────────────────────────────────────────────────────────
-
-  void _agregarUnidad() {
-    final u = _unidadCtrl.text.trim();
-    if (u.isEmpty) return;
-    if (_unidades.contains(u)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.t('unit_already_added', args: [u])),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-    setState(() {
-      _unidades.add(u);
-      _unidadCtrl.clear();
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // ENVIAR SOLICITUD
-  // ─────────────────────────────────────────────────────────
 
   Future<void> _enviarSolicitud() async {
     final calle = _calleCtrl.text.trim();
