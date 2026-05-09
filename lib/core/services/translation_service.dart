@@ -1,22 +1,20 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-/// Servicio de traducción usando LibreTranslate API pública.
-/// Gratis, sin API key, sin registro.
-/// Límite: ~80 req/hora en la API pública — suficiente para 40 personas.
-/// 
-/// Traduce solo contenido dinámico: anuncios, notificaciones, campañas.
-/// Los strings de la UI se manejan por app_translations.dart.
+/// Servicio de traducción ES→PT usando LibreTranslate.
+/// Múltiples servidores públicos con fallback automático.
+/// Funciona desde dispositivos móviles (no desde servidores).
 class TranslationService {
-  // Servidores públicos de LibreTranslate (fallback automático)
   static const List<String> _servers = [
     'https://libretranslate.com',
+    'https://translate.argosopentech.com',
+    'https://libretranslate.de',
     'https://translate.terraprint.co',
     'https://lt.vern.cc',
   ];
 
   /// Traduce texto de ES a PT-BR.
-  /// Retorna el texto original si falla.
+  /// Retorna el texto original si todos los servidores fallan.
   static Future<String> traducirEsPt(String texto) async {
     if (texto.trim().isEmpty) return texto;
 
@@ -24,32 +22,32 @@ class TranslationService {
       try {
         final response = await http.post(
           Uri.parse('$server/translate'),
-          headers: {'Content-Type': 'application/json'},
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
           body: jsonEncode({
             'q': texto,
             'source': 'es',
             'target': 'pt',
             'format': 'text',
           }),
-        ).timeout(const Duration(seconds: 6));
+        ).timeout(const Duration(seconds: 8));
 
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           final traduccion = data['translatedText'] as String?;
-          if (traduccion != null && traduccion.isNotEmpty) {
+          if (traduccion != null && traduccion.isNotEmpty && traduccion != texto) {
             return traduccion;
           }
         }
       } catch (_) {
-        // Intentar siguiente servidor
         continue;
       }
     }
-    // Si todos fallan, retornar original
-    return texto;
+    return texto; // Fallback: texto original
   }
 
-  /// Traduce en ambos idiomas si se necesita.
   static Future<Map<String, String>> traducirBilingue(String textoEs) async {
     final textoPt = await traducirEsPt(textoEs);
     return {'es': textoEs, 'pt': textoPt};

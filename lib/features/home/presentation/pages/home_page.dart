@@ -129,7 +129,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                     Icon(Icons.notifications_none_outlined,
                         size: 48, color: Colors.grey),
                     SizedBox(height: 16),
-                    Text('No tienes notificaciones',
+                    Text(context.t('no_new_notifications'),
                         style: TextStyle(color: Colors.grey)),
                   ],
                 ),
@@ -3871,7 +3871,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(child: Text('No tienes tarjetas asignadas.'));
+          return Center(child: Text(context.t('no_cards_assigned')));
         }
 
         return ListView.builder(

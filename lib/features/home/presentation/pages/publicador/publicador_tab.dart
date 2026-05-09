@@ -1505,7 +1505,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text(
-                              'Progreso mensual',
+                              context.t('monthly_progress'),
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15,
