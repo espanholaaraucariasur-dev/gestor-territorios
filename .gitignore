@@ -44,3 +44,6 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 lib/core/config/app_secrets.dart
+android/app/araucaria_sur.jks
+*.jks
+key.properties
