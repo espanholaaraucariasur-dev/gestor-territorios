@@ -347,9 +347,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     });
   }
 
-  String _tiempoRelativo(Timestamp? ts) {
-    if (ts == null) return '';
-    final dt = ts.toDate();
+  String _tiempoRelativo(DateTime? dt) {
+    if (dt == null) return '';
     final diff = DateTime.now().difference(dt);
     if (diff.inSeconds < 60) return 'hace unos segundos';
     if (diff.inMinutes < 60) return 'hace ${diff.inMinutes} min';
