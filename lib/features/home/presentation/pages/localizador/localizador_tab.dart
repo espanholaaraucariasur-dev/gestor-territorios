@@ -176,7 +176,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           _buscado = true;
           _encontrada = true;
           _direccionEncontrada = encontrada;
-          _mensaje = '$calle\${comp.isNotEmpty ? ' · $comp' : ''}';
+          _mensaje = comp.isNotEmpty ? '$calle · $comp' : calle;
           _mostrarFormulario = false;
         });
         return;
@@ -206,7 +206,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                 _buscado = true;
                 _encontrada = true;
                 _direccionEncontrada = data;
-                _mensaje = '$calle\${comp.isNotEmpty ? ' · $comp' : ''}';
+          _mensaje = comp.isNotEmpty ? '$calle · $comp' : calle;
                 _mostrarFormulario = false;
               });
               return;
@@ -336,6 +336,28 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     _detallesCtrl.dispose();
     _unidadCtrl.dispose();
     super.dispose();
+  }
+
+  void _agregarUnidad() {
+    final unidad = _unidadCtrl.text.trim();
+    if (unidad.isEmpty) return;
+    setState(() {
+      _unidades.add(unidad);
+      _unidadCtrl.clear();
+    });
+  }
+
+  String _tiempoRelativo(Timestamp? ts) {
+    if (ts == null) return '';
+    final dt = ts.toDate();
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'hace unos segundos';
+    if (diff.inMinutes < 60) return 'hace ${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'hace ${diff.inHours}h';
+    if (diff.inDays < 7) return 'hace ${diff.inDays}d';
+    if (diff.inDays < 30) return 'hace ${(diff.inDays / 7).floor()}sem';
+    if (diff.inDays < 365) return 'hace ${(diff.inDays / 30).floor()}m';
+    return 'hace ${(diff.inDays / 365).floor()}a';
   }
 
   // ─────────────────────────────────────────────────────────
