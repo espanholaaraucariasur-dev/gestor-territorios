@@ -684,10 +684,12 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
     return Row(
       children: [
         SizedBox(
-          width: 70,
+          width: 85,
           child: Text(
             label,
             style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
         Expanded(
@@ -703,7 +705,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
         ),
         const SizedBox(width: 8),
         SizedBox(
-          width: 50,
+          width: 55,
           child: Text(
             '$valor (${(pct * 100).toStringAsFixed(0)}%)',
             style: TextStyle(
@@ -712,6 +714,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
               fontWeight: FontWeight.bold,
             ),
             textAlign: TextAlign.right,
+            maxLines: 1,
           ),
         ),
       ],
