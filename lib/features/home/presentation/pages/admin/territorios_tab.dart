@@ -923,11 +923,27 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                     .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
                     .replaceAll(RegExp(r'\s+'), ' ')
                     .trim();
+
+                // Generar palabras_clave para búsqueda
+                final palabrasClave = calleNorm.split(' ')
+                    .where((w) => w.length >= 2)
+                    .toSet()
+                    .toList();
+                // Agregar complemento a las palabras clave
+                if (complemento.isNotEmpty) {
+                  final compNorm = complemento.toLowerCase()
+                      .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
+                      .replaceAll(RegExp(r'\s+'), ' ')
+                      .trim();
+                  palabrasClave.addAll(compNorm.split(' ').where((w) => w.length >= 2));
+                }
+
                 await FirebaseFirestore.instance
                     .collection('direcciones_globales')
                     .add({
                   'calle': calle,
                   'calle_normalizada': calleNorm,
+                  'palabras_clave': palabrasClave,
                   'complemento': complemento,
                   'tarjeta_id': tarjetaId,
                   'nombre_tarjeta': tarjetaId,
