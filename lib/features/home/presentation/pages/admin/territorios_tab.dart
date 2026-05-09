@@ -192,7 +192,29 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                     builder: (context, dirSnap) {
                                       final count =
                                           dirSnap.data?.docs.length ?? 0;
-                                      return Text('Dir. vinculadas: $count');
+                                      final enviadoNombre = (tarjetaMap['enviado_nombre'] as String?)
+                                          ?? (tarjetaMap['asignado_a'] as String?) ?? '';
+                                      final enviadoEn = tarjetaMap['enviado_en'] as Timestamp?;
+                                      String fechaHora = '';
+                                      if (enviadoEn != null) {
+                                        final dt = enviadoEn.toDate();
+                                        fechaHora = ' · ${dt.day}/${dt.month} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+                                      }
+                                      return Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Dir. vinculadas: $count'),
+                                          if (enviadoNombre.isNotEmpty)
+                                            Text(
+                                              'Enviado a: $enviadoNombre$fechaHora',
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.orange,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                        ],
+                                      );
                                     },
                                   ),
                                   trailing: Row(
