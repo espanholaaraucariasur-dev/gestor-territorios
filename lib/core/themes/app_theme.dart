@@ -40,4 +40,53 @@ class AppTheme {
           ),
         ),
       );
+
+  static ThemeData get dark => ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: AppColors.primary,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFF121212),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1A1A1A),
+          elevation: 1,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+            letterSpacing: 0.3,
+          ),
+          iconTheme: IconThemeData(color: Colors.white),
+        ),
+        cardColor: const Color(0xFF1E1E1E),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF2A2A2A),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primary, width: 2),
+          ),
+          labelStyle: const TextStyle(color: Colors.grey),
+        ),
+        listTileTheme: const ListTileThemeData(
+          textColor: Colors.white,
+          iconColor: Colors.white70,
+        ),
+        dividerColor: Colors.white12,
+      );
 }

@@ -8,6 +8,7 @@ import 'admin/admin_tab.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import '../../../auth/presentation/pages/login_page.dart';
+import '../../../../../core/themes/theme_provider.dart';
 import '../../../../core/services/auto_return_service.dart';
 // CSV
 import 'package:file_picker/file_picker.dart';
@@ -882,6 +883,25 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
               ),
 
               // ── Cerrar sesión ─────────────────────────────
+              const Divider(height: 1),
+              // Toggle modo oscuro
+              Builder(builder: (ctx) {
+                final themeProvider = ThemeProviderScope.of(ctx);
+                return SwitchListTile(
+                  secondary: Icon(
+                    themeProvider.isDark ? Icons.dark_mode : Icons.light_mode,
+                    color: const Color(0xFF1B5E20),
+                  ),
+                  title: Text(
+                    themeProvider.isDark ? 'Modo oscuro' : 'Modo claro',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  value: themeProvider.isDark,
+                  activeColor: const Color(0xFF1B5E20),
+                  onChanged: (_) => themeProvider.toggle(),
+                  dense: true,
+                );
+              }),
               const Divider(height: 1),
               Padding(
                 padding: const EdgeInsets.all(16),
