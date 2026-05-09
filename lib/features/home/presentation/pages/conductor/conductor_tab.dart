@@ -256,73 +256,61 @@ class _ConductorTabState extends State<ConductorTab> {
                     builder: (context, snap) {
                       final todas = snap.data?.docs ?? [];
 
-                      // Tarjetas enviadas directamente al conductor
-                      final tarjetasDirectas = todas.where((d) {
-                        final data = d.data() as Map<String, dynamic>;
-                        return data['conductor_email'] == widget.usuarioEmail ||
-                            data['enviado_a'] == widget.usuarioEmail;
-                      }).length;
-
-                      // Tarjetas dentro de territorios recibidos por el conductor
-                      // (se cuentan por separado via StreamBuilder de territorios)
                       return StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
                             .collection('territorios')
                             .snapshots(),
                         builder: (context, terSnap) {
-                          int tarjetasEnTerritorios = 0;
+                          final territoriosDelConductor = <String>{};
                           if (terSnap.hasData) {
                             for (final ter in terSnap.data!.docs) {
-                              final td =
-                                  (ter.data() as Map<String, dynamic>?) ?? {};
-                              final esDelConductor = td['enviado_a'] ==
-                                      widget.usuarioEmail ||
-                                  td['conductor_email'] == widget.usuarioEmail;
-                              if (!esDelConductor) continue;
-                              // Contar tarjetas de este territorio desde collectionGroup
-                              tarjetasEnTerritorios += todas
-                                  .where((t) =>
-                                      t.reference.parent.parent?.id == ter.id)
-                                  .length;
+                              final td = (ter.data() as Map<String, dynamic>?) ?? {};
+                              if (td['enviado_a'] == widget.usuarioEmail ||
+                                  td['conductor_email'] == widget.usuarioEmail) {
+                                territoriosDelConductor.add(ter.id);
+                              }
                             }
                           }
 
-                          final recibidas =
-                              tarjetasDirectas + tarjetasEnTerritorios;
-                          final enviadas = todas.where((d) {
-                            final data = d.data() as Map<String, dynamic>;
-                            final esDelConductor = data['conductor_email'] ==
-                                    widget.usuarioEmail ||
-                                data['enviado_a'] == widget.usuarioEmail;
-                            if (!esDelConductor) return false;
-                            // Contar como enviada si tiene publicador_email asignado por el conductor
+                          // Recibidas: tarjetas en territorios del conductor
+                          // + tarjetas enviadas directamente al conductor
+                          int recibidas = 0;
+                          int enviadas = 0;
+                          int devueltas = 0;
+
+                          for (final tarjDoc in todas) {
+                            final data = (tarjDoc.data() as Map<String, dynamic>?) ?? {};
+                            final territorioId = tarjDoc.reference.parent.parent?.id ?? '';
+
+                            final esDelConductor =
+                                data['conductor_email'] == widget.usuarioEmail ||
+                                data['enviado_a'] == widget.usuarioEmail ||
+                                territoriosDelConductor.contains(territorioId);
+
+                            if (!esDelConductor) continue;
+
+                            recibidas++;
+
+                            // Enviada = el conductor la pasó a un publicador
                             final asignadoA = (data['asignado_a'] as String?) ?? '';
-                            final enviadoNombre = (data['enviado_nombre'] as String?) ?? '';
-                            // Solo tarjetas que el conductor envió activamente (tienen enviado_tipo publicador)
                             final enviadoTipo = (data['enviado_tipo'] as String?) ?? '';
-                            return asignadoA.isNotEmpty ||
-                                (enviadoNombre.isNotEmpty && enviadoTipo == 'publicador');
-                          }).length;
-                          final devueltas = todas.where((d) {
-                            final data = d.data() as Map<String, dynamic>;
-                            return data['devuelto_por'] ==
-                                (widget.usuarioData['nombre'] ??
-                                    widget.usuarioEmail);
-                          }).length;
+                            if (asignadoA.isNotEmpty && enviadoTipo == 'publicador') {
+                              enviadas++;
+                            }
+
+                            // Devuelta
+                            if ((data['devuelto_por'] as String?)?.isNotEmpty == true) {
+                              devueltas++;
+                            }
+                          }
 
                           return Row(
                             children: [
-                              Expanded(
-                                  child: _statCard(
-                                      'Recibidas', recibidas, Icons.download)),
+                              Expanded(child: _statCard('Recibidas', recibidas, Icons.download)),
                               const SizedBox(width: 12),
-                              Expanded(
-                                  child: _statCard(
-                                      'Enviadas', enviadas, Icons.upload)),
+                              Expanded(child: _statCard('Enviadas', enviadas, Icons.upload)),
                               const SizedBox(width: 12),
-                              Expanded(
-                                  child: _statCard(
-                                      'Devueltas', devueltas, Icons.undo)),
+                              Expanded(child: _statCard('Devueltas', devueltas, Icons.undo)),
                             ],
                           );
                         },

@@ -603,19 +603,26 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          const Row(
+                                          Row(
                                             children: [
-                                              Icon(Icons.campaign,
+                                              const Icon(Icons.campaign,
                                                   color: Color(0xFFE65100),
                                                   size: 14),
-                                              SizedBox(width: 4),
-                                              Text(
+                                              const SizedBox(width: 4),
+                                              const Text(
                                                 'Campaña especial',
                                                 style: TextStyle(
                                                   fontSize: 11,
                                                   fontWeight: FontWeight.bold,
                                                   color: Color(0xFFE65100),
                                                 ),
+                                              ),
+                                              const Spacer(),
+                                              InkWell(
+                                                onTap: () => setLocalState(() {
+                                                  _estadosPorTarjeta[tarjetaId]!['campana_oculta_${dirDoc.id}'] = 'true';
+                                                }),
+                                                child: const Icon(Icons.close, size: 16, color: Color(0xFFE65100)),
                                               ),
                                             ],
                                           ),
@@ -1355,7 +1362,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   .snapshots(),
               builder: (context, snap) {
                 final data = (snap.data?.data() as Map<String, dynamic>?) ?? {};
-                final texto = (data['texto'] as String?) ?? '';
+                final idioma = context.currentLanguage;
+                final texto = idioma == 'PT'
+                    ? ((data['texto_pt'] as String?)?.isNotEmpty == true ? data['texto_pt'] as String : data['texto'] as String? ?? '')
+                    : (data['texto'] as String? ?? data['mensaje'] as String? ?? '');
                 if (texto.isEmpty) return const SizedBox.shrink();
                 return Container(
                   margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
