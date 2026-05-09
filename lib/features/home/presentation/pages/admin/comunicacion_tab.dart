@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../../../core/services/deepl_service.dart';
+import '../../../../../core/services/translation_service.dart';
 
 class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -357,14 +357,12 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     if (texto.isEmpty) return;
     setState(() => _enviandoAnuncio = true);
     try {
-      // Obtener API key de DeepL si existe
-      final deeplDoc = await FirebaseFirestore.instance.collection('configuracion').doc('deepl_config').get();
-      final deeplKey = (deeplDoc.data()?['api_key'] as String?) ?? '';
-
-      // Traducir al portugués si hay API key
+      // Traducir automáticamente al portugués con LibreTranslate
       String textoPT = texto;
-      if (deeplKey.isNotEmpty) {
-        textoPT = await DeepLService.traducir(texto: texto, targetLang: 'PT-BR', apiKey: deeplKey);
+      try {
+        textoPT = await TranslationService.traducirEsPt(texto);
+      } catch (_) {
+        // Si falla la traducción, continuar con el original
       }
 
       await FirebaseFirestore.instance
@@ -902,66 +900,38 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
 
           const SizedBox(height: 20),
 
-          // ── API Traducción (DeepL) ───────────────────────
-          _seccionTitulo('TRADUCCIÓN AUTOMÁTICA (DeepL)'),
+          // ── Traducción automática ────────────────────────
+          _seccionTitulo('TRADUCCIÓN AUTOMÁTICA'),
           const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(14),
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                const Text(
-                  'Anuncios y notificaciones se traducen automáticamente al portugués.\nObtén tu API key gratis en deepl.com/pro-api (500k caracteres/mes).',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.translate, color: Color(0xFF1B5E20), size: 20),
                 ),
-                const SizedBox(height: 12),
-                StreamBuilder<DocumentSnapshot>(
-                  stream: FirebaseFirestore.instance.collection('configuracion').doc('deepl_config').snapshots(),
-                  builder: (context, snap) {
-                    final keyActual = (snap.data?.data() as Map<String, dynamic>?)?['api_key'] as String? ?? '';
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.translate, color: Color(0xFF1B5E20), size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              keyActual.isNotEmpty ? 'API Key configurada ✅' : 'Sin API Key — traducción desactivada',
-                              style: TextStyle(fontSize: 12, color: keyActual.isNotEmpty ? Colors.green : Colors.grey),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            labelText: 'DeepL API Key (Free)',
-                            hintText: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            isDense: true,
-                          ),
-                          onSubmitted: (value) async {
-                            if (value.trim().isEmpty) return;
-                            await FirebaseFirestore.instance.collection('configuracion').doc('deepl_config').set({
-                              'api_key': value.trim(),
-                              'actualizado_en': FieldValue.serverTimestamp(),
-                            });
-                            if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('✅ API Key guardada'), backgroundColor: Colors.green),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 4),
-                        const Text('Presiona Enter para guardar', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      ],
-                    );
-                  },
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('LibreTranslate activo ✅',
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      SizedBox(height: 2),
+                      Text('Anuncios y campañas se traducen automáticamente\nal portugués al enviar. Sin API key, sin costo.',
+                          style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    ],
+                  ),
                 ),
               ],
             ),
