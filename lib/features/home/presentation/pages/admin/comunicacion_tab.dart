@@ -1088,9 +1088,31 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                           tooltip: 'Editar',
                         ),
                         IconButton(
-                          icon: const Icon(Icons.stop_circle_outlined,
-                              size: 18, color: Colors.red),
-                          onPressed: () => _cerrarCampana(slot, data),
+                          icon: const Icon(Icons.close,
+                              size: 20, color: Colors.red),
+                          onPressed: () async {
+                            final confirmar = await showDialog<bool>(
+                              context: context,
+                              builder: (c) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                title: const Row(children: [
+                                  Icon(Icons.warning_amber, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('Cerrar campaña'),
+                                ]),
+                                content: Text('¿Cerrar la campaña "${data['nombre'] ?? slot}"?\nEsta acción no se puede deshacer.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+                                  ElevatedButton(
+                                    onPressed: () => Navigator.pop(c, true),
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                    child: const Text('Cerrar campaña'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmar == true) _cerrarCampana(slot, data);
+                          },
                           tooltip: 'Cerrar campaña',
                         ),
                       ],

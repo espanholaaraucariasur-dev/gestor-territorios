@@ -611,6 +611,52 @@ class _ConductorTabState extends State<ConductorTab> {
                                               ],
                                             ),
                                           ),
+                                          // Botón candado - liberar/bloquear para publicadores
+                                          IconButton(
+                                            onPressed: () async {
+                                              final bloqueado = (td['bloqueado'] as bool?) ?? true;
+                                              final accion = bloqueado ? 'liberar' : 'bloquear';
+                                              final confirmar = await showDialog<bool>(
+                                                context: context,
+                                                builder: (c) => AlertDialog(
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                                  title: Text(bloqueado ? '🔓 Liberar tarjeta' : '🔒 Bloquear tarjeta'),
+                                                  content: Text('¿Deseas $accion la tarjeta "$tarjNombre" para los publicadores?'),
+                                                  actions: [
+                                                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+                                                    ElevatedButton(
+                                                      onPressed: () => Navigator.pop(c, true),
+                                                      style: ElevatedButton.styleFrom(
+                                                        backgroundColor: bloqueado ? Colors.green : Colors.orange,
+                                                        foregroundColor: Colors.white,
+                                                      ),
+                                                      child: Text(bloqueado ? 'Liberar' : 'Bloquear'),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                              if (confirmar == true) {
+                                                await FirebaseFirestore.instance
+                                                    .collection('territorios')
+                                                    .doc(doc.id)
+                                                    .collection('tarjetas')
+                                                    .doc(tarjDoc.id)
+                                                    .update({
+                                                  'bloqueado': !bloqueado,
+                                                  'disponible_para_publicadores': bloqueado,
+                                                });
+                                              }
+                                            },
+                                            icon: Icon(
+                                              (td['bloqueado'] as bool?) == true ? Icons.lock_outline : Icons.lock_open_outlined,
+                                              size: 18,
+                                              color: (td['bloqueado'] as bool?) == true ? Colors.orange : Colors.green,
+                                            ),
+                                            tooltip: (td['bloqueado'] as bool?) == true ? 'Liberar tarjeta' : 'Bloquear tarjeta',
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                          ),
+                                          const SizedBox(width: 4),
                                           // Botón enviar tarjeta individual
                                           ElevatedButton(
                                             onPressed: () =>
