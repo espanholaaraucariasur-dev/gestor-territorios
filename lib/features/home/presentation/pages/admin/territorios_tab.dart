@@ -272,15 +272,54 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                     children: [
                                       if (readOnly) ...[
                                         IconButton(
-                                            icon: const Icon(Icons.send,
-                                                color: Colors.blue, size: 20),
-                                            onPressed: () =>
-                                                _enviarTarjetaIndividual(
-                                                    context,
-                                                    terId,
-                                                    tarjetaId,
-                                                    tarjetaNombre),
-                                            tooltip: 'Enviar tarjeta'),
+                                            icon: Icon(Icons.send,
+                                                color: (tarjetaMap['completada'] as bool?) == true
+                                                    ? Colors.orange
+                                                    : Colors.blue,
+                                                size: 20),
+                                            onPressed: () async {
+                                              final completada = (tarjetaMap['completada'] as bool?) == true;
+                                              if (completada) {
+                                                final accion = await showDialog<String>(
+                                                  context: context,
+                                                  builder: (c) => AlertDialog(
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                                    title: const Row(children: [
+                                                      Icon(Icons.check_circle, color: Colors.green),
+                                                      SizedBox(width: 8),
+                                                      Text('Tarjeta completada'),
+                                                    ]),
+                                                    content: Text('La tarjeta "$tarjetaNombre" ya fue completada este mes.\n\n¿Deseas reactivarla y enviarla?'),
+                                                    actions: [
+                                                      TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
+                                                      ElevatedButton(
+                                                        onPressed: () => Navigator.pop(c, 'reactivar'),
+                                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+                                                        child: const Text('Reactivar y enviar'),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                                if (accion != 'reactivar') return;
+                                                await FirebaseFirestore.instance
+                                                    .collection('territorios')
+                                                    .doc(terId)
+                                                    .collection('tarjetas')
+                                                    .doc(tarjetaId)
+                                                    .update({
+                                                  'completada': false,
+                                                  'fecha_completada': null,
+                                                  'asignado_a': null,
+                                                  'publicador_email': null,
+                                                  'bloqueado': false,
+                                                  'disponible_para_publicadores': true,
+                                                });
+                                              }
+                                              _enviarTarjetaIndividual(context, terId, tarjetaId, tarjetaNombre);
+                                            },
+                                            tooltip: (tarjetaMap['completada'] as bool?) == true
+                                                ? 'Tarjeta completada — toca para reactivar'
+                                                : 'Enviar tarjeta'),
                                         IconButton(
                                             icon: Icon(
                                                 tarjetaMap['bloqueado'] == true
