@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../../../core/services/translation_service.dart';
+import '../../../../../core/services/gemini_service.dart';
 
 class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -357,12 +357,12 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     if (texto.isEmpty) return;
     setState(() => _enviandoAnuncio = true);
     try {
-      // Traducir automáticamente al portugués con LibreTranslate
+      // Traducir automáticamente al portugués con Gemini AI
       String textoPT = texto;
       try {
-        textoPT = await TranslationService.traducirEsPt(texto);
+        textoPT = await GeminiService.traducirEsPt(texto);
       } catch (_) {
-        // Si falla la traducción, continuar con el original
+        // Si falla, continuar con el original
       }
 
       await FirebaseFirestore.instance
@@ -925,10 +925,10 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('LibreTranslate activo ✅',
+                      Text('Gemini AI activo ✅',
                           style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                       SizedBox(height: 2),
-                      Text('Anuncios y campañas se traducen automáticamente\nal portugués al enviar. Sin API key, sin costo.',
+                      Text('Anuncios traducidos automáticamente\nal portugués con Google Gemini AI.',
                           style: TextStyle(fontSize: 11, color: Colors.grey)),
                     ],
                   ),
