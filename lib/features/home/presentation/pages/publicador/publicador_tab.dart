@@ -994,6 +994,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final complemento = (data['complemento'] as String?) ?? '';
         final territorioNombre = territorioNombreGlobal;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
+        // Si la dirección ya es temporal, preservar el origen original
+        final origenReal = (data['tarjeta_id_origen'] as String?)?.isNotEmpty == true
+            ? data['tarjeta_id_origen'] as String
+            : tarjetaIdOriginal;
+        final territorioOrigenId = (data['territorio_origen_id'] as String?) ?? territorioId;
+        final territorioOrigenNombre = (data['territorio_origen_nombre'] as String?) ?? territorioNombre;
 
         // ── Verificar campañas activas ──────────────────
         final campSnap = await FirebaseFirestore.instance
@@ -1052,8 +1058,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
         } else if (estado == 'no_predicado' || estado == 'otro') {
           if (!folderYaExiste) {
             batch.set(folderRef, {
-              'nombre_grupo': territorioNombre,
-              'territorio_id': territorioId,
+              'nombre_grupo': territorioOrigenNombre,
+              'territorio_id': territorioOrigenId,
               'tipo': 'folder_temporal',
               'created_at': FieldValue.serverTimestamp(),
             });
@@ -1065,9 +1071,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
             'complemento': complemento,
             'direccion_normalizada':
                 _normalizarDireccion('$calle $complemento'),
-            'territorio_id': territorioId,
-            'territorio_nombre': territorioNombre,
-            'tarjeta_id_origen': tarjetaIdOriginal,
+            'territorio_id': territorioOrigenId,
+            'territorio_nombre': territorioOrigenNombre,
+            'tarjeta_id_origen': origenReal,
             'motivo': estado == 'otro' ? motivo : 'no_predicado',
             'created_at': FieldValue.serverTimestamp(),
           });
@@ -1075,11 +1081,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
           batch.update(dir.reference, {
             'estado': 'temporal',
             'estado_predicacion': 'temporal',
+            'tarjeta_id_origen': origenReal,
             'motivo_temporal': estado == 'otro' ? motivo : 'no_predicado',
             'fecha_temporal': FieldValue.serverTimestamp(),
           });
         } else if (estado == 'no_hispano') {
-          // Eliminar de globales → ir a removidas
           batch.set(
             db.collection('direcciones_removidas').doc(dir.id),
             {
@@ -1087,9 +1093,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
               'complemento': complemento,
               'direccion_normalizada':
                   _normalizarDireccion('$calle $complemento'),
-              'territorio_id': territorioId,
-              'territorio_nombre': territorioNombre,
-              'tarjeta_id_origen': tarjetaIdOriginal,
+              'territorio_id': territorioOrigenId,
+              'territorio_nombre': territorioOrigenNombre,
+              'tarjeta_id_origen': origenReal,
               'motivo': 'no_hispano',
               'removida_por': widget.usuarioData['nombre'] ?? '',
               'removida_en': FieldValue.serverTimestamp(),
@@ -1116,6 +1122,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
       );
 
       await batch.commit();
+
+      // Cancelar timer de devolución automática
+      AutoReturnService().cancelarTimer(tarjetaId);
 
       // Notificar al admin de territorios si hay "no_predicado" o "no_hispano"
       final dirNoPredicadas = direcciones.where((dir) {
@@ -1163,11 +1172,22 @@ class _PublicadorTabState extends State<PublicadorTab> {
         if (dirsTemporales.docs.isNotEmpty) {
           final batchClean = db.batch();
           for (final d in dirsTemporales.docs) {
-            batchClean.delete(d.reference);
+            final dData = d.data() as Map<String, dynamic>;
+            final estadoDir = dData['estado_predicacion'] as String? ?? '';
+            final origenId = dData['tarjeta_id_origen'] as String? ?? '';
+            // Solo restaurar dirs completadas — las temporales/removidas ya tienen su destino
+            if (estadoDir == 'completada' && origenId.isNotEmpty) {
+              batchClean.update(d.reference, {
+                'tarjeta_id': origenId,
+                'tarjeta_id_origen': null,
+                'estado': 'activa',
+              });
+            } else if (estadoDir == 'completada') {
+              batchClean.delete(d.reference);
+            }
           }
           await batchClean.commit();
         }
-        // Eliminar también la tarjeta temporal
         await db
             .collection('territorios')
             .doc(territorioId)
@@ -1179,6 +1199,36 @@ class _PublicadorTabState extends State<PublicadorTab> {
       if (mounted) {
         setState(() {
           _tarjetasCompletadas.add(tarjetaId);
+        });
+
+        // Verificar si terminó TODAS las tarjetas → mensaje motivacional en 10 min
+        Future.delayed(const Duration(minutes: 10), () async {
+          if (!mounted) return;
+          try {
+            final nombre = widget.usuarioData['nombre'] ?? '';
+            final activas = await FirebaseFirestore.instance
+                .collectionGroup('tarjetas')
+                .where('asignado_a', isEqualTo: nombre)
+                .where('completada', isEqualTo: false)
+                .get();
+            if (activas.docs.isNotEmpty) return; // aún tiene tarjetas
+            final msgsSnap = await FirebaseFirestore.instance
+                .collection('configuracion').doc('mensajes_motivacionales')
+                .collection('mensajes').where('activo', isEqualTo: true).get();
+            if (msgsSnap.docs.isEmpty) return;
+            final idx = DateTime.now().millisecond % msgsSnap.docs.length;
+            final texto = (msgsSnap.docs[idx].data()['texto'] as String? ?? '')
+                .replaceAll('{nombre}', nombre);
+            if (texto.isEmpty) return;
+            await FirebaseFirestore.instance.collection('notificaciones').add({
+              'titulo': '🌟 ¡Gracias por tu trabajo!',
+              'cuerpo': texto,
+              'tipo': 'motivacional',
+              'destinatario': widget.usuarioEmail,
+              'leida': false,
+              'created_at': FieldValue.serverTimestamp(),
+            });
+          } catch (_) {}
         });
 
         ScaffoldMessenger.of(context).showSnackBar(

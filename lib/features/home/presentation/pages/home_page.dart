@@ -210,6 +210,32 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         ),
         actions: [
           TextButton(
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (c) => AlertDialog(
+                  title: const Text('Limpiar notificaciones'),
+                  content: const Text('¿Eliminar todas las notificaciones?'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(c, true),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      child: const Text('Limpiar'),
+                    ),
+                  ],
+                ),
+              );
+              if (ok != true) return;
+              final snap = await FirebaseFirestore.instance.collection('notificaciones').limit(200).get();
+              final batch = FirebaseFirestore.instance.batch();
+              for (final d in snap.docs) { batch.delete(d.reference); }
+              await batch.commit();
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: const Text('Limpiar', style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cerrar'),
           ),
@@ -3767,6 +3793,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           .doc(tarjetaId)
           .set({
         'asignado_a': widget.usuarioData['nombre'] ?? '',
+        'enviado_nombre': widget.usuarioData['nombre'] ?? '',
+        'enviado_tipo': 'publicador',
         'publicador_email': _usuarioEmail,
         'publicador_id': widget.usuarioData['uid'] ?? '',
         'mes_asignacion': '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}',

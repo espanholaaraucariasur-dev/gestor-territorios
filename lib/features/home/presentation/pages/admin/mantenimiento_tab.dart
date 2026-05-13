@@ -220,6 +220,62 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     return t.split(' ').where((w) => w.length >= 2).toSet().toList();
   }
 
+  Future<void> _limpiarEstadisticas() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🗑️ Limpiar estadísticas'),
+        content: const Text('Elimina todos los datos estadísticos.\nUsar antes del uso real (salir del modo prueba).'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange),
+            child: const Text('Limpiar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('🗑️ Limpiando estadísticas...'), duration: Duration(seconds: 30)),
+    );
+    try {
+      int total = 0;
+      final snap1 = await FirebaseFirestore.instance.collection('estadisticas_mensuales').get();
+      if (snap1.docs.isNotEmpty) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final d in snap1.docs) { batch.delete(d.reference); }
+        await batch.commit();
+        total += snap1.docs.length;
+      }
+      final snap2 = await FirebaseFirestore.instance.collection('direcciones_globales').limit(500).get();
+      if (snap2.docs.isNotEmpty) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final d in snap2.docs) {
+          batch.update(d.reference, {
+            'predicado': false, 'no_predicado': false,
+            'estado_predicacion': 'pendiente', 'entrego_invitacion': false,
+            'fecha_predicacion': null, 'mes_predicacion': null,
+          });
+        }
+        await batch.commit();
+        total += snap2.docs.length;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('✅ Estadísticas limpiadas ($total registros)'), backgroundColor: Colors.deepOrange),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
   Future<void> _migrarPalabrasClave() async {
     final confirmar = await showDialog<bool>(
       context: context,
@@ -1015,6 +1071,14 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                 'Resetea predicaciones, libera todas las tarjetas y deja el sistema listo para el nuevo ciclo mensual.',
             color: const Color(0xFF1B5E20),
             onPressed: _iniciarNuevoMes,
+          ),
+          const SizedBox(height: 12),
+          _buildBotonMantenimiento(
+            icono: Icons.bar_chart,
+            titulo: '🗑️ Limpiar datos de estadísticas',
+            descripcion: 'Elimina todos los datos estadísticos. Usar antes de iniciar el uso real (salir del modo de prueba).',
+            color: Colors.deepOrange,
+            onPressed: _limpiarEstadisticas,
           ),
           const SizedBox(height: 12),
           _buildBotonMantenimiento(

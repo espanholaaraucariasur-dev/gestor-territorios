@@ -120,6 +120,27 @@ class AutoReturnService {
     String usuarioNombre,
   ) async {
     try {
+      // Verificar si la tarjeta aún existe y no fue completada
+      final doc = await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .get();
+
+      if (!doc.exists) {
+        cancelarTimer(tarjetaId);
+        return;
+      }
+
+      final data = doc.data() as Map<String, dynamic>?;
+      final completada = data?['completada'] as bool? ?? false;
+      final asignadoA = data?['asignado_a'] as String? ?? '';
+      if (completada || asignadoA.isEmpty) {
+        cancelarTimer(tarjetaId);
+        return;
+      }
+
       debugPrint('🔄 Devolviendo automáticamente: $tarjetaNombre');
 
       await FirebaseFirestore.instance
