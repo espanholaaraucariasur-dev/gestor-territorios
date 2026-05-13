@@ -19,6 +19,47 @@ class ConductorTab extends StatefulWidget {
 
 class _ConductorTabState extends State<ConductorTab> {
 
+  Future<void> _tomarTerritorio(String territorioId, String nombre) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Tomar territorio'),
+        content: Text('¿Deseas tomar el territorio "$nombre"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
+            child: const Text('Tomar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .update({
+        'conductor_email': widget.usuarioEmail,
+        'enviado_a': widget.usuarioEmail,
+        'enviado_nombre': widget.usuarioData['nombre'] ?? '',
+        'enviado_tipo': 'conductor',
+        'estatus_envio': 'enviado',
+        'enviado_en': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('✅ Territorio "$nombre" tomado'), backgroundColor: const Color(0xFF1B5E20)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   Future<void> _tomarTarjetaDisponible(String tarjetaId, String nombre, String terId) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -460,65 +501,101 @@ class _ConductorTabState extends State<ConductorTab> {
             ),
           ),
 
-          // Tarjetas disponibles para conductores
+          // Territorios y tarjetas disponibles para conductores
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
-                    .collectionGroup('tarjetas')
-                    .where('solo_conductores', isEqualTo: true)
-                    .where('bloqueado', isEqualTo: false)
+                    .collection('territorios')
+                    .where('estatus_envio', isEqualTo: 'disponible')
                     .snapshots(),
-                builder: (context, snap) {
-                  final disponibles = (snap.data?.docs ?? []).where((t) {
+                builder: (context, snapTer) {
+                  final terDisp = (snapTer.data?.docs ?? []).where((t) {
                     final d = t.data() as Map<String, dynamic>;
-                    return (d['asignado_a'] as String? ?? '').isEmpty &&
-                        d['es_temporal'] != true &&
-                        d['completada'] != true;
+                    return (d['enviado_a'] as String? ?? '').isEmpty &&
+                        t.id != 'temporales' && t.id != 'campanas';
                   }).toList();
-                  if (disponibles.isEmpty) return const SizedBox.shrink();
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          const Icon(Icons.map_outlined, color: Color(0xFF1B5E20), size: 16),
-                          const SizedBox(width: 6),
-                          Text('Tarjetas disponibles (${disponibles.length})',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        ]),
-                        const SizedBox(height: 8),
-                        ...disponibles.take(5).map((t) {
-                          final d = t.data() as Map<String, dynamic>;
-                          final nombre = d['nombre'] as String? ?? '';
-                          final terNombre = d['territorio_nombre'] as String? ?? '';
-                          final terId = d['territorio_id'] as String? ?? '';
-                          return ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            leading: const Icon(Icons.folder_outlined, color: Color(0xFF1B5E20), size: 20),
-                            title: Text(nombre, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                            subtitle: Text(terNombre, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                            trailing: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1B5E20),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              ),
-                              onPressed: () => _tomarTarjetaDisponible(t.id, nombre, terId),
-                              child: const Text('Tomar', style: TextStyle(fontSize: 12, color: Colors.white)),
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
+
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collectionGroup('tarjetas')
+                        .where('solo_conductores', isEqualTo: true)
+                        .where('bloqueado', isEqualTo: false)
+                        .snapshots(),
+                    builder: (context, snapTar) {
+                      final tarjetasDisp = (snapTar.data?.docs ?? []).where((t) {
+                        final d = t.data() as Map<String, dynamic>;
+                        return (d['asignado_a'] as String? ?? '').isEmpty &&
+                            d['es_temporal'] != true && d['completada'] != true;
+                      }).toList();
+
+                      if (terDisp.isEmpty && tarjetasDisp.isEmpty) return const SizedBox.shrink();
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.3)),
+                          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.map_outlined, color: Color(0xFF1B5E20), size: 16),
+                              const SizedBox(width: 6),
+                              Text('Disponibles para tomar (${terDisp.length + tarjetasDisp.length})',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            ]),
+                            const SizedBox(height: 8),
+                            // Territorios completos
+                            ...terDisp.take(3).map((t) {
+                              final d = t.data() as Map<String, dynamic>;
+                              final nombre = d['nombre'] as String? ?? t.id;
+                              return ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.folder_outlined, color: Color(0xFF1B5E20), size: 20),
+                                title: Text(nombre, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                subtitle: const Text('Territorio completo', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                                trailing: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF1B5E20),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  ),
+                                  onPressed: () => _tomarTerritorio(t.id, nombre),
+                                  child: const Text('Tomar', style: TextStyle(fontSize: 12, color: Colors.white)),
+                                ),
+                              );
+                            }),
+                            // Tarjetas individuales
+                            ...tarjetasDisp.take(3).map((t) {
+                              final d = t.data() as Map<String, dynamic>;
+                              final nombre = d['nombre'] as String? ?? '';
+                              final terId = d['territorio_id'] as String? ?? '';
+                              return ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.credit_card_outlined, color: Colors.blue, size: 20),
+                                title: Text(nombre, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                subtitle: Text('Solo conductores', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                                trailing: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  ),
+                                  onPressed: () => _tomarTarjetaDisponible(t.id, nombre, terId),
+                                  child: const Text('Tomar', style: TextStyle(fontSize: 12, color: Colors.white)),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      );
+                    },
                   );
                 },
               ),

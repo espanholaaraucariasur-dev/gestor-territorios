@@ -673,14 +673,6 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             children: [
               if (teritorio.isNotEmpty)
                 _infoBadge(Icons.map, teritorio, _verde),
-              if (tarjeta.isNotEmpty)
-                _infoBadge(Icons.credit_card, tarjeta, Colors.blue),
-              if (estado.isNotEmpty)
-                _infoBadge(
-                  estado == 'completada' ? Icons.check_circle : Icons.schedule,
-                  estado,
-                  estado == 'completada' ? _verde : Colors.orange,
-                ),
             ],
           ),
         ],
