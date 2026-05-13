@@ -402,6 +402,79 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   // APROBAR SOLICITUD DE DIRECCIÓN
   // ─────────────────────────────────────────────────────────
 
+  // Calcular distancia en metros entre dos coordenadas (Haversine)
+  double _distanciaMetros(double lat1, double lng1, double lat2, double lng2) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * 3.14159265358979 / 180;
+    final dLng = (lng2 - lng1) * 3.14159265358979 / 180;
+    final a = (dLat / 2) * (dLat / 2) +
+        (lat1 * 3.14159265358979 / 180) * (lat2 * 3.14159265358979 / 180) *
+            (dLng / 2) * (dLng / 2);
+    return r * 2 * (a < 1 ? a : 1);
+  }
+
+  // Busca la tarjeta más cercana a las coordenadas dadas
+  Future<({String territorioId, String territorioNombre, String tarjetaId, double distancia})?> 
+      _sugerirTarjetaCercana(double lat, double lng) async {
+    try {
+      // Buscar hasta 200 direcciones cercanas
+      final dirs = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('estado', isEqualTo: 'activa')
+          .limit(300)
+          .get();
+
+      String? mejorTerritorio;
+      String? mejorTerNombre;
+      String? mejorTarjeta;
+      double mejorDist = double.infinity;
+
+      // Acumular distancias por tarjeta
+      final Map<String, List<double>> distsPorTarjeta = {};
+      final Map<String, String> tarjetaATerritorio = {};
+      final Map<String, String> tarjetaATerNombre = {};
+
+      for (final dir in dirs.docs) {
+        final d = dir.data() as Map<String, dynamic>;
+        final dLat = (d['lat'] as num?)?.toDouble();
+        final dLng = (d['lng'] as num?)?.toDouble();
+        final tarjetaId = d['tarjeta_id'] as String?;
+        final territorioId = d['territorio_id'] as String?;
+        final terNombre = d['territorio_nombre'] as String?;
+        if (dLat == null || dLng == null || tarjetaId == null || territorioId == null) continue;
+        if (territorioId == 'temporales' || territorioId == 'campanas') continue;
+
+        final dist = _distanciaMetros(lat, lng, dLat, dLng);
+        distsPorTarjeta.putIfAbsent(tarjetaId, () => []).add(dist);
+        tarjetaATerritorio[tarjetaId] = territorioId;
+        tarjetaATerNombre[tarjetaId] = terNombre ?? territorioId;
+      }
+
+      // Calcular distancia promedio por tarjeta (top 5 más cercanas)
+      for (final entry in distsPorTarjeta.entries) {
+        final dists = entry.value..sort();
+        final top = dists.take(5).toList();
+        final promedio = top.reduce((a, b) => a + b) / top.length;
+        if (promedio < mejorDist) {
+          mejorDist = promedio;
+          mejorTarjeta = entry.key;
+          mejorTerritorio = tarjetaATerritorio[entry.key];
+          mejorTerNombre = tarjetaATerNombre[entry.key];
+        }
+      }
+
+      if (mejorTarjeta == null || mejorTerritorio == null) return null;
+      return (
+        territorioId: mejorTerritorio,
+        territorioNombre: mejorTerNombre ?? mejorTerritorio,
+        tarjetaId: mejorTarjeta,
+        distancia: mejorDist,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _aprobarSolicitud(DocumentSnapshot solicitudDoc) async {
     final data = (solicitudDoc.data() as Map<String, dynamic>?) ?? {};
     final calle = (data['direccion_original'] as String?) ?? '';
@@ -409,20 +482,41 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     final detalles = (data['detalles'] as String?) ?? '';
     final esCondominio = (data['es_condominio'] as bool?) ?? false;
     final unidades = (data['unidades_condominio'] as List?) ?? [];
+    final latSol = (data['lat'] as num?)?.toDouble();
+    final lngSol = (data['lng'] as num?)?.toDouble();
 
     final territoriosSnap =
         await FirebaseFirestore.instance.collection('territorios').get();
 
     if (!mounted) return;
 
+    // Buscar sugerencia por proximidad
     String? territorioIdSel;
     String? territorioNombreSel;
     String? tarjetaIdSel;
+    double? distSugerida;
+    bool cargandoSugerencia = latSol != null && lngSol != null;
 
     await showDialog(
       context: context,
       builder: (c) => StatefulBuilder(
-        builder: (context, setDlg) => AlertDialog(
+        builder: (context, setDlg) {
+          // Cargar sugerencia al abrir el diálogo
+          if (cargandoSugerencia && latSol != null && lngSol != null) {
+            cargandoSugerencia = false;
+            _sugerirTarjetaCercana(latSol, lngSol).then((sug) {
+              if (sug != null && c.mounted) {
+                setDlg(() {
+                  territorioIdSel = sug.territorioId;
+                  territorioNombreSel = sug.territorioNombre;
+                  tarjetaIdSel = sug.tarjetaId;
+                  distSugerida = sug.distancia;
+                });
+              }
+            });
+          }
+
+          return AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Agregar dirección a tarjeta'),
@@ -445,6 +539,49 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                           fontWeight: FontWeight.bold, fontSize: 13),
                     ),
                   ),
+                  // Sugerencia por proximidad
+                  if (territorioIdSel != null && distSugerida != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B5E20).withOpacity(0.07),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.near_me, color: Color(0xFF1B5E20), size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('📍 Sugerencia por proximidad',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+                                Text(
+                                  '$territorioNombreSel · $tarjetaIdSel',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                                Text(
+                                  '~${distSugerida!.toStringAsFixed(0)} m de distancia promedio',
+                                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else if (latSol != null) ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const SizedBox(width: 4),
+                      SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey[400])),
+                      const SizedBox(width: 8),
+                      Text('Buscando tarjeta más cercana...', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                    ]),
+                  ],
                   const SizedBox(height: 12),
                   const Text('Selecciona territorio:',
                       style:
@@ -463,6 +600,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                         territorioIdSel = terDoc.id;
                         territorioNombreSel = terNombre;
                         tarjetaIdSel = null;
+                        distSugerida = null;
                       }),
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 4),
@@ -565,7 +703,8 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
               child: const Text('Agregar'),
             ),
           ],
-        ),
+        );
+        }, // end StatefulBuilder
       ),
     );
 
