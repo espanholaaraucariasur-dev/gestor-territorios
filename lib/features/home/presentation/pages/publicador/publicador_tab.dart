@@ -970,14 +970,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
       final mesActual =
           '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
 
-      // Verificar folder temporal
-      final folderRef = db
-          .collection('territorios')
-          .doc('temporales')
-          .collection('tarjetas')
-          .doc(territorioId);
-      bool folderYaExiste = (await folderRef.get()).exists;
-
       final batch = db.batch();
 
       // Nombre del territorio consistente para toda la tarjeta
@@ -985,6 +977,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
       final territorioNombreGlobal = (terDoc.data()?['nombre'] as String?)?.isNotEmpty == true
           ? terDoc.data()!['nombre'] as String
           : territorioId;
+
+      // Mapa de folders ya verificados en esta operación (por territorioOrigenId)
+      final Map<String, bool> foldersVerificados = {};
 
       for (final dir in direcciones) {
         final estado = estados[dir.id] ?? 'pendiente';
@@ -998,8 +993,36 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final origenReal = (data['tarjeta_id_origen'] as String?)?.isNotEmpty == true
             ? data['tarjeta_id_origen'] as String
             : tarjetaIdOriginal;
-        final territorioOrigenId = (data['territorio_origen_id'] as String?) ?? territorioId;
-        final territorioOrigenNombre = (data['territorio_origen_nombre'] as String?) ?? territorioNombre;
+
+        // Territorio de origen REAL — nunca 'temporales'
+        String territorioOrigenId = (data['territorio_origen_id'] as String?) ?? '';
+        String territorioOrigenNombre = (data['territorio_origen_nombre'] as String?) ?? '';
+
+        // Si no tiene origen explícito o el territorio actual es real (no temporal)
+        if (territorioOrigenId.isEmpty || territorioOrigenId == 'temporales') {
+          territorioOrigenId = territorioId == 'temporales'
+              ? (data['territorio_id'] as String? ?? territorioId)
+              : territorioId;
+        }
+        if (territorioOrigenNombre.isEmpty || territorioOrigenNombre == 'temporales') {
+          territorioOrigenNombre = territorioId == 'temporales'
+              ? (data['territorio_nombre'] as String? ?? territorioNombre)
+              : territorioNombre;
+        }
+
+        // El folder siempre usa el ID del territorio de origen como documento
+        final folderRef = db
+            .collection('territorios')
+            .doc('temporales')
+            .collection('tarjetas')
+            .doc(territorioOrigenId);
+
+        // Verificar/crear folder solo una vez por territorioOrigenId
+        if (!foldersVerificados.containsKey(territorioOrigenId)) {
+          final existe = (await folderRef.get()).exists;
+          foldersVerificados[territorioOrigenId] = existe;
+        }
+        bool folderYaExiste = foldersVerificados[territorioOrigenId]!;
 
         // ── Verificar campañas activas ──────────────────
         final campSnap = await FirebaseFirestore.instance
@@ -1063,7 +1086,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
               'tipo': 'folder_temporal',
               'created_at': FieldValue.serverTimestamp(),
             });
-            folderYaExiste = true;
+            foldersVerificados[territorioOrigenId] = true;
           }
 
           batch.set(folderRef.collection('direcciones').doc(dir.id), {
@@ -1082,6 +1105,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
             'estado': 'temporal',
             'estado_predicacion': 'temporal',
             'tarjeta_id_origen': origenReal,
+            'territorio_origen_id': territorioOrigenId,
+            'territorio_origen_nombre': territorioOrigenNombre,
             'motivo_temporal': estado == 'otro' ? motivo : 'no_predicado',
             'fecha_temporal': FieldValue.serverTimestamp(),
           });
