@@ -3533,6 +3533,196 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     );
   }
 
+  Future<void> _mostrarDialogoSolicitarTerritorioConductor() async {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          width: double.maxFinite,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
+          ),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Solicitar tarjeta',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const Text(
+                'Selecciona un territorio para ver sus tarjetas disponibles',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('territorios')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return const Center(
+                        child: Text('No hay territorios.', style: TextStyle(color: Colors.grey)),
+                      );
+                    }
+                    return ListView.builder(
+                      itemCount: snapshot.data!.docs.length,
+                      itemBuilder: (context, i) {
+                        final terDoc = snapshot.data!.docs[i];
+                        final terData = terDoc.data() as Map<String, dynamic>;
+                        final terNombre = terData['nombre'] ?? terDoc.id;
+                        if (terDoc.id == 'temporales' || terDoc.id == 'campanas') return const SizedBox.shrink();
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ExpansionTile(
+                            leading: const Icon(Icons.folder, color: Color(0xFF1B5E20)),
+                            title: Text(terNombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: const Text('Toca para ver tarjetas'),
+                            children: [
+                              StreamBuilder<QuerySnapshot>(
+                                stream: FirebaseFirestore.instance
+                                    .collection('territorios')
+                                    .doc(terDoc.id)
+                                    .collection('tarjetas')
+                                    .where('bloqueado', isEqualTo: false)
+                                    .snapshots(),
+                                builder: (context, tarjetasSnap) {
+                                  if (tarjetasSnap.connectionState == ConnectionState.waiting) {
+                                    return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
+                                  }
+                                  // Conductor ve TODAS — incluyendo solo_conductores
+                                  final tarjetas = (tarjetasSnap.data?.docs ?? []).where((doc) {
+                                    final d = doc.data() as Map<String, dynamic>;
+                                    final asignado = d['asignado_a']?.toString() ?? '';
+                                    return asignado.isEmpty;
+                                  }).toList();
+                                  if (tarjetas.isEmpty) {
+                                    return const Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: Text('No hay tarjetas disponibles.', style: TextStyle(color: Colors.grey)),
+                                    );
+                                  }
+                                  return Column(
+                                    children: tarjetas.map((tarjetaDoc) {
+                                      final data = tarjetaDoc.data() as Map<String, dynamic>;
+                                      final tarjetaNombre = data['nombre'] ?? tarjetaDoc.id;
+                                      final soloConductores = (data['solo_conductores'] as bool?) ?? false;
+                                      return StreamBuilder<QuerySnapshot>(
+                                        stream: FirebaseFirestore.instance
+                                            .collection('direcciones_globales')
+                                            .where('tarjeta_id', isEqualTo: tarjetaDoc.id)
+                                            .snapshots(),
+                                        builder: (context, dirSnapshot) {
+                                          final cantDir = dirSnapshot.data?.docs.length ?? 0;
+                                          return ListTile(
+                                            leading: Icon(
+                                              soloConductores ? Icons.lock : Icons.credit_card,
+                                              color: data['completada'] == true ? Colors.grey : const Color(0xFF1B5E20),
+                                            ),
+                                            title: Text(tarjetaNombre,
+                                                style: TextStyle(color: data['completada'] == true ? Colors.grey : Colors.black)),
+                                            subtitle: Text(
+                                              data['completada'] == true
+                                                  ? '✅ Completada este mes'
+                                                  : '$cantDir direcciones${soloConductores ? ' · Solo conductores' : ''}',
+                                            ),
+                                            trailing: data['completada'] == true
+                                                ? null
+                                                : ElevatedButton(
+                                                    onPressed: cantDir > 0
+                                                        ? () async {
+                                                            Navigator.pop(context);
+                                                            await _asignarTarjetaAConductor(
+                                                              terDoc.id,
+                                                              tarjetaDoc.id,
+                                                              tarjetaNombre,
+                                                            );
+                                                          }
+                                                        : null,
+                                                    style: ElevatedButton.styleFrom(
+                                                      backgroundColor: cantDir > 0 ? const Color(0xFF1B5E20) : Colors.grey.shade400,
+                                                      foregroundColor: Colors.white,
+                                                    ),
+                                                    child: const Text('Tomar'),
+                                                  ),
+                                          );
+                                        },
+                                      );
+                                    }).toList(),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _asignarTarjetaAConductor(
+    String territorioId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
+    try {
+      final ahora = DateTime.now();
+      final nombre = widget.usuarioData['nombre'] ?? '';
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .set({
+        'asignado_a': nombre,
+        'enviado_nombre': nombre,
+        'enviado_tipo': 'conductor',
+        'conductor_email': _usuarioEmail,
+        'enviado_a': _usuarioEmail,
+        'mes_asignacion': '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
+        'completada': false,
+        'disponible_para_publicadores': false,
+        'bloqueado': false,
+        'asignado_en': FieldValue.serverTimestamp(),
+        'tomado_en': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Tarjeta "$tarjetaNombre" tomada'),
+          backgroundColor: const Color(0xFF1B5E20),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   Future<void> _mostrarDialogoSolicitarTerritorioPublicador() async {
     showDialog(
       context: context,
@@ -4365,6 +4555,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     return ConductorTab(
       usuarioData: widget.usuarioData,
       usuarioEmail: _usuarioEmail,
+      onSolicitarTerritorio: _mostrarDialogoSolicitarTerritorioConductor,
     );
   }
 
