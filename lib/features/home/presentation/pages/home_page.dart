@@ -201,7 +201,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                           color: leida ? Colors.grey.shade600 : Colors.black87,
                           fontSize: 13,
                         ),
-                        maxLines: 2,
+                        maxLines: tipo == 'alerta_predicacion' ? 5 : 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       trailing: Text(

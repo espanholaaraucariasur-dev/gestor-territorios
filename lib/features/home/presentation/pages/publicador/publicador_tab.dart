@@ -1180,9 +1180,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
         await db.collection('notificaciones').add({
           'tipo': 'alerta_predicacion',
           'titulo': '⚠️ Atención requerida',
-          'mensaje': '$nombre reportó ${dirNoPredicadas.length} dirección(es) en $tarjetaId:\n$resumen',
+          'cuerpo': '$nombre reportó ${dirNoPredicadas.length} dirección(es) en $tarjetaId:\n$resumen',
           'tarjeta_id': tarjetaId,
           'territorio_id': territorioId,
+          'destinatario': widget.usuarioEmail,
           'publicador': nombre,
           'leida': false,
           'destino_rol': 'admin_territorios',
