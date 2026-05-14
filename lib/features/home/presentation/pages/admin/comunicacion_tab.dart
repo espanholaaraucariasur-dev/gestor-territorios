@@ -17,6 +17,7 @@ class ComunicacionTab extends StatefulWidget {
 class _ComunicacionTabState extends State<ComunicacionTab> {
   final TextEditingController _anuncioCtrl = TextEditingController();
   final TextEditingController _codigoAccesoCtrl = TextEditingController();
+  final TextEditingController _mensajeMotivacionalCtrl = TextEditingController();
   bool _enviandoAnuncio = false;
   bool _guardandoCodigo = false;
 
@@ -33,6 +34,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   void dispose() {
     _anuncioCtrl.dispose();
     _codigoAccesoCtrl.dispose();
+    _mensajeMotivacionalCtrl.dispose();
     super.dispose();
   }
 
@@ -1059,97 +1061,178 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   }
 
   Widget _buildMensajesMotivacionales() {
-    final ctrl = TextEditingController();
-    return StatefulBuilder(builder: (ctx, setLocal) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Theme.of(ctx).cardColor,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Expanded(
-                child: TextField(
-                  controller: ctrl,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                    hintText: 'Ej: ¡Excelente trabajo, {nombre}! 🙏',
-                    hintStyle: const TextStyle(fontSize: 12),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Campo de entrada
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _mensajeMotivacionalCtrl,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Ej: ¡Excelente trabajo, {nombre}! 🙏',
+                  hintStyle: const TextStyle(fontSize: 12),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
                   ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 ),
               ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12)),
-                onPressed: () async {
-                  final texto = ctrl.text.trim();
-                  if (texto.isEmpty) return;
-                  await FirebaseFirestore.instance
-                      .collection('configuracion').doc('mensajes_motivacionales')
-                      .collection('mensajes').add({'texto': texto, 'activo': true, 'created_at': FieldValue.serverTimestamp()});
-                  ctrl.clear();
-                },
-                child: const Icon(Icons.add, color: Colors.white),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
               ),
-            ]),
-            const SizedBox(height: 4),
-            const Text('Usa {nombre} para el nombre del publicador', style: TextStyle(fontSize: 11, color: Colors.grey)),
-            const SizedBox(height: 12),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('configuracion').doc('mensajes_motivacionales')
-                  .collection('mensajes').orderBy('created_at').snapshots(),
-              builder: (ctx2, snap) {
-                final docs = snap.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
-                    child: const Text('Sin mensajes. Agrega al menos uno.', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  );
+              onPressed: () async {
+                final texto = _mensajeMotivacionalCtrl.text.trim();
+                if (texto.isEmpty) return;
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('configuracion')
+                      .doc('mensajes_motivacionales')
+                      .collection('mensajes')
+                      .add({
+                    'texto': texto,
+                    'activo': true,
+                    'created_at': FieldValue.serverTimestamp(),
+                  });
+                  _mensajeMotivacionalCtrl.clear();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('✅ Mensaje guardado'),
+                        backgroundColor: Color(0xFF1B5E20),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                    );
+                  }
                 }
-                return Column(children: docs.map((doc) {
+              },
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          const Text(
+            'Usa {nombre} para incluir el nombre del publicador',
+            style: TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+
+          // Lista de mensajes
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('configuracion')
+                .doc('mensajes_motivacionales')
+                .collection('mensajes')
+                .orderBy('created_at')
+                .snapshots(),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final docs = snap.data?.docs ?? [];
+              if (docs.isEmpty) {
+                return Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'Sin mensajes. Agrega al menos uno.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                );
+              }
+              return Column(
+                children: docs.map((doc) {
                   final d = doc.data() as Map<String, dynamic>;
-                  final texto = d['texto'] as String? ?? '';
-                  final activo = d['activo'] as bool? ?? true;
+                  final texto = (d['texto'] as String?) ?? '';
+                  final activo = (d['activo'] as bool?) ?? true;
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: activo ? Colors.green.shade50 : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: activo ? Colors.green.shade200 : Colors.grey.shade300),
+                      border: Border.all(
+                        color: activo ? Colors.green.shade200 : Colors.grey.shade300,
+                      ),
                     ),
                     child: Row(children: [
-                      Expanded(child: Text(texto, style: TextStyle(fontSize: 12, color: activo ? Colors.black87 : Colors.grey))),
+                      Expanded(
+                        child: Text(
+                          texto,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: activo ? Colors.black87 : Colors.grey,
+                          ),
+                        ),
+                      ),
+                      // Toggle activo/inactivo
                       IconButton(
-                        icon: Icon(activo ? Icons.toggle_on : Icons.toggle_off, color: activo ? const Color(0xFF1B5E20) : Colors.grey, size: 28),
+                        icon: Icon(
+                          activo ? Icons.toggle_on : Icons.toggle_off,
+                          color: activo ? const Color(0xFF1B5E20) : Colors.grey,
+                          size: 30,
+                        ),
                         onPressed: () => doc.reference.update({'activo': !activo}),
-                        padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
                       const SizedBox(width: 4),
+                      // Eliminar
                       IconButton(
                         icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                        onPressed: () => doc.reference.delete(),
-                        padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (c) => AlertDialog(
+                              title: const Text('Eliminar mensaje'),
+                              content: Text('"$texto"'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.pop(c, true),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                  child: const Text('Eliminar'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (ok == true) await doc.reference.delete();
+                        },
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
                     ]),
                   );
-                }).toList());
-              },
-            ),
-          ],
-        ),
-      );
-    });
+                }).toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSlotCampana(String slot, String slotLabel) {

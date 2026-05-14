@@ -65,6 +65,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
             duration: const Duration(seconds: 8),
           ),
         );
+        // Guardar también en Firestore para persistir
+        FirebaseFirestore.instance.collection('notificaciones').add({
+          'titulo': '⏰ Aviso de devolución',
+          'cuerpo': mensaje,
+          'tipo': 'auto_devolucion',
+          'destinatario': widget.usuarioEmail,
+          'leida': false,
+          'created_at': FieldValue.serverTimestamp(),
+        });
       }
     };
     // Verificar tarjetas asignadas al iniciar

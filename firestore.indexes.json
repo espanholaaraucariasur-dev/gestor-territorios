@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "notificaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "destinatario", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tarjetas",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "asignado_a", "order": "ASCENDING" },
+        { "fieldPath": "completada", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tarjetas",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "asignado_a", "order": "ASCENDING" },
+        { "fieldPath": "mes_asignacion", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -112,6 +112,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         content: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
               .collection('notificaciones')
+              .where('destinatario', isEqualTo: _usuarioEmail)
               .orderBy('created_at', descending: true)
               .limit(50)
               .snapshots(),
@@ -148,12 +149,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                   final cuerpo = data?['cuerpo'] ?? 'Sin contenido';
                   final createdAt = data?['created_at'] as Timestamp?;
                   final leida = data?['leida'] ?? false;
+                  final tipo = data?['tipo'] as String? ?? '';
 
                   String fecha = '';
                   if (createdAt != null) {
                     final dt = createdAt.toDate();
                     fecha =
                         '${dt.day}/${dt.month} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+                  }
+
+                  // Ícono según tipo
+                  IconData icono;
+                  Color colorIcono;
+                  if (tipo == 'motivacional') {
+                    icono = Icons.star;
+                    colorIcono = Colors.amber;
+                  } else if (tipo == 'auto_devolucion') {
+                    icono = Icons.timer;
+                    colorIcono = Colors.orange;
+                  } else {
+                    icono = Icons.notifications;
+                    colorIcono = const Color(0xFF1B5E20);
                   }
 
                   return Card(
@@ -164,10 +180,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         radius: 20,
                         backgroundColor: leida
                             ? Colors.grey.shade300
-                            : const Color(0xFF1B5E20).withOpacity(0.1),
+                            : colorIcono.withOpacity(0.12),
                         child: Icon(
-                          Icons.notifications,
-                          color: leida ? Colors.grey : const Color(0xFF1B5E20),
+                          icono,
+                          color: leida ? Colors.grey : colorIcono,
                           size: 20,
                         ),
                       ),
@@ -196,7 +212,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         ),
                       ),
                       onTap: () async {
-                        // Marcar como leída
                         if (!leida) {
                           await doc.reference.update({'leida': true});
                         }
