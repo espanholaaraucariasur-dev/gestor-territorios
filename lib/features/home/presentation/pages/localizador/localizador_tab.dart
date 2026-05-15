@@ -267,6 +267,17 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
     final normalizada = _normalizar(calle);
 
+    // Obtener coordenadas actuales si están disponibles
+    double? latSol;
+    double? lngSol;
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 5)),
+      );
+      latSol = pos.latitude;
+      lngSol = pos.longitude;
+    } catch (_) {}
+
     try {
       await FirebaseFirestore.instance
           .collection('solicitudes_localizador')
@@ -279,6 +290,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         'unidades_condominio': _esCondominio ? _unidades : [],
         'solicitante_email': widget.usuarioEmail,
         'estado': 'pendiente',
+        if (latSol != null) 'lat': latSol,
+        if (lngSol != null) 'lng': lngSol,
         'created_at': FieldValue.serverTimestamp(),
       });
 

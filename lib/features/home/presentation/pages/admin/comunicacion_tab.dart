@@ -491,25 +491,28 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     String? territorioNombreSel;
     String? tarjetaIdSel;
     double? distSugerida;
-    bool cargandoSugerencia = latSol != null && lngSol != null;
+
+    // Buscar sugerencia ANTES de abrir el diálogo
+    if (latSol != null && lngSol != null) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('📍 Buscando tarjeta más cercana...'), duration: Duration(seconds: 3)),
+      );
+      final sug = await _sugerirTarjetaCercana(latSol, lngSol);
+      if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
+      if (sug != null) {
+        territorioIdSel = sug.territorioId;
+        territorioNombreSel = sug.territorioNombre;
+        tarjetaIdSel = sug.tarjetaId;
+        distSugerida = sug.distancia;
+      }
+    }
+
+    if (!mounted) return;
 
     await showDialog(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (context, setDlg) {
-          if (cargandoSugerencia && latSol != null && lngSol != null) {
-            cargandoSugerencia = false;
-            _sugerirTarjetaCercana(latSol, lngSol).then((sug) {
-              if (sug != null && c.mounted) {
-                setDlg(() {
-                  territorioIdSel = sug.territorioId;
-                  territorioNombreSel = sug.territorioNombre;
-                  tarjetaIdSel = sug.tarjetaId;
-                  distSugerida = sug.distancia;
-                });
-              }
-            });
-          }
           return AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -556,14 +559,21 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                         ])),
                       ]),
                     ),
-                  ] else if (latSol != null) ...[
+                  ] else if (latSol == null) ...[
                     const SizedBox(height: 8),
-                    Row(children: [
-                      const SizedBox(width: 4),
-                      SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey.shade400)),
-                      const SizedBox(width: 8),
-                      Text('Buscando tarjeta más cercana...', style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-                    ]),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(children: [
+                        Icon(Icons.location_off, size: 14, color: Colors.grey),
+                        SizedBox(width: 6),
+                        Text('Sin coordenadas — selecciona manualmente',
+                            style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ]),
+                    ),
                   ],
                   const SizedBox(height: 12),
                   const Text('Selecciona territorio:',
