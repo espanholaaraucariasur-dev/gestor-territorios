@@ -32,9 +32,11 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   bool _mostrarFormulario = false;
   bool _enviando = false;
   bool _esCondominio = false;
+  bool _buscandoGps = false;
   String _mensaje = '';
   Map<String, dynamic>? _direccionEncontrada;
   final List<String> _unidades = [];
+  List<Map<String, dynamic>> _sugerencias = [];
 
   static const Color _verde = Color(0xFF1B5E20);
   static const Color _verdeClaro = Color(0xFF2E7D32);
@@ -112,6 +114,111 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   // BUSCAR CON ARRAY-CONTAINS-ANY + FALLBACK RANGE QUERY
   // ─────────────────────────────────────────────────────────
 
+  // Autocompletado mientras el usuario escribe
+  Future<void> _actualizarSugerencias(String texto) async {
+    if (texto.length < 3) {
+      setState(() => _sugerencias = []);
+      return;
+    }
+    try {
+      final norm = _normalizarBusqueda(texto);
+      final tokens = norm.split(' ').where((t) => t.length >= 2).toList();
+      if (tokens.isEmpty) return;
+
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('palabras_clave', arrayContainsAny: tokens.take(5).toList())
+          .limit(8)
+          .get();
+
+      // Agrupar calles únicas (sin número para mostrar nombre de calle)
+      final callesVistas = <String>{};
+      final sugs = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
+        final d = doc.data();
+        final calle = d['calle'] as String? ?? '';
+        if (calle.isEmpty || callesVistas.contains(calle)) continue;
+        callesVistas.add(calle);
+        sugs.add(d);
+        if (sugs.length >= 5) break;
+      }
+      if (mounted) setState(() => _sugerencias = sugs);
+    } catch (_) {
+      setState(() => _sugerencias = []);
+    }
+  }
+
+  // Buscar por GPS — encuentra la dirección más cercana al usuario
+  Future<void> _buscarPorGps() async {
+    setState(() { _buscandoGps = true; _sugerencias = []; });
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      final lat = pos.latitude;
+      final lng = pos.longitude;
+
+      // Buscar dirección más cercana en radio de 100m
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('lat', isGreaterThan: lat - 0.001)
+          .where('lat', isLessThan: lat + 0.001)
+          .limit(30)
+          .get();
+
+      Map<String, dynamic>? masNear;
+      double menorDist = double.infinity;
+      for (final doc in snap.docs) {
+        final d = doc.data();
+        final dLat = (d['lat'] as num?)?.toDouble();
+        final dLng = (d['lng'] as num?)?.toDouble();
+        if (dLat == null || dLng == null) continue;
+        final dist = _distanciaMetros(lat, lng, dLat, dLng);
+        if (dist < menorDist) { menorDist = dist; masNear = d; }
+      }
+
+      if (masNear != null && menorDist < 150) {
+        final calle = masNear['calle']?.toString() ?? '';
+        _calleCtrl.text = calle;
+        setState(() {
+          _buscandoGps = false;
+          _buscando = false; _buscado = true; _encontrada = true;
+          _direccionEncontrada = masNear;
+          final comp = masNear!['complemento']?.toString() ?? '';
+          _mensaje = comp.isNotEmpty ? '$calle · $comp' : calle;
+          _mostrarFormulario = false;
+        });
+      } else {
+        setState(() { _buscandoGps = false; });
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📍 No se encontró ninguna dirección cercana (radio 150m)'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() { _buscandoGps = false; });
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error GPS: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  double _distanciaMetros(double lat1, double lng1, double lat2, double lng2) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * 3.14159265358979 / 180;
+    final dLng = (lng2 - lng1) * 3.14159265358979 / 180;
+    final a = (dLat / 2) * (dLat / 2) +
+        (lat1 * 3.14159265358979 / 180) * (lat2 * 3.14159265358979 / 180) *
+            (dLng / 2) * (dLng / 2);
+    return r * 2 * (a < 1 ? a : 1);
+  }
+
   Future<void> _buscar() async {
     final consulta = _calleCtrl.text.trim();
     if (consulta.isEmpty) return;
@@ -139,26 +246,43 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       }
 
       // ── Estrategia 1: array-contains-any con palabras_clave ──
-      // Firebase permite máximo 30 valores en array-contains-any
       final tokensQuery = tokens.take(10).toList();
       final snap1 = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .where('palabras_clave', arrayContainsAny: tokensQuery)
-          .limit(20)
+          .limit(50)
           .get();
 
       if (snap1.docs.isNotEmpty) {
-        // Scoring: cuántos tokens coinciden
+        // Extraer el número de la consulta (último token numérico)
+        final numeroConsulta = tokens.lastWhere(
+          (t) => RegExp(r'^\d+$').hasMatch(t), orElse: () => '');
+
         int mejorScore = -1;
         Map<String, dynamic>? encontrada;
+
         for (final doc in snap1.docs) {
           final data = doc.data();
           final keywords = List<String>.from(data['palabras_clave'] ?? []);
+          final calleDir = _normalizarBusqueda(data['calle']?.toString() ?? '');
+
+          // Si la consulta tiene número, debe coincidir EXACTAMENTE
+          if (numeroConsulta.isNotEmpty) {
+            final tieneNumeroExacto = keywords.contains(numeroConsulta) ||
+                calleDir.contains(numeroConsulta);
+            if (!tieneNumeroExacto) continue; // descarta si el número no coincide
+          }
+
           int coinciden = tokens.where((t) => keywords.contains(t)).length;
-          int score = tokens.isEmpty ? 0 : (coinciden * 100 ~/ tokens.length);
+          // Bonus si la calle completa contiene todos los tokens de texto
+          final tokensTexto = tokens.where((t) => !RegExp(r'^\d+$').hasMatch(t)).toList();
+          int bonusTexto = tokensTexto.every((t) => calleDir.contains(t)) ? 20 : 0;
+          int score = tokens.isEmpty ? 0 : (coinciden * 100 ~/ tokens.length) + bonusTexto;
+
           if (score > mejorScore) { mejorScore = score; encontrada = data; }
         }
-        if (encontrada != null && mejorScore >= 50) {
+
+        if (encontrada != null && mejorScore >= 60) {
           final calle = encontrada['calle']?.toString() ?? '';
           final comp = encontrada['complemento']?.toString() ?? '';
           setState(() {
@@ -481,43 +605,106 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                       ),
                     ],
                   ),
-                  child: TextField(
-                    controller: _calleCtrl,
-                    decoration: InputDecoration(
-                      hintText: context.t('address_example'),
-                      hintStyle: TextStyle(color: Colors.grey[400]),
-                      prefixIcon: const Icon(Icons.search, color: _verde),
-                      suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                        valueListenable: _calleCtrl,
-                        builder: (context, value, child) {
-                          return value.text.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear,
-                                      color: Colors.grey, size: 18),
-                                  onPressed: () {
-                                    _calleCtrl.clear();
-                                    setState(() {
-                                      _buscado = false;
-                                      _mostrarFormulario = false;
-                                    });
+                  child: Column(
+                    children: [
+                      // Campo de búsqueda con botón GPS
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _calleCtrl,
+                              decoration: InputDecoration(
+                                hintText: context.t('address_example'),
+                                hintStyle: TextStyle(color: Colors.grey[400]),
+                                prefixIcon: const Icon(Icons.search, color: _verde),
+                                suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                                  valueListenable: _calleCtrl,
+                                  builder: (context, value, child) {
+                                    return value.text.isNotEmpty
+                                        ? IconButton(
+                                            icon: const Icon(Icons.clear, color: Colors.grey, size: 18),
+                                            onPressed: () {
+                                              _calleCtrl.clear();
+                                              setState(() {
+                                                _buscado = false;
+                                                _mostrarFormulario = false;
+                                                _sugerencias = [];
+                                              });
+                                            },
+                                          )
+                                        : const SizedBox.shrink();
                                   },
-                                )
-                              : const SizedBox.shrink();
-                        },
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  borderSide: BorderSide.none,
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  borderSide: const BorderSide(color: _verde, width: 2),
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                              ),
+                              onChanged: (v) {
+                                setState(() {});
+                                _actualizarSugerencias(v);
+                              },
+                              onSubmitted: (_) {
+                                setState(() => _sugerencias = []);
+                                _buscar();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          // Botón GPS
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 4)],
+                            ),
+                            child: IconButton(
+                              onPressed: _buscandoGps ? null : _buscarPorGps,
+                              icon: _buscandoGps
+                                  ? const SizedBox(width: 20, height: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: _verde))
+                                  : const Icon(Icons.my_location, color: _verde),
+                              tooltip: 'Buscar por mi ubicación',
+                            ),
+                          ),
+                        ],
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide.none,
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: _verde, width: 2),
-                      ),
-                      filled: true,
-                      fillColor: Colors.white,
-                    ),
-                    onChanged: (_) => setState(() {}),
-                    onSubmitted: (_) => _buscar(),
+
+                      // Sugerencias de autocompletado
+                      if (_sugerencias.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8)],
+                          ),
+                          child: Column(
+                            children: _sugerencias.map((sug) {
+                              final calle = sug['calle'] as String? ?? '';
+                              final comp = sug['complemento'] as String? ?? '';
+                              return ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.location_on_outlined, color: _verde, size: 18),
+                                title: Text(calle, style: const TextStyle(fontSize: 13)),
+                                subtitle: comp.isNotEmpty ? Text(comp, style: const TextStyle(fontSize: 11)) : null,
+                                onTap: () {
+                                  _calleCtrl.text = calle;
+                                  setState(() => _sugerencias = []);
+                                  _buscar();
+                                },
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(height: 10),
