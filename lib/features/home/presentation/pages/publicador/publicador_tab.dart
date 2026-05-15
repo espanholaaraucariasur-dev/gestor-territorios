@@ -575,7 +575,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                                   const SizedBox(height: 10),
                                   Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
-                                  const SizedBox(height: 8);
+                                  const SizedBox(height: 8),
 
                                   // ── Opciones de predicación ──
                                   ...[
