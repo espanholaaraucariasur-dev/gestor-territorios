@@ -358,8 +358,19 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                 final direcciones = snapshot.data!.docs;
 
+                // Ordenar: prioridades del mes anterior primero
+                final dirs = [...direcciones];
+                dirs.sort((a, b) {
+                  final aP = (_safeData(a)['prioridad_mes_anterior'] as bool?) == true ? 0 : 1;
+                  final bP = (_safeData(b)['prioridad_mes_anterior'] as bool?) == true ? 0 : 1;
+                  return aP.compareTo(bP);
+                });
+
+                final cantPrioridad = dirs.where((d) =>
+                    (_safeData(d)['prioridad_mes_anterior'] as bool?) == true).length;
+
                 if (_estadosPorTarjeta[tarjetaId]!.isEmpty) {
-                  for (final dir in direcciones) {
+                  for (final dir in dirs) {
                     final data = _safeData(dir);
                     _estadosPorTarjeta[tarjetaId]![dir.id] =
                         (data['estado_predicacion'] as String?) ?? 'pendiente';
@@ -371,8 +382,30 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                 return Column(
                   children: [
+                    // Banner de prioridades si hay pendientes del mes anterior
+                    if (cantPrioridad > 0)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.orange.shade300),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.priority_high, color: Colors.orange, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '⚠️ $cantPrioridad dirección(es) pendiente(s) del mes anterior',
+                              style: const TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ]),
+                      ),
+
                     // ── Lista de direcciones ──────────────────
-                    ...direcciones.map((dirDoc) {
+                    ...dirs.map((dirDoc) {
                       final data = _safeData(dirDoc);
                       final estadoLocal =
                           _estadosPorTarjeta[tarjetaId]![dirDoc.id] ??

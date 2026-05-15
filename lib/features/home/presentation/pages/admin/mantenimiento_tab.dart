@@ -838,8 +838,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         content: const Text(
           'Esto realizará:\n\n'
           '• Guardar estadísticas del mes actual\n'
-          '• Liberar todas las tarjetas (cerradas por defecto)\n'
-          '• Limpiar asignaciones de tarjetas y territorios\n'
+          '• Marcar direcciones no predicadas como prioridad\n'
+          '• Devolver tarjetas incompletas al conductor\n'
           '• Resetear predicaciones del mes\n'
           '• Limpiar tarjetas temporales\n\n'
           '⚠️ Las direcciones NO se eliminan.',
@@ -861,91 +861,149 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     if (confirmar != true) return;
 
     try {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('🔄 Iniciando nuevo mes...'),
-            duration: Duration(seconds: 30),
-          ),
-        );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('🔄 Iniciando nuevo mes...'), duration: Duration(seconds: 60)),
+      );
 
-      // PASO 1: Guardar snapshot estadísticas del mes que termina
       final ahora = DateTime.now();
-      final mesAnterior =
-          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
-      final dirs = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .get();
-      final predicadas =
-          dirs.docs.where((d) => (d.data())['predicado'] == true).length;
-      await FirebaseFirestore.instance
-          .collection('estadisticas')
-          .doc(mesAnterior)
-          .set({
-        'mes': mesAnterior,
-        'total_direcciones': dirs.docs.length,
-        'predicadas': predicadas,
-        'creado_en': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      // Guardar documento de control con inicio del nuevo mes
+      final mesAnterior = '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
       final nuevoMes = ahora.month == 12
           ? DateTime(ahora.year + 1, 1, 1)
           : DateTime(ahora.year, ahora.month + 1, 1);
-      await FirebaseFirestore.instance
-          .collection('configuraciones')
-          .doc('mes_actual')
-          .set({
+      final nuevoMesStr = '${nuevoMes.year}-${nuevoMes.month.toString().padLeft(2, '0')}';
+
+      // ── PASO 1: Guardar estadísticas ──────────────────────────
+      final dirs = await FirebaseFirestore.instance
+          .collection('direcciones_globales').get();
+      final predicadas = dirs.docs.where((d) => (d.data())['predicado'] == true).length;
+      final noPredicadas = dirs.docs.where((d) =>
+          (d.data())['predicado'] != true &&
+          (d.data())['estado'] == 'activa').length;
+
+      await FirebaseFirestore.instance.collection('estadisticas').doc(mesAnterior).set({
+        'mes': mesAnterior,
+        'total_direcciones': dirs.docs.length,
+        'predicadas': predicadas,
+        'no_predicadas': noPredicadas,
+        'creado_en': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      await FirebaseFirestore.instance.collection('configuraciones').doc('mes_actual').set({
         'inicio_mes': Timestamp.fromDate(nuevoMes),
-        'mes_str': '${nuevoMes.year}-${nuevoMes.month.toString().padLeft(2, '0')}',
+        'mes_str': nuevoMesStr,
         'actualizado_en': FieldValue.serverTimestamp(),
       });
 
-      // PASO 2: Resetear todas las tarjetas de todos los territorios
-      final territoriosSnap =
-          await FirebaseFirestore.instance.collection('territorios').get();
+      // ── PASO 2: Marcar direcciones no predicadas como prioridad ──
+      // y resetear las predicadas para el nuevo mes
+      for (int i = 0; i < dirs.docs.length; i += 100) {
+        final chunk = dirs.docs.skip(i).take(100).toList();
+        final batch = FirebaseFirestore.instance.batch();
+        for (final doc in chunk) {
+          final d = doc.data();
+          final fuePredicada = d['predicado'] == true;
+          final estadoActual = d['estado'] as String? ?? 'activa';
+          if (estadoActual != 'activa') continue;
+
+          if (fuePredicada) {
+            // Predicada → resetear para nuevo mes
+            batch.update(doc.reference, {
+              'predicado': false,
+              'estado_predicacion': 'pendiente',
+              'fecha_predicacion': null,
+              'mes_predicacion': null,
+              'prioridad_mes_anterior': false,
+              'motivo_temporal': null,
+            });
+          } else {
+            // NO predicada → marcar como prioridad del mes siguiente
+            batch.update(doc.reference, {
+              'predicado': false,
+              'estado_predicacion': 'pendiente',
+              'prioridad_mes_anterior': true,
+              'mes_pendiente': mesAnterior,
+              'fecha_predicacion': null,
+              'mes_predicacion': null,
+              'motivo_temporal': null,
+            });
+          }
+        }
+        await batch.commit();
+        await Future.delayed(const Duration(milliseconds: 150));
+      }
+
+      // ── PASO 3: Tarjetas — devolver incompletas al conductor ──
+      final territoriosSnap = await FirebaseFirestore.instance
+          .collection('territorios').get();
 
       for (final territorio in territoriosSnap.docs) {
-        if (['temporales', 'removidas', 'estadisticas']
-            .contains(territorio.id)) continue;
+        if (['temporales', 'removidas', 'estadisticas', 'campanas'].contains(territorio.id)) continue;
 
         final tarjetasSnap = await FirebaseFirestore.instance
-            .collection('territorios')
-            .doc(territorio.id)
-            .collection('tarjetas')
-            .get();
+            .collection('territorios').doc(territorio.id)
+            .collection('tarjetas').get();
 
         for (int i = 0; i < tarjetasSnap.docs.length; i += 100) {
           final chunk = tarjetasSnap.docs.skip(i).take(100).toList();
-          WriteBatch batch = FirebaseFirestore.instance.batch();
+          final batch = FirebaseFirestore.instance.batch();
           for (final tarjeta in chunk) {
-            batch.update(tarjeta.reference, {
-              'mes_anterior': mesAnterior,
-              'asignado_a': null,
-              'asignado_en': null,
-              'mes_asignacion': null,
-              'completada': false,
-              'fecha_completada': null,
-              'enviado_a': null,
-              'enviado_nombre': null,
-              'enviado_en': null,
-              'enviado_tipo': null,
-              'publicador_email': null,
-              'publicador_nombre': null,
-              'conductor_email': null,
-              'estatus_envio': 'disponible',
-              'bloqueado': true,
-              'disponible_para_publicadores': false,
-            });
+            final td = tarjeta.data();
+            final completada = td['completada'] == true;
+            final asignado = (td['asignado_a'] as String?) ?? '';
+            final conductorEmail = (td['conductor_email'] as String?) ?? '';
+
+            if (!completada && asignado.isNotEmpty) {
+              // Tarjeta incompleta → liberar PERO marcar con prioridad para admin
+              batch.update(tarjeta.reference, {
+                'mes_anterior': mesAnterior,
+                'asignado_a': null,
+                'asignado_en': null,
+                'mes_asignacion': null,
+                'completada': false,
+                'fecha_completada': null,
+                'enviado_a': null,
+                'enviado_nombre': null,
+                'enviado_en': null,
+                'enviado_tipo': null,
+                'publicador_email': null,
+                'publicador_nombre': null,
+                'conductor_email': null,
+                'estatus_envio': 'disponible',
+                'bloqueado': true,
+                'disponible_para_publicadores': false,
+                'prioridad_admin': true,        // ← bandera para admin
+                'mes_prioridad': mesAnterior,   // ← qué mes quedó pendiente
+              });
+            } else {
+              // Tarjeta completada o libre → resetear normal
+              batch.update(tarjeta.reference, {
+                'mes_anterior': mesAnterior,
+                'asignado_a': null,
+                'asignado_en': null,
+                'mes_asignacion': null,
+                'completada': false,
+                'fecha_completada': null,
+                'enviado_a': null,
+                'enviado_nombre': null,
+                'enviado_en': null,
+                'enviado_tipo': null,
+                'publicador_email': null,
+                'publicador_nombre': null,
+                'conductor_email': null,
+                'estatus_envio': 'disponible',
+                'bloqueado': true,
+                'disponible_para_publicadores': false,
+                'tiene_pendientes_mes_anterior': false,
+              });
+            }
           }
           await batch.commit();
-          await Future.delayed(const Duration(milliseconds: 200));
+          await Future.delayed(const Duration(milliseconds: 150));
         }
 
-        // Resetear el territorio también
+        // Resetear territorio
         await FirebaseFirestore.instance
-            .collection('territorios')
-            .doc(territorio.id)
+            .collection('territorios').doc(territorio.id)
             .update({
           'enviado_a': null,
           'enviado_nombre': null,
@@ -956,38 +1014,18 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         });
       }
 
-      // PASO 3: Limpiar datos dinámicos (incluye predicaciones)
-      // NO limpia tarjetas temporales — eso es responsabilidad de _limpiarDatosDinamicos
-      for (int i = 0; i < dirs.docs.length; i += 100) {
-        final chunk = dirs.docs.skip(i).take(100).toList();
-        WriteBatch batch = FirebaseFirestore.instance.batch();
-        for (final doc in chunk) {
-          batch.update(doc.reference, {
-            'predicado': false,
-            'estado_predicacion': 'pendiente',
-            'fecha_predicacion': null,
-            'mes_predicacion': null,
-            'motivo_temporal': null,
-            'asignado_a': null,
-          });
-        }
-        await batch.commit();
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white),
-                SizedBox(width: 8),
-                Text('✅ Nuevo mes iniciado correctamente'),
-              ],
-            ),
-            backgroundColor: Color(0xFF1B5E20),
-            duration: Duration(seconds: 4),
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 8),
+              Text('✅ Nuevo mes $nuevoMesStr iniciado. '
+                  '${noPredicadas} dirs. marcadas como prioridad.'),
+            ]),
+            backgroundColor: const Color(0xFF1B5E20),
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -995,10 +1033,7 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
         );
       }
     }

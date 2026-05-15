@@ -221,18 +221,50 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                               final tarjetaNombre =
                                   tarjetaMap['nombre'] as String? ??
                                       'Sin nombre';
+                              final esPrioridad = tarjetaMap['prioridad_admin'] == true;
+                              final mesPrioridad = tarjetaMap['mes_prioridad'] as String? ?? '';
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 10),
-                                color: Colors.blue.shade50,
+                                color: esPrioridad ? Colors.orange.shade50 : Colors.blue.shade50,
                                 elevation: 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  side: esPrioridad
+                                      ? const BorderSide(color: Colors.orange, width: 1.5)
+                                      : BorderSide.none,
+                                ),
                                 child: ExpansionTile(
-                                  leading: const Icon(Icons.folder,
-                                      color: Colors.blue),
-                                  title: Text(tarjetaNombre,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 15),
-                                      overflow: TextOverflow.ellipsis),
+                                  leading: Icon(
+                                    esPrioridad ? Icons.priority_high : Icons.folder,
+                                    color: esPrioridad ? Colors.orange : Colors.blue,
+                                  ),
+                                  title: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(tarjetaNombre,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 15),
+                                            overflow: TextOverflow.ellipsis),
+                                      ),
+                                      if (esPrioridad)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange,
+                                            borderRadius: BorderRadius.circular(10),
+                                          ),
+                                          child: Text(
+                                            'Pendiente $mesPrioridad',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                   subtitle: StreamBuilder<QuerySnapshot>(
                                     stream: FirebaseFirestore.instance
                                         .collection('direcciones_globales')
@@ -242,6 +274,9 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                     builder: (context, dirSnap) {
                                       final count =
                                           dirSnap.data?.docs.length ?? 0;
+                                      final cantPrioridad = dirSnap.data?.docs
+                                          .where((d) => (d.data() as Map<String,dynamic>)['prioridad_mes_anterior'] == true)
+                                          .length ?? 0;
                                       final enviadoNombre = (tarjetaMap['enviado_nombre'] as String?)
                                           ?? (tarjetaMap['asignado_a'] as String?) ?? '';
                                       final enviadoEn = tarjetaMap['enviado_en'] as Timestamp?;
@@ -253,13 +288,23 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                       return Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text('Dir. vinculadas: $count'),
+                                          Text('Dir. vinculadas: $count'
+                                              '${cantPrioridad > 0 ? " · $cantPrioridad sin predicar" : ""}'),
+                                          if (esPrioridad && cantPrioridad > 0)
+                                            Text(
+                                              '⚠️ Enviar primero — $cantPrioridad dir. pendientes del mes anterior',
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.orange,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
                                           if (enviadoNombre.isNotEmpty)
                                             Text(
                                               'Enviado a: $enviadoNombre$fechaHora',
                                               style: const TextStyle(
                                                 fontSize: 11,
-                                                color: Colors.orange,
+                                                color: Colors.blue,
                                                 fontWeight: FontWeight.w500,
                                               ),
                                             ),
@@ -679,9 +724,11 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         'enviado_nombre': nombreDestinatario,
         'enviado_tipo': tipo,
         'enviado_en': FieldValue.serverTimestamp(),
-        'territorio_nombre': territoryNombre, // ✅ Nombre legible guardado
+        'territorio_nombre': territoryNombre,
         'disponible_para_publicadores': tipo == 'publicador' ? true : null,
         'bloqueado': tipo == 'publicador' ? false : null,
+        'prioridad_admin': false,   // ← limpiar al enviar
+        'mes_prioridad': null,
       };
       if (tarjetaId != null) {
         await FirebaseFirestore.instance
