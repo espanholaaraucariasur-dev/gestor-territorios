@@ -415,8 +415,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       final calle = (data['calle'] as String?) ?? '';
                       final complemento =
                           (data['complemento'] as String?) ?? '';
-                      final direccionCompleta =
-                          '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}';
+                      final detalles =
+                          (data['detalles'] as String?) ?? '';
+                      final esPrioridad =
+                          (data['prioridad_mes_anterior'] as bool?) == true;
+                      final direccionCompleta = calle;
 
                       Color accentColor = const Color(0xFFB0BEC5);
                       IconData estadoIcon = Icons.radio_button_unchecked;
@@ -499,13 +502,80 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         ),
                                     ],
                                   ),
-                                  const SizedBox(height: 4),
+
+                                  // Complemento
+                                  if (complemento.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Row(children: [
+                                      const SizedBox(width: 22),
+                                      const Icon(Icons.apartment, size: 13, color: Colors.blueGrey),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          complemento,
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            color: Color(0xFF455A64),
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ]),
+                                  ],
+
+                                  // Detalles / observaciones
+                                  if (detalles.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Container(
+                                      margin: const EdgeInsets.only(left: 22),
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: Colors.amber.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.amber.shade200),
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Icon(Icons.info_outline, size: 13, color: Colors.amber),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              detalles,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.amber.shade900,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+
+                                  // Badge prioridad mes anterior
+                                  if (esPrioridad) ...[
+                                    const SizedBox(height: 4),
+                                    Container(
+                                      margin: const EdgeInsets.only(left: 22),
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.orange.shade300),
+                                      ),
+                                      child: const Row(children: [
+                                        Icon(Icons.history, size: 12, color: Colors.orange),
+                                        SizedBox(width: 4),
+                                        Text('Pendiente del mes anterior',
+                                            style: TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.w600)),
+                                      ]),
+                                    ),
+                                  ],
+
                                   const SizedBox(height: 10),
-                                  Divider(
-                                      height: 1,
-                                      thickness: 1,
-                                      color: Colors.grey.shade100),
-                                  const SizedBox(height: 8),
+                                  Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
+                                  const SizedBox(height: 8);
 
                                   // ── Opciones de predicación ──
                                   ...[
