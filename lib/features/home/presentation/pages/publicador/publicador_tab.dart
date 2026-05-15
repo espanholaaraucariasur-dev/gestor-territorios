@@ -1080,13 +1080,32 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
         // ── Procesar estado de predicación ─────────────────
         if (estado == 'completada') {
-          batch.update(dir.reference, {
-            'estado': 'activa',
-            'estado_predicacion': 'completada',
-            'predicado': true,
-            'fecha_predicacion': FieldValue.serverTimestamp(),
-            'mes_predicacion': mesActual,
-          });
+          // Si tiene tarjeta_id_origen → está en temporal → volver al origen
+          if (origenReal != tarjetaIdOriginal && origenReal.isNotEmpty) {
+            // Mover de vuelta a la tarjeta de origen
+            batch.update(dir.reference, {
+              'tarjeta_id': origenReal,
+              'tarjeta_id_origen': null,
+              'territorio_id': territorioOrigenId,
+              'territorio_nombre': territorioOrigenNombre,
+              'territorio_origen_id': null,
+              'territorio_origen_nombre': null,
+              'estado': 'activa',
+              'estado_predicacion': 'completada',
+              'predicado': true,
+              'fecha_predicacion': FieldValue.serverTimestamp(),
+              'mes_predicacion': mesActual,
+            });
+          } else {
+            // Tarjeta normal — solo marcar como completada
+            batch.update(dir.reference, {
+              'estado': 'activa',
+              'estado_predicacion': 'completada',
+              'predicado': true,
+              'fecha_predicacion': FieldValue.serverTimestamp(),
+              'mes_predicacion': mesActual,
+            });
+          }
         } else if (estado == 'no_predicado' || estado == 'otro') {
           if (!folderYaExiste) {
             batch.set(folderRef, {
@@ -1210,16 +1229,26 @@ class _PublicadorTabState extends State<PublicadorTab> {
             final dData = d.data() as Map<String, dynamic>;
             final estadoDir = dData['estado_predicacion'] as String? ?? '';
             final origenId = dData['tarjeta_id_origen'] as String? ?? '';
-            // Solo restaurar dirs completadas — las temporales/removidas ya tienen su destino
+            final terOrigenId = dData['territorio_origen_id'] as String? ?? '';
+            final terOrigenNombre = dData['territorio_origen_nombre'] as String? ?? '';
+
             if (estadoDir == 'completada' && origenId.isNotEmpty) {
+              // Restaurar completamente a tarjeta y territorio de origen
               batchClean.update(d.reference, {
                 'tarjeta_id': origenId,
                 'tarjeta_id_origen': null,
+                'territorio_id': terOrigenId.isNotEmpty ? terOrigenId : dData['territorio_id'],
+                'territorio_nombre': terOrigenNombre.isNotEmpty ? terOrigenNombre : dData['territorio_nombre'],
+                'territorio_origen_id': null,
+                'territorio_origen_nombre': null,
                 'estado': 'activa',
+                'estado_predicacion': 'completada',
               });
             } else if (estadoDir == 'completada') {
+              // Sin origen — eliminar
               batchClean.delete(d.reference);
             }
+            // Las que van a temporal/removidas ya tienen su destino — no tocar
           }
           await batchClean.commit();
         }
