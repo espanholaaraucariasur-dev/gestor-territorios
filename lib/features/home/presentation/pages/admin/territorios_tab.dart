@@ -1309,41 +1309,55 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                           .collection('tarjetas')
                                           .snapshots(),
                                       builder: (context, t) {
-                                        final numTarjetas =
-                                            t.data?.docs.length ?? 0;
-                                        final tarjetaIds = t.data?.docs
-                                                .map((d) => d.id)
-                                                .toList() ??
-                                            [];
+                                        final tarjetas = t.data?.docs ?? [];
+                                        final numTarjetas = tarjetas.length;
+                                        final tarjetaIds = tarjetas.map((d) => d.id).toList();
+                                        final cantPrioridad = tarjetas.where((d) =>
+                                            (d.data() as Map<String,dynamic>)['prioridad_admin'] == true).length;
 
                                         if (tarjetaIds.isEmpty) {
                                           return Text(
                                             '$numTarjetas tarjetas · 0 direcciones',
-                                            style: const TextStyle(
-                                                color: Colors.grey,
-                                                fontSize: 13),
+                                            style: const TextStyle(color: Colors.grey, fontSize: 13),
                                           );
                                         }
 
-                                        return FutureBuilder<QuerySnapshot>(
-                                          future: FirebaseFirestore.instance
-                                              .collection(
-                                                  'direcciones_globales')
-                                              .where('tarjeta_id',
-                                                  whereIn: tarjetaIds
-                                                      .take(10)
-                                                      .toList())
-                                              .get(),
-                                          builder: (context, dirSnap) {
-                                            final numDirs =
-                                                dirSnap.data?.docs.length ?? 0;
-                                            return Text(
-                                              '$numTarjetas tarjetas · $numDirs direcciones',
-                                              style: const TextStyle(
-                                                  color: Colors.grey,
-                                                  fontSize: 13),
-                                            );
-                                          },
+                                        return Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            FutureBuilder<QuerySnapshot>(
+                                              future: FirebaseFirestore.instance
+                                                  .collection('direcciones_globales')
+                                                  .where('tarjeta_id', whereIn: tarjetaIds.take(10).toList())
+                                                  .get(),
+                                              builder: (context, dirSnap) {
+                                                final numDirs = dirSnap.data?.docs.length ?? 0;
+                                                return Text(
+                                                  '$numTarjetas tarjetas · $numDirs direcciones',
+                                                  style: const TextStyle(color: Colors.grey, fontSize: 13),
+                                                );
+                                              },
+                                            ),
+                                            if (cantPrioridad > 0) ...[
+                                              const SizedBox(height: 3),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.orange.shade100,
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  border: Border.all(color: Colors.orange.shade300),
+                                                ),
+                                                child: Text(
+                                                  '⚠️ $cantPrioridad tarjeta(s) pendiente(s)',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: Colors.orange.shade900,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
                                         );
                                       },
                                     ),

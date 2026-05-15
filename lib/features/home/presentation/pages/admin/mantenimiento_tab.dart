@@ -526,6 +526,80 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     }
   }
 
+  Future<void> _limpiarPendientes() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🔄 Limpiar prioridades pendientes'),
+        content: const Text(
+          'Elimina las marcas de "pendiente del mes anterior" de:\n\n'
+          '• Direcciones (prioridad_mes_anterior)\n'
+          '• Tarjetas (prioridad_admin)\n\n'
+          'Todo vuelve a estado normal.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
+            child: const Text('Limpiar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('🔄 Limpiando pendientes...'), duration: Duration(seconds: 30)),
+      );
+      final db = FirebaseFirestore.instance;
+      int total = 0;
+
+      // Limpiar prioridad en direcciones
+      final dirs = await db.collection('direcciones_globales')
+          .where('prioridad_mes_anterior', isEqualTo: true).get();
+      for (int i = 0; i < dirs.docs.length; i += 100) {
+        final chunk = dirs.docs.skip(i).take(100).toList();
+        final b = db.batch();
+        for (final d in chunk) {
+          b.update(d.reference, {'prioridad_mes_anterior': false, 'mes_pendiente': null});
+        }
+        await b.commit();
+        total += chunk.length;
+      }
+
+      // Limpiar prioridad en tarjetas
+      final ters = await db.collection('territorios').get();
+      for (final ter in ters.docs) {
+        if (['temporales','removidas','estadisticas','campanas'].contains(ter.id)) continue;
+        final tarjetas = await db.collection('territorios').doc(ter.id)
+            .collection('tarjetas').where('prioridad_admin', isEqualTo: true).get();
+        if (tarjetas.docs.isEmpty) continue;
+        final b = db.batch();
+        for (final t in tarjetas.docs) {
+          b.update(t.reference, {'prioridad_admin': false, 'mes_prioridad': null});
+        }
+        await b.commit();
+        total += tarjetas.docs.length;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('✅ $total prioridades limpiadas'),
+          backgroundColor: Colors.blueGrey,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _limpiarDatosDinamicos() async {
     final confirmar = await showDialog<bool>(
       context: context,
@@ -583,17 +657,25 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
-      // 2. Eliminar tarjetas temporales
+      // 2. Eliminar tarjetas temporales (con sus subcolecciones de direcciones)
       final temporalesSnap = await db
           .collection('territorios')
           .doc('temporales')
           .collection('tarjetas')
           .get();
-      for (int i = 0; i < temporalesSnap.docs.length; i += 100) {
-        final chunk = temporalesSnap.docs.skip(i).take(100).toList();
-        WriteBatch batch = db.batch();
-        for (final t in chunk) batch.delete(t.reference);
-        await batch.commit();
+      for (final t in temporalesSnap.docs) {
+        // Primero eliminar subcolección direcciones
+        final dirsSubSnap = await t.reference.collection('direcciones').get();
+        if (dirsSubSnap.docs.isNotEmpty) {
+          for (int i = 0; i < dirsSubSnap.docs.length; i += 100) {
+            final chunk = dirsSubSnap.docs.skip(i).take(100).toList();
+            final b = db.batch();
+            for (final d in chunk) b.delete(d.reference);
+            await b.commit();
+          }
+        }
+        // Luego eliminar el documento padre
+        await t.reference.delete();
       }
 
       // 3. Eliminar direcciones temporales de direcciones_globales
@@ -950,9 +1032,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
             final td = tarjeta.data();
             final completada = td['completada'] == true;
             final asignado = (td['asignado_a'] as String?) ?? '';
-            final conductorEmail = (td['conductor_email'] as String?) ?? '';
 
-            if (!completada && asignado.isNotEmpty) {
+            if (!completada && (asignado.isNotEmpty || td['prioridad_admin'] == true)) {
               // Tarjeta incompleta → liberar PERO marcar con prioridad para admin
               batch.update(tarjeta.reference, {
                 'mes_anterior': mesAnterior,
@@ -1106,6 +1187,15 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                 'Resetea predicaciones, libera todas las tarjetas y deja el sistema listo para el nuevo ciclo mensual.',
             color: const Color(0xFF1B5E20),
             onPressed: _iniciarNuevoMes,
+          ),
+          const SizedBox(height: 12),
+          _buildBotonMantenimiento(
+            icono: Icons.flag_outlined,
+            titulo: '🔄 Limpiar prioridades pendientes',
+            descripcion:
+                'Elimina las marcas de "pendiente del mes anterior" de tarjetas y direcciones. Todo vuelve a estado normal.',
+            color: Colors.blueGrey,
+            onPressed: _limpiarPendientes,
           ),
           const SizedBox(height: 12),
           _buildBotonMantenimiento(

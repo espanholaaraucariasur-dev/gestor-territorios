@@ -78,7 +78,10 @@ class RestauracionMensual {
         for (final tarjeta in tarjetasSnap.docs) {
           final td = tarjeta.data();
           if (td['es_temporal'] == true) continue;
-          final incompleta = td['completada'] != true && (td['asignado_a'] as String? ?? '').isNotEmpty;
+          final incompleta = td['completada'] != true && 
+              ((td['asignado_a'] as String? ?? '').isNotEmpty ||
+               // También tarjetas nunca enviadas que tenían dirs sin predicar
+               td['prioridad_admin'] == true);
           b.update(tarjeta.reference, {
             'mes_anterior': mesAnterior, 'asignado_a': null, 'asignado_en': null,
             'mes_asignacion': null, 'completada': false, 'fecha_completada': null,
