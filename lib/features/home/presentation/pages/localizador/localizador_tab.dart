@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 // Mapbox
@@ -272,7 +273,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     double? lngSol;
     try {
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 5)),
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
       );
       latSol = pos.latitude;
       lngSol = pos.longitude;
