@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import '../../../auth/presentation/pages/login_page.dart';
 import '../../../../core/services/auto_return_service.dart';
+import 'admin/restauracion_mensual.dart';
 // CSV
 import 'package:file_picker/file_picker.dart';
 // Traducciones
@@ -4589,24 +4590,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   // ── HELPERS ─────────────────────────────────────────────────────────────
 
   void _verificarReinicioMensual() async {
-    final ahora = DateTime.now();
-    final prefs = await SharedPreferences.getInstance();
-
-    // Obtener el último mes de reinicio guardado
-    final ultimoMesReinicio = prefs.getInt('ultimo_mes_reinicio') ?? -1;
-    final mesActual = ahora.month;
-    final anioActual = ahora.year;
-
-    // Solo ejecutar el reinicio el día 1 de cada mes Y si el mes es diferente
-    if (ahora.day == 1 && mesActual != ultimoMesReinicio) {
-      await _logicaReinicio(silencioso: true); // Ejecutar en modo silencioso
-
-      // Actualizar el mes guardado
-      await prefs.setInt('ultimo_mes_reinicio', mesActual);
-      await prefs.setInt('ultimo_anio_reinicio', anioActual);
-
-      debugPrint(
-          '🔄 Reinicio mensual automático ejecutado silenciosamente - Mes: $mesActual, Año: $anioActual');
+    try {
+      final debe = await RestauracionMensual.debeEjecutarse();
+      if (debe && mounted) {
+        debugPrint('🗓️ Día 1 detectado — ejecutando reinicio mensual automático');
+        await RestauracionMensual.ejecutar(context);
+      }
+    } catch (e) {
+      debugPrint('❌ Error verificando reinicio mensual: $e');
     }
   }
 
