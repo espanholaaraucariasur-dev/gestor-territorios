@@ -987,7 +987,24 @@ class _PublicadorTabState extends State<PublicadorTab> {
           ? terDoc.data()!['nombre'] as String
           : territorioId;
 
-      // Mapa de folders ya verificados en esta operación (por territorioOrigenId)
+      // Mapa de folders ya verificados: nombre_territorio → {id, existe}
+      final Map<String, String> folderIdPorTerritorio = {};
+
+      // Pre-cargar folders existentes para evitar duplicados
+      final foldersExistentes = await db
+          .collection('territorios')
+          .doc('temporales')
+          .collection('tarjetas')
+          .get();
+      for (final f in foldersExistentes.docs) {
+        final fData = f.data();
+        final nombre = (fData['nombre_grupo'] as String?) ?? '';
+        final terId = (fData['territorio_id'] as String?) ?? '';
+        if (nombre.isNotEmpty) folderIdPorTerritorio[nombre] = f.id;
+        if (terId.isNotEmpty) folderIdPorTerritorio[terId] = f.id;
+      }
+
+      // Mapa de folders ya verificados en esta operación
       final Map<String, bool> foldersVerificados = {};
 
       for (final dir in direcciones) {
@@ -1019,19 +1036,30 @@ class _PublicadorTabState extends State<PublicadorTab> {
               : territorioNombre;
         }
 
+        // Buscar si ya existe un folder para este territorio
+        // Primero por ID, luego por nombre — evita duplicados
+        String folderDocId = folderIdPorTerritorio[territorioOrigenId]
+            ?? folderIdPorTerritorio[territorioOrigenNombre]
+            ?? territorioOrigenId;
+
         // El folder siempre usa el ID del territorio de origen como documento
         final folderRef = db
             .collection('territorios')
             .doc('temporales')
             .collection('tarjetas')
-            .doc(territorioOrigenId);
+            .doc(folderDocId);
 
-        // Verificar/crear folder solo una vez por territorioOrigenId
-        if (!foldersVerificados.containsKey(territorioOrigenId)) {
+        // Verificar/crear folder solo una vez por folderDocId
+        if (!foldersVerificados.containsKey(folderDocId)) {
           final existe = (await folderRef.get()).exists;
-          foldersVerificados[territorioOrigenId] = existe;
+          foldersVerificados[folderDocId] = existe;
+          if (existe) {
+            // Registrar también por nombre para que otras dirs lo encuentren
+            folderIdPorTerritorio[territorioOrigenNombre] = folderDocId;
+            folderIdPorTerritorio[territorioOrigenId] = folderDocId;
+          }
         }
-        bool folderYaExiste = foldersVerificados[territorioOrigenId]!;
+        bool folderYaExiste = foldersVerificados[folderDocId]!;
 
         // ── Verificar campañas activas ──────────────────
         final campSnap = await FirebaseFirestore.instance
@@ -1114,7 +1142,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
               'tipo': 'folder_temporal',
               'created_at': FieldValue.serverTimestamp(),
             });
-            foldersVerificados[territorioOrigenId] = true;
+            foldersVerificados[folderDocId] = true;
+            // Registrar para que otras dirs del mismo territorio lo encuentren
+            folderIdPorTerritorio[territorioOrigenNombre] = folderDocId;
+            folderIdPorTerritorio[territorioOrigenId] = folderDocId;
           }
 
           batch.set(folderRef.collection('direcciones').doc(dir.id), {
