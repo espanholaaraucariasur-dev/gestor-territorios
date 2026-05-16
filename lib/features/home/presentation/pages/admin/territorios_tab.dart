@@ -279,11 +279,18 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                           .length ?? 0;
                                       final enviadoNombre = (tarjetaMap['enviado_nombre'] as String?)
                                           ?? (tarjetaMap['asignado_a'] as String?) ?? '';
+                                      final devueltaPor = tarjetaMap['devuelta_por'] as String? ?? '';
                                       final enviadoEn = tarjetaMap['enviado_en'] as Timestamp?;
-                                      String fechaHora = '';
+                                      final devueltaEn = tarjetaMap['devuelta_en'] as Timestamp?;
+                                      String fechaEnvio = '';
                                       if (enviadoEn != null) {
                                         final dt = enviadoEn.toDate();
-                                        fechaHora = ' · ${dt.day}/${dt.month} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+                                        fechaEnvio = ' · ${dt.day}/${dt.month} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+                                      }
+                                      String fechaDevuelta = '';
+                                      if (devueltaEn != null) {
+                                        final dt = devueltaEn.toDate();
+                                        fechaDevuelta = ' · ${dt.day}/${dt.month} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
                                       }
                                       return Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,20 +300,17 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                           if (esPrioridad && cantPrioridad > 0)
                                             Text(
                                               '⚠️ Enviar primero — $cantPrioridad dir. pendientes del mes anterior',
-                                              style: const TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.orange,
-                                                fontWeight: FontWeight.w600,
-                                              ),
+                                              style: const TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.w600),
                                             ),
                                           if (enviadoNombre.isNotEmpty)
                                             Text(
-                                              'Enviado a: $enviadoNombre$fechaHora',
-                                              style: const TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.blue,
-                                                fontWeight: FontWeight.w500,
-                                              ),
+                                              '📤 Enviada a: $enviadoNombre$fechaEnvio',
+                                              style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.w500),
+                                            ),
+                                          if (devueltaPor.isNotEmpty && enviadoNombre.isEmpty)
+                                            Text(
+                                              '↩️ Devuelta por: $devueltaPor$fechaDevuelta',
+                                              style: TextStyle(fontSize: 11, color: Colors.orange.shade700, fontWeight: FontWeight.w500),
                                             ),
                                         ],
                                       );

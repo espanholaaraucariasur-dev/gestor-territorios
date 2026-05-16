@@ -174,6 +174,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                   } else if (tipo == 'alerta_predicacion') {
                     icono = Icons.warning_amber;
                     colorIcono = Colors.red;
+                  } else if (tipo == 'devolucion_tarjeta') {
+                    icono = Icons.assignment_return;
+                    colorIcono = Colors.orange;
+                  } else if (tipo == 'devolucion_automatica') {
+                    icono = Icons.assignment_late;
+                    colorIcono = Colors.deepOrange;
                   } else {
                     icono = Icons.notifications;
                     colorIcono = const Color(0xFF1B5E20);

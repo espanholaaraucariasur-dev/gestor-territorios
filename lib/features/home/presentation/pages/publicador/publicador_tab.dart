@@ -280,7 +280,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // ───────────────────────────────────────────────────────────
 
   Future<void> _devolverTarjeta(String territorioId, String tarjetaId) async {
+    final nombre = widget.usuarioData['nombre'] as String? ?? widget.usuarioEmail;
     try {
+      // Actualizar tarjeta con estado devuelta
       await FirebaseFirestore.instance
           .collection('territorios')
           .doc(territorioId)
@@ -289,8 +291,40 @@ class _PublicadorTabState extends State<PublicadorTab> {
           .update({
         'asignado_a': null,
         'asignado_en': null,
+        'enviado_a': null,
+        'enviado_nombre': null,
+        'publicador_email': null,
         'estatus_envio': 'disponible',
+        'bloqueado': true,
+        'disponible_para_publicadores': false,
+        'devuelta_por': nombre,
+        'devuelta_en': FieldValue.serverTimestamp(),
+        'completada': false,
       });
+
+      // Notificar a admins de territorios
+      final adminsSnap = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('estado', isEqualTo: 'aprobado')
+          .get();
+      for (final admin in adminsSnap.docs) {
+        final u = admin.data();
+        if (u['es_admin_territorios'] != true && u['es_admin'] != true) continue;
+        final adminEmail = u['email'] as String? ?? '';
+        if (adminEmail.isEmpty) continue;
+        await FirebaseFirestore.instance.collection('notificaciones').add({
+          'titulo': '↩️ Tarjeta devuelta',
+          'cuerpo': '$nombre devolvió la tarjeta "$tarjetaId"',
+          'tipo': 'devolucion_tarjeta',
+          'destinatario': adminEmail,
+          'territorio_id': territorioId,
+          'tarjeta_id': tarjetaId,
+          'devuelta_por': nombre,
+          'leida': false,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
