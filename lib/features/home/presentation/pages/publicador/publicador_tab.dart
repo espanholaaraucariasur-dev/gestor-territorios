@@ -109,7 +109,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
       }
     } catch (_) {}
   }
-  }
 
   @override
   void dispose() {
