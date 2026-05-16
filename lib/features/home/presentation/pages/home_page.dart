@@ -99,6 +99,21 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   }
 
   void _mostrarNotificaciones() {
+    // Marcar todas como leídas al abrir
+    FirebaseFirestore.instance
+        .collection('notificaciones')
+        .where('destinatario', isEqualTo: _usuarioEmail)
+        .where('leida', isEqualTo: false)
+        .get()
+        .then((snap) {
+      if (snap.docs.isEmpty) return;
+      final batch = FirebaseFirestore.instance.batch();
+      for (final d in snap.docs) {
+        batch.update(d.reference, {'leida': true});
+      }
+      batch.commit();
+    });
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1014,7 +1029,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
               final docs = snap.data?.docs ?? [];
               final count = docs.where((d) {
                 final data = d.data() as Map<String, dynamic>;
-                return data['leida'] != true;
+                // Solo contar si explícitamente leida == false
+                return data['leida'] == false;
               }).length;
               return Stack(
                 children: [
