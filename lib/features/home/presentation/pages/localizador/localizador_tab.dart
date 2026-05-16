@@ -420,6 +420,33 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         'created_at': FieldValue.serverTimestamp(),
       });
 
+      // Notificar a todos los admins y admin_territorios
+      final adminsSnap = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('estado', isEqualTo: 'aprobado')
+          .get();
+
+      final admins = adminsSnap.docs.where((d) {
+        final u = d.data();
+        return u['es_admin'] == true || u['es_admin_territorios'] == true;
+      }).toList();
+
+      for (final admin in admins) {
+        final adminData = admin.data();
+        final adminEmail = adminData['email'] as String? ?? '';
+        if (adminEmail.isEmpty) continue;
+        await FirebaseFirestore.instance.collection('notificaciones').add({
+          'titulo': '📍 Nueva dirección reportada',
+          'cuerpo': '${widget.usuarioEmail} reportó: "$calle"${_complementoCtrl.text.isNotEmpty ? ' · ${_complementoCtrl.text}' : ''}',
+          'tipo': 'solicitud_direccion',
+          'destinatario': adminEmail,
+          'solicitante': widget.usuarioEmail,
+          'direccion': calle,
+          'leida': false,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }
+
       setState(() {
         _enviando = false;
         _buscado = false;
