@@ -1101,21 +1101,25 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       }
 
       // Limpiar datos basura automáticamente
+      final fi = FirebaseFirestore.instance;
       final hace30dias = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 30)));
-      final notifSnap = await db.collection('notificaciones')
+      final notifSnap = await fi.collection('notificaciones')
           .where('created_at', isLessThan: hace30dias).limit(500).get();
       if (notifSnap.docs.isNotEmpty) {
-        final b = db.batch();
+        final b = fi.batch();
         for (final d in notifSnap.docs) b.delete(d.reference);
         await b.commit();
       }
-      final solVSnap = await db.collection('solicitudes_localizador')
+      final solVSnap = await fi.collection('solicitudes_localizador')
           .where('created_at', isLessThan: hace30dias).limit(500).get();
-      final solPSnap = await db.collection('solicitudes_localizador')
+      final solPSnap = await fi.collection('solicitudes_localizador')
           .where('estado', whereIn: ['aprobada', 'rechazada', 'agregada']).limit(500).get();
-      final solRefs = {...solVSnap.docs.map((d) => d.reference), ...solPSnap.docs.map((d) => d.reference)};
+      final solRefs = <DocumentReference>{
+        ...solVSnap.docs.map((d) => d.reference),
+        ...solPSnap.docs.map((d) => d.reference),
+      };
       if (solRefs.isNotEmpty) {
-        final b = db.batch();
+        final b = fi.batch();
         for (final r in solRefs) b.delete(r);
         await b.commit();
       }
