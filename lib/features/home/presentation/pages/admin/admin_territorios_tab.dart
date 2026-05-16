@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'territorios_tab.dart';
 import 'temporales_tab.dart';
 import 'devueltas_tab_original.dart';
@@ -72,8 +73,58 @@ class _AdminTerritoriosTabState extends State<AdminTerritoriosTab> {
                     text: 'Territorios',
                   ),
                   Tab(
-                    icon: Icon(Icons.timer, color: Color(0xFF4A148C)),
-                    text: 'Temporales',
+                    child: StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('territorios')
+                          .doc('temporales')
+                          .collection('tarjetas')
+                          .snapshots(),
+                      builder: (context, snap) {
+                        final count = snap.data?.docs.length ?? 0;
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Icon(
+                                  Icons.timer,
+                                  color: count > 0 ? Colors.orange : const Color(0xFF4A148C),
+                                ),
+                                if (count > 0)
+                                  Positioned(
+                                    right: -6,
+                                    top: -4,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(
+                                        color: Colors.orange,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Text(
+                                        '$count',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Temporales',
+                              style: TextStyle(
+                                color: count > 0 ? Colors.orange : const Color(0xFF4A148C),
+                                fontWeight: count > 0 ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
                   ),
                   Tab(
                     icon: Icon(Icons.delete_sweep, color: Color(0xFF4A148C)),
