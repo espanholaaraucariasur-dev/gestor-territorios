@@ -101,7 +101,48 @@ class RestauracionMensual {
         });
       }
 
-      // PASO 4: Registrar ejecución — usa nuevoMesStr para no volver a correr este mes
+      // PASO 4: Limpiar datos basura
+      final hace30dias = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 30)));
+
+      // Notificaciones con más de 30 días
+      final notifSnap = await FirebaseFirestore.instance
+          .collection('notificaciones')
+          .where('created_at', isLessThan: hace30dias)
+          .limit(500).get();
+      if (notifSnap.docs.isNotEmpty) {
+        int n = 0; WriteBatch b = FirebaseFirestore.instance.batch();
+        for (final d in notifSnap.docs) {
+          b.delete(d.reference);
+          if (++n >= 400) { await b.commit(); b = FirebaseFirestore.instance.batch(); n = 0; }
+        }
+        if (n > 0) await b.commit();
+        debugPrint('🗑️ ${notifSnap.docs.length} notificaciones antiguas eliminadas');
+      }
+
+      // Solicitudes localizador ya procesadas o con más de 30 días
+      final solViejasSnap = await FirebaseFirestore.instance
+          .collection('solicitudes_localizador')
+          .where('created_at', isLessThan: hace30dias)
+          .limit(500).get();
+      final solProcSnap = await FirebaseFirestore.instance
+          .collection('solicitudes_localizador')
+          .where('estado', whereIn: ['aprobada', 'rechazada', 'agregada'])
+          .limit(500).get();
+      final solRefs = {
+        ...solViejasSnap.docs.map((d) => d.reference),
+        ...solProcSnap.docs.map((d) => d.reference),
+      };
+      if (solRefs.isNotEmpty) {
+        int n = 0; WriteBatch b = FirebaseFirestore.instance.batch();
+        for (final ref in solRefs) {
+          b.delete(ref);
+          if (++n >= 400) { await b.commit(); b = FirebaseFirestore.instance.batch(); n = 0; }
+        }
+        if (n > 0) await b.commit();
+        debugPrint('🗑️ ${solRefs.length} solicitudes localizador eliminadas');
+      }
+
+      // PASO 5: Registrar ejecución — usa nuevoMesStr para no volver a correr este mes
       await FirebaseFirestore.instance.collection('sistema').doc('restauracion_mensual').set({
         'ultimo_mes': nuevoMesStr,
         'ejecutado_en': FieldValue.serverTimestamp(),
