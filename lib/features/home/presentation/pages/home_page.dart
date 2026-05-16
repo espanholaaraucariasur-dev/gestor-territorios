@@ -255,7 +255,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                 ),
               );
               if (ok != true) return;
-              final snap = await FirebaseFirestore.instance.collection('notificaciones').limit(200).get();
+              final snap = await FirebaseFirestore.instance
+                  .collection('notificaciones')
+                  .where('destinatario', isEqualTo: _usuarioEmail)
+                  .limit(200)
+                  .get();
               final batch = FirebaseFirestore.instance.batch();
               for (final d in snap.docs) { batch.delete(d.reference); }
               await batch.commit();
@@ -1002,8 +1006,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('notificaciones')
+                .where('destinatario', isEqualTo: _usuarioEmail)
                 .where('leida', isEqualTo: false)
-                .limit(99)
                 .snapshots(),
             builder: (context, snap) {
               final count = snap.data?.docs.length ?? 0;
