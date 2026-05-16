@@ -38,6 +38,10 @@ dependencies:
   # CSV
   file_picker: ^8.0.0
   url_launcher: ^6.3.2
+  
+  # PDF
+  pdf: ^3.11.0
+  printing: ^5.13.0
 
 dev_dependencies:
   flutter_test:

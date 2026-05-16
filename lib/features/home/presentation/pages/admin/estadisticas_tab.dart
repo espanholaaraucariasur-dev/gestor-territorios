@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 class EstadisticasTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -1019,7 +1022,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => _exportarTexto(datos),
+                  onPressed: () => _exportarPDF(datos),
                   icon: const Icon(Icons.share, size: 16),
                   label: const Text('Compartir resumen',
                       style: TextStyle(fontSize: 12)),
@@ -1040,6 +1043,517 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
   // ─────────────────────────────────────────────────────────
   // EXPORTAR TEXTO
   // ─────────────────────────────────────────────────────────
+
+  Future<void> _exportarPDF(_DatosEstadisticas datos) async {
+    try {
+      // Mostrar loading
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('📊 Generando PDF...'), duration: Duration(seconds: 30)),
+      );
+
+      final pdf = pw.Document();
+      final ahora = DateTime.now();
+      final periodoTexto = _mesesSeleccionados == 1
+          ? 'Mensual'
+          : _mesesSeleccionados == 3
+              ? 'Trimestral'
+              : _mesesSeleccionados == 6
+                  ? 'Semestral'
+                  : 'Anual';
+      final fechaGenerado =
+          '${ahora.day.toString().padLeft(2, '0')}/${ahora.month.toString().padLeft(2, '0')}/${ahora.year}';
+
+      // ── COLORES ──────────────────────────────────────────
+      final colorVerde = PdfColor.fromHex('#1B5E20');
+      final colorVerdeClaro = PdfColor.fromHex('#2E7D32');
+      final colorMorado = PdfColor.fromHex('#4A148C');
+      final colorGrisClaro = PdfColor.fromHex('#F5F5F5');
+      final colorGrisMedio = PdfColor.fromHex('#E0E0E0');
+      final colorBlanco = PdfColors.white;
+      final colorTexto = PdfColor.fromHex('#212121');
+      final colorTextoSuave = PdfColor.fromHex('#757575');
+      final colorNaranja = PdfColor.fromHex('#E65100');
+
+      // ── PORCENTAJE COMPLETADO ─────────────────────────────
+      final pct = datos.totalActivas > 0
+          ? (datos.predicadasPeriodo / datos.totalActivas * 100).clamp(0, 100)
+          : 0.0;
+
+      // ── PÁGINA 1: RESUMEN EJECUTIVO ───────────────────────
+      pdf.addPage(
+        pw.Page(
+          pageTheme: pw.PageTheme(
+            pageFormat: PdfPageFormat.a4,
+            margin: const pw.EdgeInsets.all(0),
+          ),
+          build: (pw.Context ctx) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                // Header
+                pw.Container(
+                  height: 120,
+                  color: colorVerde,
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        mainAxisAlignment: pw.MainAxisAlignment.center,
+                        children: [
+                          pw.Text('CONGREGACIÓN ESPAÑOLA',
+                              style: pw.TextStyle(
+                                  color: colorBlanco,
+                                  fontSize: 10,
+                                  letterSpacing: 2,
+                                  fontWeight: pw.FontWeight.bold)),
+                          pw.SizedBox(height: 4),
+                          pw.Text('Araucária Sur',
+                              style: pw.TextStyle(
+                                  color: colorBlanco,
+                                  fontSize: 26,
+                                  fontWeight: pw.FontWeight.bold)),
+                          pw.SizedBox(height: 4),
+                          pw.Text('Informe de Estadísticas Territoriales',
+                              style: pw.TextStyle(
+                                  color: PdfColor.fromHex('#A5D6A7'),
+                                  fontSize: 12)),
+                        ],
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        mainAxisAlignment: pw.MainAxisAlignment.center,
+                        children: [
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: pw.BoxDecoration(
+                              color: colorVerdeClaro,
+                              borderRadius: pw.BorderRadius.circular(20),
+                            ),
+                            child: pw.Text('Período $periodoTexto',
+                                style: pw.TextStyle(
+                                    color: colorBlanco,
+                                    fontSize: 11,
+                                    fontWeight: pw.FontWeight.bold)),
+                          ),
+                          pw.SizedBox(height: 8),
+                          pw.Text('Generado: $fechaGenerado',
+                              style: pw.TextStyle(
+                                  color: PdfColor.fromHex('#C8E6C9'),
+                                  fontSize: 10)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Contenido
+                pw.Expanded(
+                  child: pw.Padding(
+                    padding: const pw.EdgeInsets.all(32),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        // ── KPIs principales ──────────────────────────
+                        pw.Text('RESUMEN EJECUTIVO',
+                            style: pw.TextStyle(
+                                fontSize: 11,
+                                fontWeight: pw.FontWeight.bold,
+                                color: colorTextoSuave,
+                                letterSpacing: 1.5)),
+                        pw.SizedBox(height: 12),
+                        pw.Row(
+                          children: [
+                            _pdfKpi('Direcciones activas', '${datos.totalActivas}', colorVerde, colorBlanco),
+                            pw.SizedBox(width: 12),
+                            _pdfKpi('Predicadas período', '${datos.predicadasPeriodo}', colorMorado, colorBlanco),
+                            pw.SizedBox(width: 12),
+                            _pdfKpi('Temporales', '${datos.temporales}', colorNaranja, colorBlanco),
+                            pw.SizedBox(width: 12),
+                            _pdfKpi('Territorios', '${datos.totalTerritorios}', PdfColor.fromHex('#0277BD'), colorBlanco),
+                          ],
+                        ),
+
+                        pw.SizedBox(height: 24),
+
+                        // ── Barra de progreso ──────────────────────────
+                        pw.Text('PROGRESO DE PREDICACIÓN',
+                            style: pw.TextStyle(
+                                fontSize: 11,
+                                fontWeight: pw.FontWeight.bold,
+                                color: colorTextoSuave,
+                                letterSpacing: 1.5)),
+                        pw.SizedBox(height: 10),
+                        pw.Container(
+                          padding: const pw.EdgeInsets.all(20),
+                          decoration: pw.BoxDecoration(
+                            color: colorGrisClaro,
+                            borderRadius: pw.BorderRadius.circular(12),
+                            border: pw.Border.all(color: colorGrisMedio),
+                          ),
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Row(
+                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                children: [
+                                  pw.Text('Cobertura del período',
+                                      style: pw.TextStyle(fontSize: 12, color: colorTexto)),
+                                  pw.Text('${pct.toStringAsFixed(1)}%',
+                                      style: pw.TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: pw.FontWeight.bold,
+                                          color: colorVerde)),
+                                ],
+                              ),
+                              pw.SizedBox(height: 10),
+                              pw.ClipRRect(
+                                horizontalRadius: 4,
+                                verticalRadius: 4,
+                                child: pw.LinearProgressIndicator(
+                                  value: pct / 100,
+                                  backgroundColor: colorGrisMedio,
+                                  valueColor: colorVerde,
+                                  minHeight: 14,
+                                ),
+                              ),
+                              pw.SizedBox(height: 8),
+                              pw.Row(
+                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                children: [
+                                  pw.Text('${datos.predicadasPeriodo} predicadas',
+                                      style: pw.TextStyle(fontSize: 10, color: colorVerde, fontWeight: pw.FontWeight.bold)),
+                                  pw.Text('${datos.totalActivas - datos.predicadasPeriodo} pendientes',
+                                      style: pw.TextStyle(fontSize: 10, color: colorTextoSuave)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        pw.SizedBox(height: 24),
+
+                        // ── Gráfico de barras por mes ──────────────────
+                        if (datos.predicadasPorMes.isNotEmpty) ...[
+                          pw.Text('EVOLUCIÓN MENSUAL',
+                              style: pw.TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: colorTextoSuave,
+                                  letterSpacing: 1.5)),
+                          pw.SizedBox(height: 10),
+                          pw.Container(
+                            height: 150,
+                            padding: const pw.EdgeInsets.all(16),
+                            decoration: pw.BoxDecoration(
+                              color: colorGrisClaro,
+                              borderRadius: pw.BorderRadius.circular(12),
+                              border: pw.Border.all(color: colorGrisMedio),
+                            ),
+                            child: pw.Column(
+                              children: [
+                                pw.Expanded(
+                                  child: pw.Row(
+                                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                                    mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+                                    children: () {
+                                      final maxVal = datos.predicadasPorMes.values
+                                          .fold(0, (a, b) => a > b ? a : b)
+                                          .toDouble();
+                                      return datos.meses.map((mes) {
+                                        final val = datos.predicadasPorMes[mes] ?? 0;
+                                        final h = maxVal > 0 ? (val / maxVal) : 0.0;
+                                        final parts = mes.split('-');
+                                        final label = parts.length >= 2 ? '${_mesCorto(int.parse(parts[1]))}' : mes;
+                                        return pw.Column(
+                                          mainAxisAlignment: pw.MainAxisAlignment.end,
+                                          children: [
+                                            pw.Text('$val', style: pw.TextStyle(fontSize: 8, color: colorVerde, fontWeight: pw.FontWeight.bold)),
+                                            pw.SizedBox(height: 3),
+                                            pw.Container(
+                                              width: 28,
+                                              height: (h * 80).clamp(4, 80),
+                                              decoration: pw.BoxDecoration(
+                                                color: colorVerde,
+                                                borderRadius: pw.BorderRadius.only(
+                                                  topLeft: const pw.Radius.circular(4),
+                                                  topRight: const pw.Radius.circular(4),
+                                                ),
+                                              ),
+                                            ),
+                                            pw.SizedBox(height: 4),
+                                            pw.Text(label, style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
+                                          ],
+                                        );
+                                      }).toList();
+                                    }(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        pw.SizedBox(height: 24),
+
+                        // ── Resumen removidas/restauradas ──────────────
+                        pw.Row(
+                          children: [
+                            _pdfInfoCard('No hispanohablantes', '${datos.totalRemovidas}', colorNaranja),
+                            pw.SizedBox(width: 12),
+                            _pdfInfoCard('Restauradas', '${datos.totalRestauradas}', colorVerde),
+                            pw.SizedBox(width: 12),
+                            _pdfInfoCard('Eliminadas', '${datos.totalEliminadasPermanente}', PdfColor.fromHex('#B71C1C')),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Footer
+                pw.Container(
+                  height: 36,
+                  color: PdfColor.fromHex('#F9FBE7'),
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    children: [
+                      pw.Text('Congregación Española · Araucária Sur · Paraná, Brasil',
+                          style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
+                      pw.Text('Página 1',
+                          style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      // ── PÁGINA 2: DETALLE POR TERRITORIO ─────────────────
+      if (datos.porTerritorio.isNotEmpty) {
+        pdf.addPage(
+          pw.Page(
+            pageTheme: pw.PageTheme(
+              pageFormat: PdfPageFormat.a4,
+              margin: const pw.EdgeInsets.all(0),
+            ),
+            build: (pw.Context ctx) {
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  // Mini header
+                  pw.Container(
+                    height: 56,
+                    color: colorVerde,
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text('DETALLE POR TERRITORIO',
+                            style: pw.TextStyle(
+                                color: colorBlanco,
+                                fontSize: 14,
+                                fontWeight: pw.FontWeight.bold,
+                                letterSpacing: 1)),
+                        pw.Text(fechaGenerado,
+                            style: pw.TextStyle(color: PdfColor.fromHex('#C8E6C9'), fontSize: 10)),
+                      ],
+                    ),
+                  ),
+
+                  pw.Expanded(
+                    child: pw.Padding(
+                      padding: const pw.EdgeInsets.all(32),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                        children: [
+                          // Cabecera tabla
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: pw.BoxDecoration(color: colorVerde),
+                            child: pw.Row(
+                              children: [
+                                pw.Expanded(flex: 3, child: pw.Text('TERRITORIO', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold, letterSpacing: 1))),
+                                pw.Expanded(flex: 1, child: pw.Text('DIRS.', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 1, child: pw.Text('PRED.', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 1, child: pw.Text('TEMP.', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 1, child: pw.Text('TARJ.', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 1, child: pw.Text('%', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                              ],
+                            ),
+                          ),
+
+                          // Filas
+                          ...datos.porTerritorio.entries.toList().asMap().entries.map((entry) {
+                            final i = entry.key;
+                            final nombre = entry.value.key;
+                            final d = entry.value.value;
+                            final pctTer = d.totalDirecciones > 0
+                                ? (d.predicadas / d.totalDirecciones * 100).clamp(0, 100)
+                                : 0.0;
+                            final bgColor = i.isEven ? colorGrisClaro : colorBlanco;
+                            return pw.Container(
+                              padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                              decoration: pw.BoxDecoration(color: bgColor),
+                              child: pw.Row(
+                                children: [
+                                  pw.Expanded(flex: 3, child: pw.Text(nombre, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorTexto))),
+                                  pw.Expanded(flex: 1, child: pw.Text('${d.totalDirecciones}', style: pw.TextStyle(fontSize: 10, color: colorTexto), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(flex: 1, child: pw.Text('${d.predicadas}', style: pw.TextStyle(fontSize: 10, color: colorVerde, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(flex: 1, child: pw.Text('${d.temporales}', style: pw.TextStyle(fontSize: 10, color: colorNaranja), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(flex: 1, child: pw.Text('${d.totalTarjetas}', style: pw.TextStyle(fontSize: 10, color: colorTexto), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(
+                                    flex: 1,
+                                    child: pw.Container(
+                                      margin: const pw.EdgeInsets.symmetric(horizontal: 4),
+                                      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: pw.BoxDecoration(
+                                        color: pctTer >= 80
+                                            ? PdfColor.fromHex('#E8F5E9')
+                                            : pctTer >= 50
+                                                ? PdfColor.fromHex('#FFF8E1')
+                                                : PdfColor.fromHex('#FFEBEE'),
+                                        borderRadius: pw.BorderRadius.circular(10),
+                                      ),
+                                      child: pw.Text(
+                                        '${pctTer.toStringAsFixed(0)}%',
+                                        style: pw.TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: pw.FontWeight.bold,
+                                          color: pctTer >= 80
+                                              ? colorVerde
+                                              : pctTer >= 50
+                                                  ? colorNaranja
+                                                  : PdfColor.fromHex('#B71C1C'),
+                                        ),
+                                        textAlign: pw.TextAlign.center,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+
+                          pw.SizedBox(height: 20),
+
+                          // Totales
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: pw.BoxDecoration(
+                              color: PdfColor.fromHex('#E8F5E9'),
+                              border: pw.Border(top: pw.BorderSide(color: colorVerde, width: 2)),
+                            ),
+                            child: pw.Row(
+                              children: [
+                                pw.Expanded(flex: 3, child: pw.Text('TOTAL GENERAL', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde))),
+                                pw.Expanded(flex: 1, child: pw.Text('${datos.totalActivas}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 1, child: pw.Text('${datos.predicadasPeriodo}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 1, child: pw.Text('${datos.temporales}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorNaranja), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 1, child: pw.Text('', style: pw.TextStyle(fontSize: 10))),
+                                pw.Expanded(flex: 1, child: pw.Text('${pct.toStringAsFixed(1)}%', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Footer
+                  pw.Container(
+                    height: 36,
+                    color: PdfColor.fromHex('#F9FBE7'),
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text('Congregación Española · Araucária Sur · Paraná, Brasil',
+                            style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
+                        pw.Text('Página 2',
+                            style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      }
+
+      if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
+
+      // Compartir/imprimir
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+        name: 'estadisticas_araucaria_${fechaGenerado.replaceAll('/', '-')}.pdf',
+      );
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generando PDF: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // Helpers para widgets PDF
+  pw.Widget _pdfKpi(String label, String value, PdfColor bg, PdfColor fg) {
+    return pw.Expanded(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        decoration: pw.BoxDecoration(
+          color: bg,
+          borderRadius: pw.BorderRadius.circular(10),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(value, style: pw.TextStyle(color: fg, fontSize: 22, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 4),
+            pw.Text(label, style: pw.TextStyle(color: PdfColor(fg.red, fg.green, fg.blue, 0.8), fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  pw.Widget _pdfInfoCard(String label, String value, PdfColor color) {
+    return pw.Expanded(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        decoration: pw.BoxDecoration(
+          color: PdfColors.white,
+          borderRadius: pw.BorderRadius.circular(10),
+          border: pw.Border.all(color: color, width: 1.5),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(value, style: pw.TextStyle(color: color, fontSize: 18, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 3),
+            pw.Text(label, style: pw.TextStyle(color: PdfColor.fromHex('#757575'), fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _mesCorto(int mes) {
+    const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    return meses[(mes - 1).clamp(0, 11)];
+  }
 
   void _exportarTexto(_DatosEstadisticas datos) {
     final ahora = DateTime.now();
