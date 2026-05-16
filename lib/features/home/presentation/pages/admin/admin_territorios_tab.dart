@@ -63,7 +63,7 @@ class _AdminTerritoriosTabState extends State<AdminTerritoriosTab> {
             ),
             Container(
               color: Colors.white,
-              child: const TabBar(
+              child: TabBar(
                 indicatorColor: Color(0xFF4A148C),
                 labelColor: Color(0xFF4A148C),
                 unselectedLabelColor: Colors.black54,
