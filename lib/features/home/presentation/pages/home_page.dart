@@ -1007,10 +1007,15 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
             stream: FirebaseFirestore.instance
                 .collection('notificaciones')
                 .where('destinatario', isEqualTo: _usuarioEmail)
-                .where('leida', isEqualTo: false)
+                .orderBy('created_at', descending: true)
+                .limit(50)
                 .snapshots(),
             builder: (context, snap) {
-              final count = snap.data?.docs.length ?? 0;
+              final docs = snap.data?.docs ?? [];
+              final count = docs.where((d) {
+                final data = d.data() as Map<String, dynamic>;
+                return data['leida'] != true;
+              }).length;
               return Stack(
                 children: [
                   IconButton(
