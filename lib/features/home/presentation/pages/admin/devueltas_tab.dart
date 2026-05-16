@@ -413,66 +413,73 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     return r * 2 * (a < 1 ? a : 1);
   }
 
-  // Busca la tarjeta más cercana a las coordenadas dadas
-  Future<({String territorioId, String territorioNombre, String tarjetaId, double distancia})?> 
-      _sugerirTarjetaCercana(double lat, double lng) async {
+  // Busca la tarjeta más cercana — por GPS o por texto de la calle
+  Future<({String territorioId, String territorioNombre, String tarjetaId, double distancia})?>
+      _sugerirTarjetaCercana(double? lat, double? lng, {String? calleTexto}) async {
     try {
-      // Buscar hasta 200 direcciones cercanas
-      final dirs = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .where('estado', isEqualTo: 'activa')
-          .limit(300)
-          .get();
-
-      String? mejorTerritorio;
-      String? mejorTerNombre;
-      String? mejorTarjeta;
-      double mejorDist = double.infinity;
-
-      // Acumular distancias por tarjeta
-      final Map<String, List<double>> distsPorTarjeta = {};
-      final Map<String, String> tarjetaATerritorio = {};
-      final Map<String, String> tarjetaATerNombre = {};
-
-      for (final dir in dirs.docs) {
-        final d = dir.data() as Map<String, dynamic>;
-        final dLat = (d['lat'] as num?)?.toDouble();
-        final dLng = (d['lng'] as num?)?.toDouble();
-        final tarjetaId = d['tarjeta_id'] as String?;
-        final territorioId = d['territorio_id'] as String?;
-        final terNombre = d['territorio_nombre'] as String?;
-        if (dLat == null || dLng == null || tarjetaId == null || territorioId == null) continue;
-        if (territorioId == 'temporales' || territorioId == 'campanas') continue;
-
-        final dist = _distanciaMetros(lat, lng, dLat, dLng);
-        distsPorTarjeta.putIfAbsent(tarjetaId, () => []).add(dist);
-        tarjetaATerritorio[tarjetaId] = territorioId;
-        tarjetaATerNombre[tarjetaId] = terNombre ?? territorioId;
-      }
-
-      // Calcular distancia promedio por tarjeta (top 5 más cercanas)
-      for (final entry in distsPorTarjeta.entries) {
-        final dists = entry.value..sort();
-        final top = dists.take(5).toList();
-        final promedio = top.reduce((a, b) => a + b) / top.length;
-        if (promedio < mejorDist) {
-          mejorDist = promedio;
-          mejorTarjeta = entry.key;
-          mejorTerritorio = tarjetaATerritorio[entry.key];
-          mejorTerNombre = tarjetaATerNombre[entry.key];
+      // Estrategia 1: por coordenadas GPS
+      if (lat != null && lng != null) {
+        final dirs = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('estado', isEqualTo: 'activa')
+            .limit(500).get();
+        final Map<String, List<double>> distsPorTarjeta = {};
+        final Map<String, String> tarjetaATer = {};
+        final Map<String, String> tarjetaATerNombre = {};
+        for (final dir in dirs.docs) {
+          final d = dir.data() as Map<String, dynamic>;
+          final dLat = (d['lat'] as num?)?.toDouble();
+          final dLng = (d['lng'] as num?)?.toDouble();
+          final tarjetaId = d['tarjeta_id'] as String?;
+          final territorioId = d['territorio_id'] as String?;
+          if (dLat == null || dLng == null || tarjetaId == null || territorioId == null) continue;
+          if (territorioId == 'temporales' || territorioId == 'campanas') continue;
+          final dist = _distanciaMetros(lat, lng, dLat, dLng);
+          distsPorTarjeta.putIfAbsent(tarjetaId, () => []).add(dist);
+          tarjetaATer[tarjetaId] = territorioId;
+          tarjetaATerNombre[tarjetaId] = (d['territorio_nombre'] as String?) ?? territorioId;
+        }
+        if (distsPorTarjeta.isNotEmpty) {
+          String? mejor; String? mejorTer; String? mejorNombre; double mejorDist = double.infinity;
+          for (final e in distsPorTarjeta.entries) {
+            final top = (e.value..sort()).take(5).toList();
+            final prom = top.reduce((a, b) => a + b) / top.length;
+            if (prom < mejorDist) { mejorDist = prom; mejor = e.key; mejorTer = tarjetaATer[e.key]; mejorNombre = tarjetaATerNombre[e.key]; }
+          }
+          if (mejor != null && mejorTer != null)
+            return (territorioId: mejorTer, territorioNombre: mejorNombre ?? mejorTer, tarjetaId: mejor, distancia: mejorDist);
         }
       }
-
-      if (mejorTarjeta == null || mejorTerritorio == null) return null;
-      return (
-        territorioId: mejorTerritorio,
-        territorioNombre: mejorTerNombre ?? mejorTerritorio,
-        tarjetaId: mejorTarjeta,
-        distancia: mejorDist,
-      );
-    } catch (_) {
+      // Estrategia 2: por texto de la calle
+      if (calleTexto != null && calleTexto.isNotEmpty) {
+        final norm = calleTexto.toLowerCase().replaceAll(RegExp(r'[àáâãä]'), 'a').replaceAll(RegExp(r'[èéêë]'), 'e').replaceAll(RegExp(r'[ìíîï]'), 'i').replaceAll(RegExp(r'[òóôõö]'), 'o').replaceAll(RegExp(r'[ùúûü]'), 'u').replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
+        final tokens = norm.split(' ').where((t) => t.length >= 3).toList();
+        if (tokens.isNotEmpty) {
+          final snap = await FirebaseFirestore.instance.collection('direcciones_globales')
+              .where('palabras_clave', arrayContainsAny: tokens.take(5).toList()).limit(50).get();
+          final Map<String, int> scores = {};
+          final Map<String, String> tarjetaATer = {};
+          final Map<String, String> tarjetaATerNombre = {};
+          for (final dir in snap.docs) {
+            final d = dir.data() as Map<String, dynamic>;
+            final tarjetaId = d['tarjeta_id'] as String?;
+            final territorioId = d['territorio_id'] as String?;
+            if (tarjetaId == null || territorioId == null) continue;
+            if (territorioId == 'temporales' || territorioId == 'campanas') continue;
+            final keywords = List<String>.from(d['palabras_clave'] ?? []);
+            final coinciden = tokens.where((t) => keywords.contains(t)).length;
+            scores[tarjetaId] = (scores[tarjetaId] ?? 0) + coinciden;
+            tarjetaATer[tarjetaId] = territorioId;
+            tarjetaATerNombre[tarjetaId] = (d['territorio_nombre'] as String?) ?? territorioId;
+          }
+          if (scores.isNotEmpty) {
+            final mejor = scores.entries.reduce((a, b) => a.value >= b.value ? a : b);
+            return (territorioId: tarjetaATer[mejor.key]!, territorioNombre: tarjetaATerNombre[mejor.key] ?? tarjetaATer[mejor.key]!, tarjetaId: mejor.key, distancia: 0.0);
+          }
+        }
+      }
       return null;
-    }
+    } catch (e) { debugPrint('❌ Sugerencia error: $e'); return null; }
   }
 
   Future<void> _aprobarSolicitud(DocumentSnapshot solicitudDoc) async {
@@ -496,11 +503,11 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     String? tarjetaIdSel;
     double? distSugerida;
 
-    if (latSol != null && lngSol != null) {
+    if (latSol != null && lngSol != null || calle.isNotEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('📍 Buscando tarjeta más cercana...'), duration: Duration(seconds: 3)),
+        const SnackBar(content: Text('📍 Buscando tarjeta más cercana...'), duration: Duration(seconds: 4)),
       );
-      final sug = await _sugerirTarjetaCercana(latSol, lngSol);
+      final sug = await _sugerirTarjetaCercana(latSol, lngSol, calleTexto: calle);
       if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
       if (sug != null) {
         territorioIdSel = sug.territorioId;
@@ -559,14 +566,15 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                               children: [
                                 const Text('📍 Sugerencia por proximidad',
                                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
-                                Text(
-                                  '$territorioNombreSel · $tarjetaIdSel',
+                                Text('$territorioNombreSel · $tarjetaIdSel',
                                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                                 ),
-                                Text(
-                                  '~${distSugerida!.toStringAsFixed(0)} m de distancia promedio',
-                                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                                ),
+                                if (distSugerida != null && distSugerida! > 0)
+                                  Text('~${distSugerida!.toStringAsFixed(0)} m de distancia promedio',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[600]))
+                                else
+                                  Text('Tarjeta con calles similares',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[600])),
                               ],
                             ),
                           ),
