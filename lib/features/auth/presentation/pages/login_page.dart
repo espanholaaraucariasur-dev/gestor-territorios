@@ -20,7 +20,11 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   final _passCtrl = TextEditingController();
   final _db = FirebaseFirestore.instance;
   final _localAuth = LocalAuthentication();
-  final _secureStorage = const FlutterSecureStorage();
+  final _secureStorage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+  );
 
   bool _isLoading = false;
   bool _obscurePass = true;
@@ -76,33 +80,47 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
   Future<void> _loginBiometrico() async {
     try {
-      // Verificar disponibilidad antes de intentar
       final canCheck = await _localAuth.canCheckBiometrics;
       final isSupported = await _localAuth.isDeviceSupported();
-      if (!canCheck || !isSupported) {
-        _snack('Biometría no disponible en este dispositivo', Colors.orange);
+
+      if (!isSupported) {
+        _snack('Dispositivo no soporta autenticación segura', Colors.orange);
+        return;
+      }
+      if (!canCheck) {
+        _snack('No hay biometría configurada. Usa email y contraseña', Colors.orange);
+        return;
+      }
+
+      // Verificar que hay email guardado ANTES de autenticar
+      final email = await _secureStorage.read(key: 'biometric_email');
+      if (email == null || email.isEmpty) {
+        _snack('Primero inicia sesión con email para activar biometría', Colors.orange);
         return;
       }
 
       final ok = await _localAuth.authenticate(
         localizedReason: 'Autentícate para ingresar a Araucaria Sur',
         options: const AuthenticationOptions(
-          biometricOnly: false, // false permite PIN como fallback
+          biometricOnly: false,
           stickyAuth: true,
           sensitiveTransaction: false,
         ),
       );
       if (!ok) return;
-      final email = await _secureStorage.read(key: 'biometric_email');
-      if (email != null) await _loginConEmail(email);
+      await _loginConEmail(email);
     } catch (e) {
       final msg = e.toString();
-      if (msg.contains('NotEnrolled')) {
+      if (msg.contains('NotEnrolled') || msg.contains('no_enrolled')) {
         _snack('No hay huella registrada en el dispositivo', Colors.orange);
-      } else if (msg.contains('LockedOut')) {
+      } else if (msg.contains('LockedOut') || msg.contains('locked_out')) {
         _snack('Demasiados intentos. Intenta más tarde', Colors.red);
+      } else if (msg.contains('NotAvailable') || msg.contains('not_available')) {
+        _snack('Biometría no disponible. Usa email y contraseña', Colors.orange);
+      } else if (msg.contains('PermanentlyLockedOut')) {
+        _snack('Biometría bloqueada. Desbloquea el dispositivo primero', Colors.red);
       } else {
-        _snack('${context.t('biometric_error')}: $e', Colors.red);
+        _snack('Error biometría: $msg', Colors.red);
       }
     }
   }
