@@ -99,21 +99,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   }
 
   void _mostrarNotificaciones() {
-    // Marcar todas como leídas al abrir
-    FirebaseFirestore.instance
-        .collection('notificaciones')
-        .where('destinatario', isEqualTo: _usuarioEmail)
-        .where('leida', isEqualTo: false)
-        .get()
-        .then((snap) {
-      if (snap.docs.isEmpty) return;
-      final batch = FirebaseFirestore.instance.batch();
-      for (final d in snap.docs) {
-        batch.update(d.reference, {'leida': true});
-      }
-      batch.commit();
-    });
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -129,7 +114,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
           stream: FirebaseFirestore.instance
               .collection('notificaciones')
               .where('destinatario', isEqualTo: _usuarioEmail)
-              .orderBy('created_at', descending: true)
               .limit(50)
               .snapshots(),
           builder: (context, snapshot) {
@@ -137,7 +121,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
               return const Center(child: CircularProgressIndicator());
             }
 
-            final docs = snapshot.data!.docs;
+            // Ordenar en memoria — evita dependencia del índice
+            final docs = [...snapshot.data!.docs];
+            docs.sort((a, b) {
+              final aT = (a.data() as Map<String,dynamic>)['created_at'] as Timestamp?;
+              final bT = (b.data() as Map<String,dynamic>)['created_at'] as Timestamp?;
+              if (aT == null && bT == null) return 0;
+              if (aT == null) return 1;
+              if (bT == null) return -1;
+              return bT.compareTo(aT); // más reciente primero
+            });
             if (docs.isEmpty) {
               return Center(
                 child: Column(
@@ -254,6 +247,24 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         actions: [
           TextButton(
             onPressed: () async {
+              // Marcar todas como leídas
+              final snap = await FirebaseFirestore.instance
+                  .collection('notificaciones')
+                  .where('destinatario', isEqualTo: _usuarioEmail)
+                  .where('leida', isEqualTo: false)
+                  .get();
+              if (snap.docs.isNotEmpty) {
+                final batch = FirebaseFirestore.instance.batch();
+                for (final d in snap.docs) {
+                  batch.update(d.reference, {'leida': true});
+                }
+                await batch.commit();
+              }
+            },
+            child: const Text('Marcar leídas', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () async {
               final ok = await showDialog<bool>(
                 context: context,
                 builder: (c) => AlertDialog(
@@ -283,7 +294,23 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
             child: const Text('Limpiar', style: TextStyle(color: Colors.red)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              // Marcar todas como leídas al cerrar
+              FirebaseFirestore.instance
+                  .collection('notificaciones')
+                  .where('destinatario', isEqualTo: _usuarioEmail)
+                  .where('leida', isEqualTo: false)
+                  .get()
+                  .then((snap) {
+                if (snap.docs.isEmpty) return;
+                final batch = FirebaseFirestore.instance.batch();
+                for (final d in snap.docs) {
+                  batch.update(d.reference, {'leida': true});
+                }
+                batch.commit();
+              });
+              Navigator.pop(context);
+            },
             child: const Text('Cerrar'),
           ),
         ],
@@ -1022,7 +1049,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
             stream: FirebaseFirestore.instance
                 .collection('notificaciones')
                 .where('destinatario', isEqualTo: _usuarioEmail)
-                .orderBy('created_at', descending: true)
                 .limit(50)
                 .snapshots(),
             builder: (context, snap) {
