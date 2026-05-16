@@ -182,6 +182,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                   } else if (tipo == 'alerta_predicacion') {
                     icono = Icons.warning_amber;
                     colorIcono = Colors.red;
+                  } else if (tipo == 'nueva_solicitud_usuario') {
+                    icono = Icons.person_add;
+                    colorIcono = Colors.purple;
                   } else if (tipo == 'devolucion_tarjeta') {
                     icono = Icons.assignment_return;
                     colorIcono = Colors.orange;
@@ -2261,8 +2264,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     final bool entregoInvitacion = data.containsKey('entrego_invitacion')
         ? data['entrego_invitacion']
         : false;
-    final bool campanaEspecial =
-        data.containsKey('campana_especial') ? data['campana_especial'] : false;
+    final bool campanaEspecial = data.containsKey('campana_especial')
+        ? data['campana_especial']
+        : false;
+    // Detectar si entregó invitación de campaña (nuevo campo dinámico)
+    final campanaInvitacionEntregada = data.keys
+        .where((k) => k.startsWith('campana_invitacion_') && data[k] == true)
+        .isNotEmpty;
+    final nombresCampanas = data.keys
+        .where((k) => k.startsWith('campana_invitacion_') && data[k] == true)
+        .map((k) => k.replaceFirst('campana_invitacion_', ''))
+        .join(', ');
 
     showDialog(
       context: context,
@@ -2340,9 +2352,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                     _chipDetalle('Entregó invitación', entregoInvitacion),
                   ],
                 ),
-                if (_campanaEspecialActiva) ...[
+                if (_campanaEspecialActiva || campanaInvitacionEntregada) ...[
                   const SizedBox(height: 10),
-                  _chipDetalle('Campaña especial', campanaEspecial),
+                  _chipDetalle(
+                    campanaInvitacionEntregada
+                        ? '✅ Invitación entregada ($nombresCampanas)'
+                        : 'Campaña: pendiente',
+                    campanaInvitacionEntregada || campanaEspecial,
+                  ),
                 ],
                 const SizedBox(height: 24),
                 SizedBox(

@@ -438,16 +438,25 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     'created_at': FieldValue.serverTimestamp(),
                   });
 
-                  // Notificar al admin
-                  await _db.collection('notificaciones').add({
-                    'titulo': '👤 Nueva solicitud de acceso',
-                    'cuerpo':
-                        '${nomCtrl.text.trim()} (${emailCtrl.text.trim()}) solicita acceso.',
-                    'tipo': 'nueva_solicitud_usuario',
-                    'leida': false,
-                    'para_roles': ['es_admin'],
-                    'created_at': FieldValue.serverTimestamp(),
-                  });
+                  // Notificar a todos los admins
+                  final adminsSnap = await _db.collection('usuarios')
+                      .where('estado', isEqualTo: 'aprobado')
+                      .where('es_admin', isEqualTo: true)
+                      .get();
+                  for (final adminDoc in adminsSnap.docs) {
+                    final adminEmail = (adminDoc.data()['email'] as String?) ?? '';
+                    if (adminEmail.isEmpty) continue;
+                    await _db.collection('notificaciones').add({
+                      'titulo': '👤 Nueva solicitud de acceso',
+                      'cuerpo': '${nomCtrl.text.trim()} solicita acceso a la app.',
+                      'tipo': 'nueva_solicitud_usuario',
+                      'destinatario': adminEmail,
+                      'solicitante_nombre': nomCtrl.text.trim(),
+                      'solicitante_email': emailCtrl.text.trim(),
+                      'leida': false,
+                      'created_at': FieldValue.serverTimestamp(),
+                    });
+                  }
 
                   if (c.mounted) Navigator.pop(c);
                   _snack(context.t('request_sent'), _verde);

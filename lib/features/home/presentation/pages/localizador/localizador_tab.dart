@@ -1266,7 +1266,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
               .limit(10)
               .snapshots(),
           builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
+            // Solo mostrar spinner en la primera carga, no en cada rebuild
+            if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
 

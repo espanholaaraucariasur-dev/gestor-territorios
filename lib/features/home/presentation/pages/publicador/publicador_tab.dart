@@ -1490,19 +1490,27 @@ class _PublicadorTabState extends State<PublicadorTab> {
           return '$calle — $motivo';
         }).join('\n');
 
-        // Guardar notificación en Firestore para el admin
-        await db.collection('notificaciones').add({
-          'tipo': 'alerta_predicacion',
-          'titulo': '⚠️ Atención requerida',
-          'cuerpo': '$nombre reportó ${dirNoPredicadas.length} dirección(es) en $tarjetaId:\n$resumen',
-          'tarjeta_id': tarjetaId,
-          'territorio_id': territorioId,
-          'destinatario': widget.usuarioEmail,
-          'publicador': nombre,
-          'leida': false,
-          'destino_rol': 'admin_territorios',
-          'created_at': FieldValue.serverTimestamp(),
-        });
+        // Notificar a admins de territorios (no al publicador)
+        final adminsSnap = await db.collection('usuarios')
+            .where('estado', isEqualTo: 'aprobado')
+            .get();
+        for (final adminDoc in adminsSnap.docs) {
+          final u = adminDoc.data() as Map<String, dynamic>;
+          if (u['es_admin'] != true && u['es_admin_territorios'] != true) continue;
+          final adminEmail = u['email'] as String? ?? '';
+          if (adminEmail.isEmpty) continue;
+          await db.collection('notificaciones').add({
+            'tipo': 'alerta_predicacion',
+            'titulo': '⚠️ Atención requerida',
+            'cuerpo': '$nombre reportó ${dirNoPredicadas.length} dirección(es) en "$tarjetaId":\n$resumen',
+            'tarjeta_id': tarjetaId,
+            'territorio_id': territorioId,
+            'destinatario': adminEmail,
+            'publicador': nombre,
+            'leida': false,
+            'created_at': FieldValue.serverTimestamp(),
+          });
+        }
       }
       // Las direcciones temporales no deben persistir en la BD
       final esTemporal = territorioId == 'temporales' ||
@@ -1813,8 +1821,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                       final completadas = dirsSnap.data?.docs.where((doc) {
                             final d = _safeData(doc);
-                            return d['predicado'] == true &&
-                                d['mes_predicacion'] == mesActual;
+                            // Contar como completada si está predicada
+                            // (con o sin mes_predicacion)
+                            return d['predicado'] == true ||
+                                d['estado_predicacion'] == 'completada';
                           }).length ??
                           0;
 
