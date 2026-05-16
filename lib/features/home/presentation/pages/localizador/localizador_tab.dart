@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -39,6 +40,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   Map<String, dynamic>? _direccionEncontrada;
   final List<String> _unidades = [];
   List<Map<String, dynamic>> _sugerencias = [];
+  Timer? _debounceTimer;
 
   static const Color _verde = Color(0xFF1B5E20);
   static const Color _verdeClaro = Color(0xFF2E7D32);
@@ -496,6 +498,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _calleCtrl.dispose();
     _complementoCtrl.dispose();
     _detallesCtrl.dispose();
@@ -678,7 +681,12 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                               ),
                               onChanged: (v) {
                                 setState(() {});
-                                _actualizarSugerencias(v);
+                                // Debounce — esperar 500ms después de la última letra
+                                _debounceTimer?.cancel();
+                                _debounceTimer = Timer(
+                                  const Duration(milliseconds: 500),
+                                  () => _actualizarSugerencias(v),
+                                );
                               },
                               onSubmitted: (_) {
                                 setState(() => _sugerencias = []);
