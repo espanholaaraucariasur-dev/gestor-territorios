@@ -555,29 +555,34 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       final db = FirebaseFirestore.instance;
       int total = 0;
 
-      // Limpiar prioridad en direcciones
-      final dirs = await db.collection('direcciones_globales')
-          .where('prioridad_mes_anterior', isEqualTo: true).get();
+      // Limpiar prioridad en TODAS las direcciones activas
+      final dirs = await db.collection('direcciones_globales').get();
       for (int i = 0; i < dirs.docs.length; i += 100) {
         final chunk = dirs.docs.skip(i).take(100).toList();
         final b = db.batch();
         for (final d in chunk) {
-          b.update(d.reference, {'prioridad_mes_anterior': false, 'mes_pendiente': null});
+          b.update(d.reference, {
+            'prioridad_mes_anterior': false,
+            'mes_pendiente': null,
+          });
         }
         await b.commit();
         total += chunk.length;
       }
 
-      // Limpiar prioridad en tarjetas
+      // Limpiar prioridad en TODAS las tarjetas
       final ters = await db.collection('territorios').get();
       for (final ter in ters.docs) {
         if (['temporales','removidas','estadisticas','campanas'].contains(ter.id)) continue;
         final tarjetas = await db.collection('territorios').doc(ter.id)
-            .collection('tarjetas').where('prioridad_admin', isEqualTo: true).get();
+            .collection('tarjetas').get();
         if (tarjetas.docs.isEmpty) continue;
         final b = db.batch();
         for (final t in tarjetas.docs) {
-          b.update(t.reference, {'prioridad_admin': false, 'mes_prioridad': null});
+          b.update(t.reference, {
+            'prioridad_admin': false,
+            'mes_prioridad': null,
+          });
         }
         await b.commit();
         total += tarjetas.docs.length;

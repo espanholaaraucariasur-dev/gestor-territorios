@@ -737,6 +737,20 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
             .collection('tarjetas')
             .doc(tarjetaId)
             .set(payload, SetOptions(merge: true));
+
+        // Limpiar prioridad_mes_anterior en todas las direcciones de esta tarjeta
+        final dirsSnap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('tarjeta_id', isEqualTo: tarjetaId)
+            .where('prioridad_mes_anterior', isEqualTo: true)
+            .get();
+        if (dirsSnap.docs.isNotEmpty) {
+          final b = FirebaseFirestore.instance.batch();
+          for (final d in dirsSnap.docs) {
+            b.update(d.reference, {'prioridad_mes_anterior': false, 'mes_pendiente': null});
+          }
+          await b.commit();
+        }
       } else {
         await FirebaseFirestore.instance
             .collection('territorios')
