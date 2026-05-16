@@ -281,17 +281,65 @@ class _TemporalesTabState extends State<TemporalesTab> {
           // Sub-tabs
           Container(
             color: Colors.white,
-            child: const TabBar(
-              indicatorColor: Color(0xFF4A148C),
-              labelColor: Color(0xFF4A148C),
+            child: TabBar(
+              indicatorColor: const Color(0xFF4A148C),
+              labelColor: const Color(0xFF4A148C),
               unselectedLabelColor: Colors.grey,
               tabs: [
-                Tab(
+                const Tab(
                     text: 'Direcciones',
                     icon: Icon(Icons.location_on, size: 16)),
                 Tab(
-                    text: 'Tarjetas T.',
-                    icon: Icon(Icons.credit_card, size: 16)),
+                  child: StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('territorios')
+                        .doc('temporales')
+                        .collection('tarjetas')
+                        .where('completada', isNotEqualTo: true)
+                        .snapshots(),
+                    builder: (context, snap) {
+                      final count = (snap.data?.docs ?? [])
+                          .where((d) => (d.data() as Map<String,dynamic>)['tipo'] != 'folder_temporal')
+                          .length;
+                      final hasItems = count > 0;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Icon(Icons.credit_card,
+                                  size: 16,
+                                  color: hasItems ? Colors.orange : Colors.grey),
+                              if (hasItems)
+                                Positioned(
+                                  right: -6, top: -4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(3),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.orange,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Text('$count',
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 7,
+                                            fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(width: 6),
+                          Text('Tarjetas T.',
+                              style: TextStyle(
+                                  color: hasItems ? Colors.orange : Colors.grey,
+                                  fontWeight: hasItems ? FontWeight.bold : FontWeight.normal,
+                                  fontSize: 12)),
+                        ],
+                      );
+                    },
+                  ),
+                ),
               ],
             ),
           ),
