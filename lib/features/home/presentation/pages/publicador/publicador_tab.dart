@@ -81,6 +81,34 @@ class _PublicadorTabState extends State<PublicadorTab> {
     if (nombre.isNotEmpty) {
       AutoReturnService().verificarTarjetasAlIniciar(nombre);
     }
+
+    // Verificar si hay mensaje motivacional pendiente de enviar
+    Future.delayed(const Duration(seconds: 3), () => _verificarTareaPendiente());
+  }
+
+  Future<void> _verificarTareaPendiente() async {
+    try {
+      final email = widget.usuarioEmail;
+      final tareaDoc = await FirebaseFirestore.instance
+          .collection('tareas_motivacionales').doc(email).get();
+      if (!tareaDoc.exists) return;
+      final tarea = tareaDoc.data() as Map<String, dynamic>;
+      if (tarea['enviado'] == true) return;
+
+      final enviarEn = (tarea['enviar_en'] as Timestamp?)?.toDate();
+      if (enviarEn == null) return;
+
+      if (DateTime.now().isAfter(enviarEn)) {
+        // Ya pasaron los 10 min — enviar ahora
+        await _enviarMensajeMotivacional();
+      } else {
+        // Programar para cuando corresponda
+        final resta = enviarEn.difference(DateTime.now());
+        Future.delayed(resta, () => _enviarMensajeMotivacional());
+        debugPrint('⏰ Mensaje motivacional en ${resta.inMinutes} min');
+      }
+    } catch (_) {}
+  }
   }
 
   @override
@@ -332,6 +360,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
           backgroundColor: Colors.orange,
         ),
       );
+      // Verificar si ya terminó todas → programar motivacional
+      _programarMensajeMotivacional();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -340,6 +370,104 @@ class _PublicadorTabState extends State<PublicadorTab> {
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  // Programa un mensaje motivacional en Firestore — se envía al verificar al iniciar
+  Future<void> _programarMensajeMotivacional() async {
+    try {
+      final nombre = widget.usuarioData['nombre'] as String? ?? '';
+      final email = widget.usuarioEmail;
+      if (nombre.isEmpty) return;
+
+      // Verificar si aún tiene tarjetas activas
+      final activas = await FirebaseFirestore.instance
+          .collectionGroup('tarjetas')
+          .where('asignado_a', isEqualTo: nombre)
+          .where('completada', isEqualTo: false)
+          .get();
+
+      // Si ya no tiene tarjetas, programar mensaje para dentro de 10 min
+      if (activas.docs.isEmpty) {
+        final enviarEn = DateTime.now().add(const Duration(minutes: 10));
+        // Guardar tarea en Firestore (sobrescribe si ya existe)
+        await FirebaseFirestore.instance
+            .collection('tareas_motivacionales')
+            .doc(email)
+            .set({
+          'email': email,
+          'nombre': nombre,
+          'enviar_en': Timestamp.fromDate(enviarEn),
+          'enviado': false,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+        debugPrint('📅 Mensaje motivacional programado para $nombre en 10 min');
+
+        // También intentar con Future.delayed por si la app sigue abierta
+        Future.delayed(const Duration(minutes: 10), () => _enviarMensajeMotivacional());
+      }
+    } catch (e) {
+      debugPrint('Error programando motivacional: $e');
+    }
+  }
+
+  // Envía el mensaje motivacional si la tarea está pendiente
+  Future<void> _enviarMensajeMotivacional() async {
+    try {
+      final nombre = widget.usuarioData['nombre'] as String? ?? '';
+      final email = widget.usuarioEmail;
+      if (nombre.isEmpty) return;
+
+      // Verificar que la tarea aún existe y no fue enviada
+      final tareaDoc = await FirebaseFirestore.instance
+          .collection('tareas_motivacionales').doc(email).get();
+      if (!tareaDoc.exists) return;
+      final tarea = tareaDoc.data() as Map<String, dynamic>;
+      if (tarea['enviado'] == true) return;
+
+      // Verificar que sigue sin tarjetas
+      final activas = await FirebaseFirestore.instance
+          .collectionGroup('tarjetas')
+          .where('asignado_a', isEqualTo: nombre)
+          .where('completada', isEqualTo: false)
+          .get();
+      if (activas.docs.isNotEmpty) {
+        // Recibió nueva tarjeta — cancelar
+        await FirebaseFirestore.instance
+            .collection('tareas_motivacionales').doc(email).delete();
+        return;
+      }
+
+      // Obtener mensaje aleatorio activo
+      final msgsSnap = await FirebaseFirestore.instance
+          .collection('configuracion').doc('mensajes_motivacionales')
+          .collection('mensajes').where('activo', isEqualTo: true).get();
+      if (msgsSnap.docs.isEmpty) return;
+
+      final idx = DateTime.now().millisecondsSinceEpoch % msgsSnap.docs.length;
+      final msgData = msgsSnap.docs[idx].data();
+      final texto = (msgData['texto'] as String? ?? '')
+          .replaceAll('{nombre}', nombre);
+      if (texto.isEmpty) return;
+
+      // Enviar notificación
+      await FirebaseFirestore.instance.collection('notificaciones').add({
+        'titulo': '🌟 ¡Gracias por tu trabajo!',
+        'cuerpo': texto,
+        'tipo': 'motivacional',
+        'destinatario': email,
+        'leida': false,
+        'created_at': FieldValue.serverTimestamp(),
+      });
+
+      // Marcar tarea como enviada
+      await FirebaseFirestore.instance
+          .collection('tareas_motivacionales').doc(email)
+          .update({'enviado': true});
+
+      debugPrint('✅ Mensaje motivacional enviado a $nombre');
+    } catch (e) {
+      debugPrint('Error enviando motivacional: $e');
     }
   }
 
@@ -1433,35 +1561,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
           _tarjetasCompletadas.add(tarjetaId);
         });
 
-        // Verificar si terminó TODAS las tarjetas → mensaje motivacional en 10 min
-        Future.delayed(const Duration(minutes: 10), () async {
-          if (!mounted) return;
-          try {
-            final nombre = widget.usuarioData['nombre'] ?? '';
-            final activas = await FirebaseFirestore.instance
-                .collectionGroup('tarjetas')
-                .where('asignado_a', isEqualTo: nombre)
-                .where('completada', isEqualTo: false)
-                .get();
-            if (activas.docs.isNotEmpty) return; // aún tiene tarjetas
-            final msgsSnap = await FirebaseFirestore.instance
-                .collection('configuracion').doc('mensajes_motivacionales')
-                .collection('mensajes').where('activo', isEqualTo: true).get();
-            if (msgsSnap.docs.isEmpty) return;
-            final idx = DateTime.now().millisecond % msgsSnap.docs.length;
-            final texto = (msgsSnap.docs[idx].data()['texto'] as String? ?? '')
-                .replaceAll('{nombre}', nombre);
-            if (texto.isEmpty) return;
-            await FirebaseFirestore.instance.collection('notificaciones').add({
-              'titulo': '🌟 ¡Gracias por tu trabajo!',
-              'cuerpo': texto,
-              'tipo': 'motivacional',
-              'destinatario': widget.usuarioEmail,
-              'leida': false,
-              'created_at': FieldValue.serverTimestamp(),
-            });
-          } catch (_) {}
-        });
+        // Programar mensaje motivacional en Firestore (persiste aunque se cierre la app)
+        _programarMensajeMotivacional();
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
