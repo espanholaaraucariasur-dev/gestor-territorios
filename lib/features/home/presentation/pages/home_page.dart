@@ -3546,6 +3546,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   Widget _buildVistaLocalizador() {
     return LocalizadorTab(
       usuarioEmail: _usuarioEmail,
+      usuarioNombre: widget.usuarioData['nombre'] as String? ?? _usuarioEmail,
     );
   }
 

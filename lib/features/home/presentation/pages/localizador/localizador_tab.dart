@@ -9,10 +9,12 @@ import '../../../../../core/services/mapbox_service.dart';
 
 class LocalizadorTab extends StatefulWidget {
   final String usuarioEmail;
+  final String usuarioNombre;
 
   const LocalizadorTab({
     super.key,
     required this.usuarioEmail,
+    required this.usuarioNombre,
   });
 
   @override
@@ -437,10 +439,11 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         if (adminEmail.isEmpty) continue;
         await FirebaseFirestore.instance.collection('notificaciones').add({
           'titulo': '📍 Nueva dirección reportada',
-          'cuerpo': '${widget.usuarioEmail} reportó: "$calle"${_complementoCtrl.text.isNotEmpty ? ' · ${_complementoCtrl.text}' : ''}',
+          'cuerpo': '${widget.usuarioNombre} envió una dirección nueva: "$calle"${_complementoCtrl.text.isNotEmpty ? ' · ${_complementoCtrl.text}' : ''}',
           'tipo': 'solicitud_direccion',
           'destinatario': adminEmail,
           'solicitante': widget.usuarioEmail,
+          'solicitante_nombre': widget.usuarioNombre,
           'direccion': calle,
           'leida': false,
           'created_at': FieldValue.serverTimestamp(),
