@@ -3188,9 +3188,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         final terData = terDoc.data() as Map<String, dynamic>;
                         final terNombre = terData['nombre'] ?? terDoc.id;
 
-                        // Ocultar territorios reservados solo para conductores
+                        // Ocultar documentos especiales (no son territorios)
+                        const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
+                        if (especiales.contains(terDoc.id)) return const SizedBox.shrink();
+
+                        // Ocultar territorios solo para conductores
                         final soloConductores = (terData['solo_conductores'] as bool?) ?? false;
                         if (soloConductores) return const SizedBox.shrink();
+
+                        // Ocultar territorios que tienen conductor asignado
+                        final conductorEmail = (terData['conductor_email'] as String?) ?? '';
+                        if (conductorEmail.isNotEmpty) return const SizedBox.shrink();
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -3226,19 +3234,15 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                     );
                                   }
 
-                                  // Filtra en memoria las que no están asignadas
-                                  // ni son solo para conductores
+                                  // Filtra tarjetas disponibles para publicadores
                                   final tarjetas =
-                                      (tarjetasSnap.data?.docs ?? []).where((
-                                    doc,
-                                  ) {
-                                    final d =
-                                        doc.data() as Map<String, dynamic>;
-                                    final asignado =
-                                        d['asignado_a']?.toString() ?? '';
-                                    // Excluir tarjetas reservadas solo para conductores
+                                      (tarjetasSnap.data?.docs ?? []).where((doc) {
+                                    final d = doc.data() as Map<String, dynamic>;
+                                    final asignado = d['asignado_a']?.toString() ?? '';
+                                    final conductorEmail = d['conductor_email']?.toString() ?? '';
                                     final soloConductores = (d['solo_conductores'] as bool?) ?? false;
-                                    return asignado.isEmpty && !soloConductores;
+                                    // Excluir: ya asignada, con conductor, o solo conductores
+                                    return asignado.isEmpty && conductorEmail.isEmpty && !soloConductores;
                                   }).toList();
 
                                   if (tarjetas.isEmpty) {
