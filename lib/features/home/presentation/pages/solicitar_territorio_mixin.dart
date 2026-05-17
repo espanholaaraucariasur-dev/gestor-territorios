@@ -158,6 +158,44 @@ mixin SolicitarTerritorioMixin<T extends StatefulWidget> on State<T> {
 
   Future<void> _asignarTarjetaAConductor(
     String territorioId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
+    try {
+      final ahora = DateTime.now();
+      final nombre = usuarioData['nombre'] ?? '';
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .set({
+        'asignado_a': nombre,
+        'enviado_nombre': nombre,
+        'enviado_tipo': 'conductor',
+        'conductor_email': usuarioEmail,
+        'enviado_a': usuarioEmail,
+        'mes_asignacion': '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
+        'completada': false,
+        'disponible_para_publicadores': false,
+        'bloqueado': false,
+        'asignado_en': FieldValue.serverTimestamp(),
+        'tomado_en': FieldValue.serverTimestamp(),
+        'prioridad_admin': false,
+        'mes_prioridad': null,
+      }, SetOptions(merge: true));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('✅ Tarjeta "$tarjetaNombre" tomada'),
+        backgroundColor: const Color(0xFF1B5E20),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
 
   Future<void> _mostrarDialogoSolicitarTerritorioPublicador() async {
     showDialog(
@@ -407,38 +445,100 @@ mixin SolicitarTerritorioMixin<T extends StatefulWidget> on State<T> {
 
   Future<void> _asignarTarjetaAPublicador(
     String territorioId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
+    try {
+      final ahora = DateTime.now();
+      final nombre = usuarioData['nombre'] ?? '';
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .set({
+        'asignado_a': nombre,
+        'publicador_email': usuarioEmail,
+        'publicador_nombre': nombre,
+        'enviado_nombre': nombre,
+        'enviado_tipo': 'publicador',
+        'enviado_a': usuarioEmail,
+        'mes_asignacion': '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
+        'completada': false,
+        'disponible_para_publicadores': true,
+        'bloqueado': false,
+        'asignado_en': FieldValue.serverTimestamp(),
+        'tomado_en': FieldValue.serverTimestamp(),
+        'prioridad_admin': false,
+        'mes_prioridad': null,
+      }, SetOptions(merge: true));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('✅ Tarjeta "$tarjetaNombre" tomada'),
+        backgroundColor: const Color(0xFF1B5E20),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
 
   Future<void> _devolverTarjeta(String territorioId, String tarjetaId) async {
+    final nombre = usuarioData['nombre'] as String? ?? usuarioEmail;
     try {
-      // Cancelar timer de devolución automática
-      AutoReturnService().cancelarTimer(tarjetaId);
-
       await FirebaseFirestore.instance
           .collection('territorios')
           .doc(territorioId)
           .collection('tarjetas')
           .doc(tarjetaId)
           .update({
-        'asignado_a': '',
-        'disponible_para_publicadores': true,
+        'asignado_a': null,
         'asignado_en': null,
-        'tomado_en': null,
+        'enviado_a': null,
+        'enviado_nombre': null,
+        'publicador_email': null,
+        'estatus_envio': 'disponible',
+        'bloqueado': true,
+        'disponible_para_publicadores': false,
+        'devuelta_por': nombre,
+        'devuelta_en': FieldValue.serverTimestamp(),
+        'completada': false,
       });
 
+      // Notificar a admins de territorios
+      final adminsSnap = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('estado', isEqualTo: 'aprobado')
+          .get();
+      for (final admin in adminsSnap.docs) {
+        final u = admin.data() as Map<String, dynamic>;
+        if (u['es_admin'] != true && u['es_admin_territorios'] != true) continue;
+        final adminEmail = u['email'] as String? ?? '';
+        if (adminEmail.isEmpty) continue;
+        await FirebaseFirestore.instance.collection('notificaciones').add({
+          'titulo': '↩️ Tarjeta devuelta',
+          'cuerpo': '$nombre devolvió la tarjeta "$tarjetaId"',
+          'tipo': 'devolucion_tarjeta',
+          'destinatario': adminEmail,
+          'territorio_id': territorioId,
+          'tarjeta_id': tarjetaId,
+          'devuelta_por': nombre,
+          'leida': false,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Tarjeta devuelta exitosamente'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Tarjeta devuelta correctamente'),
+        backgroundColor: Colors.orange,
+      ));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Error al devolver tarjeta: $e'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
     }
   }

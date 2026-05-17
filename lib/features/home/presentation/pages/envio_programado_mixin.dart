@@ -60,6 +60,17 @@ mixin EnvioProgramadoMixin<T extends StatefulWidget> on State<T> {
 
   Future<void> _programarEnvioTarjeta(
     BuildContext context,
+    String terId,
+    String tarjetaId,
+    String nombre,
+  ) async {
+    await _mostrarDialogoProgramarEnvio(
+      terId,
+      tarjetaId: tarjetaId,
+      nombre: nombre,
+      isTarjeta: true,
+    );
+  }
 
   Future<void> _mostrarDialogoProgramarEnvio(
     String terId, {
