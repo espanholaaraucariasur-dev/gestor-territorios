@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/l10n/translation_service.dart';
 
 /// Mixin para envío de tarjetas a conductores/publicadores
-mixin EnviarTarjetaMixin<T extends StatefulWidget> on State<T> {
+mixin EnviarTarjetaMixin on State {
   String get usuarioEmail;
   Map<String, dynamic> get usuarioData;
 

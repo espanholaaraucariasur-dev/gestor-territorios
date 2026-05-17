@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
 /// Mixin para envíos programados de tarjetas
-mixin EnvioProgramadoMixin<T extends StatefulWidget> on State<T> {
+mixin EnvioProgramadoMixin on State {
   String get usuarioEmail;
   Map<String, dynamic> get usuarioData;
 

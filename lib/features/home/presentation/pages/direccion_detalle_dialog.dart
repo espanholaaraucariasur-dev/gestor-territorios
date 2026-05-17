@@ -48,30 +48,30 @@ class DireccionDetalleDialog {
                 ],
               ),
               const SizedBox(height: 16),
-              _infoCard('📍 Calle', calle, Colors.blue, const Color(0xFFE3F2FD)),
+              infoCard('📍 Calle', calle, Colors.blue, const Color(0xFFE3F2FD)),
               const SizedBox(height: 12),
-              _infoCard('🏠 Complemento', complemento, Colors.green, const Color(0xFFE8F5E9)),
+              infoCard('🏠 Complemento', complemento, Colors.green, const Color(0xFFE8F5E9)),
               const SizedBox(height: 12),
-              _infoCard('🏘️ Barrio', barrio, Colors.orange, const Color(0xFFFFF3E0)),
+              infoCard('🏘️ Barrio', barrio, Colors.orange, const Color(0xFFFFF3E0)),
               const SizedBox(height: 12),
-              _infoCard('📝 Información', informacion, Colors.purple, const Color(0xFFE1BEE7)),
+              infoCard('📝 Información', informacion, Colors.purple, const Color(0xFFE1BEE7)),
               const SizedBox(height: 12),
-              _infoCard('📌 Estado', estadoPredicacion, Colors.teal, const Color(0xFFB2DFDB)),
+              infoCard('📌 Estado', estadoPredicacion, Colors.teal, const Color(0xFFB2DFDB)),
               const SizedBox(height: 10),
               Row(children: [
-                _chip('Predicado', predicado),
+                chip('Predicado', predicado),
                 const SizedBox(width: 8),
-                _chip('No predicado', noPredicado),
+                chip('No predicado', noPredicado),
               ]),
               const SizedBox(height: 10),
               Row(children: [
-                _chip(esHispano ? 'Hispano' : 'No hispano', esHispano),
+                chip(esHispano ? 'Hispano' : 'No hispano', esHispano),
                 const SizedBox(width: 8),
-                _chip('Entregó invitación', entregoInvitacion),
+                chip('Entregó invitación', entregoInvitacion),
               ]),
               if (campanaEspecialActiva || campanaInvitacionEntregada) ...[
                 const SizedBox(height: 10),
-                _chip(
+                chip(
                   campanaInvitacionEntregada
                       ? '✅ Invitación: $nombresCampanas'
                       : 'Campaña: pendiente',
@@ -99,7 +99,7 @@ class DireccionDetalleDialog {
     );
   }
 
-  static Widget _infoCard(
+  static Widget infoCard(
     String titulo,
     String valor,
     Color iconColor,
@@ -129,7 +129,7 @@ class DireccionDetalleDialog {
     );
   }
 
-  static Widget _chip(String texto, bool activo) {
+  static Widget chip(String texto, bool activo) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(

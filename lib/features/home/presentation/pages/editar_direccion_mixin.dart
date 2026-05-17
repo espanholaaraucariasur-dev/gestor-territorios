@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/l10n/translation_service.dart';
 
 /// Mixin para editar, eliminar y crear direcciones/tarjetas
-mixin EditarDireccionMixin<T extends StatefulWidget> on State<T> {
+mixin EditarDireccionMixin on State {
   String get usuarioEmail;
   Map<String, dynamic> get usuarioData;
   bool get campanaEspecialActiva;

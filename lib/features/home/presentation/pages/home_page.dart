@@ -1608,11 +1608,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   }
 
   Widget _detalleCard(String titulo, String valor, Color iconColor, Color backgroundColor) {
-    return DireccionDetalleDialog._infoCard(titulo, valor, iconColor, backgroundColor);
+    return DireccionDetalleDialog.infoCard(titulo, valor, iconColor, backgroundColor);
   }
 
   Widget _chipDetalle(String texto, bool activo) {
-    return DireccionDetalleDialog._chip(texto, activo);
+    return DireccionDetalleDialog.chip(texto, activo);
   }
 
 
@@ -2343,96 +2343,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       usuarioData: widget.usuarioData,
     );
   }
-
-
-    String tarjetaId,
-    String tarjetaNombre,
-  ) async {
-    try {
-      final ahora = DateTime.now();
-      final nombre = widget.usuarioData['nombre'] ?? '';
-      await FirebaseFirestore.instance
-          .collection('territorios')
-          .doc(territorioId)
-          .collection('tarjetas')
-          .doc(tarjetaId)
-          .set({
-        'asignado_a': nombre,
-        'enviado_nombre': nombre,
-        'enviado_tipo': 'conductor',
-        'conductor_email': _usuarioEmail,
-        'enviado_a': _usuarioEmail,
-        'mes_asignacion': '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
-        'completada': false,
-        'disponible_para_publicadores': false,
-        'bloqueado': false,
-        'asignado_en': FieldValue.serverTimestamp(),
-        'tomado_en': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Tarjeta "$tarjetaNombre" tomada'),
-          backgroundColor: const Color(0xFF1B5E20),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
-
-    String tarjetaId,
-    String tarjetaNombre,
-  ) async {
-    try {
-      final ahora = DateTime.now();
-      await FirebaseFirestore.instance
-          .collection('territorios')
-          .doc(territorioId)
-          .collection('tarjetas')
-          .doc(tarjetaId)
-          .set({
-        'asignado_a': widget.usuarioData['nombre'] ?? '',
-        'enviado_nombre': widget.usuarioData['nombre'] ?? '',
-        'enviado_tipo': 'publicador',
-        'publicador_email': _usuarioEmail,
-        'publicador_id': widget.usuarioData['uid'] ?? '',
-        'mes_asignacion': '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}',
-        'completada': false,
-        'disponible_para_publicadores': false,
-        'bloqueado': false,
-        'asignado_en': FieldValue.serverTimestamp(),
-        'tomado_en': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      // Iniciar timer de devolución automática
-      AutoReturnService().iniciarTimer(
-        tarjetaId: tarjetaId,
-        territorioId: territorioId,
-        tarjetaNombre: tarjetaNombre,
-        usuarioNombre: widget.usuarioData['nombre'] ?? '',
-        fechaAsignacion: ahora,
-      );
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Tarjeta "$tarjetaNombre" asignada — 2h para trabajarla'),
-          backgroundColor: const Color(0xFF1B5E20),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
 
   void _verificarTarjetasVencidas() async {
     final ahora = DateTime.now();
