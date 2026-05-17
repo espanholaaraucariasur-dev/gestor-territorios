@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/l10n/translation_service.dart';
 
 /// Mixin para diálogos de solicitar/asignar/devolver tarjetas
-mixin SolicitarTerritorioMixin on State {
+mixin SolicitarTerritorioMixin on State<StatefulWidget> {
   String get usuarioEmail;
   Map<String, dynamic> get usuarioData;
 
