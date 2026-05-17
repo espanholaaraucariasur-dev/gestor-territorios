@@ -132,11 +132,23 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       final tokens = norm.split(' ').where((t) => t.length >= 2).toList();
       if (tokens.isEmpty) return;
 
-      final snap = await FirebaseFirestore.instance
+      // Estrategia 1: por palabras_clave
+      var snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .where('palabras_clave', arrayContainsAny: tokens.take(5).toList())
           .limit(10)
           .get();
+
+      // Estrategia 2: si no hay resultados, buscar por rango en calle
+      if (snap.docs.isEmpty && texto.length >= 3) {
+        final textoNorm = texto.trim();
+        snap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('calle', isGreaterThanOrEqualTo: textoNorm)
+            .where('calle', isLessThanOrEqualTo: '$textoNorm\uf8ff')
+            .limit(10)
+            .get();
+      }
 
       // Agrupar calles únicas
       final callesVistas = <String>{};
@@ -149,7 +161,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         sugs.add(d);
         if (sugs.length >= 5) break;
       }
-      // Solo actualizar si cambió para evitar rebuilds innecesarios
+
+      debugPrint('🔍 Sugerencias para "$texto": ${sugs.length} resultados');
       if (mounted) setState(() => _sugerencias = sugs);
     } catch (e) {
       debugPrint('Autocompletado error: $e');
@@ -666,14 +679,13 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                                 fillColor: Colors.white,
                               ),
                               onChanged: (v) {
-                                // NO llamar setState aquí — causa parpadeo
-                                // El suffixIcon usa ValueListenableBuilder
-                                // El debounce actualiza sugerencias
                                 _debounceTimer?.cancel();
                                 _debounceTimer = Timer(
                                   const Duration(milliseconds: 400),
-                                  () {
-                                    if (mounted) _actualizarSugerencias(v);
+                                  () async {
+                                    if (mounted) {
+                                      await _actualizarSugerencias(v);
+                                    }
                                   },
                                 );
                               },
