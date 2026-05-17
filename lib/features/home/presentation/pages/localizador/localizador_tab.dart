@@ -121,7 +121,9 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   // Autocompletado mientras el usuario escribe
   Future<void> _actualizarSugerencias(String texto) async {
     if (texto.length < 3) {
-      setState(() => _sugerencias = []);
+      if (mounted && _sugerencias.isNotEmpty) {
+        setState(() => _sugerencias = []);
+      }
       return;
     }
     try {
@@ -132,10 +134,10 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .where('palabras_clave', arrayContainsAny: tokens.take(5).toList())
-          .limit(8)
+          .limit(10)
           .get();
 
-      // Agrupar calles únicas (sin número para mostrar nombre de calle)
+      // Agrupar calles únicas
       final callesVistas = <String>{};
       final sugs = <Map<String, dynamic>>[];
       for (final doc in snap.docs) {
@@ -146,9 +148,11 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         sugs.add(d);
         if (sugs.length >= 5) break;
       }
+      // Solo actualizar si cambió para evitar rebuilds innecesarios
       if (mounted) setState(() => _sugerencias = sugs);
-    } catch (_) {
-      setState(() => _sugerencias = []);
+    } catch (e) {
+      debugPrint('Autocompletado error: $e');
+      if (mounted) setState(() => _sugerencias = []);
     }
   }
 
@@ -680,12 +684,15 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                                 fillColor: Colors.white,
                               ),
                               onChanged: (v) {
-                                setState(() {});
-                                // Debounce — esperar 500ms después de la última letra
+                                // NO llamar setState aquí — causa parpadeo
+                                // El suffixIcon usa ValueListenableBuilder
+                                // El debounce actualiza sugerencias
                                 _debounceTimer?.cancel();
                                 _debounceTimer = Timer(
-                                  const Duration(milliseconds: 500),
-                                  () => _actualizarSugerencias(v),
+                                  const Duration(milliseconds: 400),
+                                  () {
+                                    if (mounted) _actualizarSugerencias(v);
+                                  },
                                 );
                               },
                               onSubmitted: (_) {
