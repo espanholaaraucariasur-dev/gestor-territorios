@@ -3878,6 +3878,51 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     }
   }
 
+
+  Future<void> _programarEnvioTarjeta(
+    BuildContext context,
+    String terId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
+    await _mostrarDialogoProgramarEnvio(
+      terId,
+      tarjetaId: tarjetaId,
+      nombre: tarjetaNombre,
+      isTarjeta: true,
+    );
+  }
+
+  void _cancelarProgramacionEnvio(String terId, String tarjetaId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(terId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .update({
+        'programado': false,
+        'programado_envio': null,
+        'programado_destinatario': null,
+        'programado_nombre': null,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Programación cancelada'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   void _verificarReinicioMensual() async {
     try {
       final debe = await RestauracionMensual.debeEjecutarse();
