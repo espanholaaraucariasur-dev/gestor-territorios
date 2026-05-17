@@ -18,8 +18,8 @@ import 'package:file_picker/file_picker.dart';
 import '../../../../core/l10n/translation_service.dart';
 
 class PantallaHomeLegacy extends StatefulWidget {
-  final Map<String, dynamic> widget.usuarioData;
-  const PantallaHomeLegacy({super.key, required this.widget.usuarioData});
+  final Map<String, dynamic> usuarioData;
+  const PantallaHomeLegacy({super.key, required this.usuarioData});
 
   @override
   State<PantallaHomeLegacy> createState() => _PantallaHomeLegacyState();
@@ -62,7 +62,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   void initState() {
     super.initState();
     _tabControllerAdmin = TabController(length: 4, vsync: this);
-    _usuarioEmail = widget.widget.usuarioData['email'] ?? '';
+    _usuarioEmail = widget.usuarioData['email'] ?? '';
     // Initialize with safe defaults to prevent null errors
     _nombreCampanaEspecial = '';
     _anuncioGeneral = '';
@@ -70,8 +70,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     _procesarEnviosProgramados();
     _verificarTarjetasVencidas();
     final esAdminTerritorios =
-        widget.widget.usuarioData['es_admin_territorios'] ?? false;
-    final esAdmin = widget.widget.usuarioData['es_admin'] ?? false;
+        widget.usuarioData['es_admin_territorios'] ?? false;
+    final esAdmin = widget.usuarioData['es_admin'] ?? false;
     if (esAdminTerritorios && !esAdmin) {
       _modoAdminTerritoriosActivo = true;
     }
@@ -292,11 +292,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
   @override
   Widget build(BuildContext context) {
-    final esConductor = widget.widget.usuarioData['es_conductor'] ?? false;
-    final esAdmin = widget.widget.usuarioData['es_admin'] ?? false;
+    final esConductor = widget.usuarioData['es_conductor'] ?? false;
+    final esAdmin = widget.usuarioData['es_admin'] ?? false;
     final esAdminTerritorios =
-        widget.widget.usuarioData['es_admin_territorios'] ?? false;
-    final nombre = widget.widget.usuarioData['nombre'] ?? 'Hermano';
+        widget.usuarioData['es_admin_territorios'] ?? false;
+    final nombre = widget.usuarioData['nombre'] ?? 'Hermano';
 
     return Scaffold(
       key: _scaffoldKey,
@@ -325,7 +325,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                           radius: 26,
                           backgroundColor: Colors.white.withOpacity(0.2),
                           child: Text(
-                            (widget.widget.usuarioData['nombre'] ?? 'U')
+                            (widget.usuarioData['nombre'] ?? 'U')
                                 .toString()
                                 .trim()
                                 .split(' ')
@@ -349,7 +349,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      widget.widget.usuarioData['nombre'] ?? 'Usuario',
+                      widget.usuarioData['nombre'] ?? 'Usuario',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -357,7 +357,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       ),
                     ),
                     Text(
-                      widget.widget.usuarioData['email'] ?? '',
+                      widget.usuarioData['email'] ?? '',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.7),
                         fontSize: 12,
@@ -660,7 +660,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
   Widget _buildContenidoAdmin() {
     return AdminTab(
-      usuarioData: widget.widget.usuarioData,
+      usuarioData: widget.usuarioData,
       tabController: _tabControllerAdmin,
     );
   }
@@ -2322,13 +2322,13 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   Widget _buildVistaLocalizador() {
     return LocalizadorTab(
       usuarioEmail: _usuarioEmail,
-      usuarioNombre: widget.widget.usuarioData['nombre'] as String? ?? _usuarioEmail,
+      usuarioNombre: widget.usuarioData['nombre'] as String? ?? _usuarioEmail,
     );
   }
 
   Widget _buildContenidoAdminTerritorios() {
     return AdminTerritoriosTab(
-      usuarioData: widget.widget.usuarioData,
+      usuarioData: widget.usuarioData,
     );
   }
 
@@ -2357,7 +2357,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   }
 
   Widget _buildMisTarjetas() {
-    final nombrePublicador = widget.widget.usuarioData['nombre'] ?? '';
+    final nombrePublicador = widget.usuarioData['nombre'] ?? '';
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -2831,7 +2831,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
   Widget _buildContenidoConductor() {
     return ConductorTab(
-      usuarioData: widget.widget.usuarioData,
+      usuarioData: widget.usuarioData,
       usuarioEmail: _usuarioEmail,
       onSolicitarTerritorio: _mostrarDialogoSolicitarTerritorioConductor,
     );
@@ -2839,7 +2839,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
   Widget _buildContenidoPublicador() {
     return PublicadorTab(
-      usuarioData: widget.widget.usuarioData,
+      usuarioData: widget.usuarioData,
       usuarioEmail: _usuarioEmail,
       _campanaEspecialActiva: _campanaEspecialActiva,
       nombreCampanaEspecial: _nombreCampanaEspecial,
@@ -3638,37 +3638,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
 
   // Métodos helpers usados internamente
-  String _normalizarDireccion(String direccion) {
-    var texto = direccion.toLowerCase();
-    texto = texto.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
-    texto = texto.replaceAll(RegExp(r'\b\d{5}-?\d{3}\b'), ' ');
-    texto = texto.replaceAll(RegExp(r'\b(n\.?|no\.?|nº|n°)\b'), ' ');
-    texto = texto.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
-    texto = texto.replaceAll('apto', 'apartamento');
-    texto = texto.replaceAll('apt', 'apartamento');
-    texto = texto.replaceAll('ap.', 'apartamento');
-    texto = texto.replaceAll('dpto', 'departamento');
-    texto = texto.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return texto;
-  }
 
-  InputDecoration _inputStyleHelper(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      filled: true,
-      fillColor: const Color(0xFFF5F5F5),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide.none,
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFF1B5E20), width: 2),
-      ),
-    );
-  }
 
-  bool get _campanaEspecialActiva => _campanaEspecialActiva;
 
   void _editarDireccion(QueryDocumentSnapshot dirDoc) {
     final data = dirDoc.data() as Map<String, dynamic>;
