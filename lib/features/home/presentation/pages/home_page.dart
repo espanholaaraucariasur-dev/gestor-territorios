@@ -3830,6 +3830,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         content: Text('✅ Tarjeta "$tarjetaNombre" asignada'),
         backgroundColor: const Color(0xFF1B5E20),
       ));
+
+      // Notificar a admin_territorios
+      final terDoc = await FirebaseFirestore.instance
+          .collection('territorios').doc(territorioId).get();
+      final terNombre = (terDoc.data()?['nombre'] as String?) ?? territorioId;
+      await NotificacionService.enviarAAdminTerritorios(
+        titulo: '📋 Tarjeta tomada por publicador',
+        cuerpo: '$nombre tomó "$tarjetaNombre" del territorio "$terNombre"',
+        tipo: TipoNotificacion.tarjetaTomada,
+        extra: {'territorio_id': territorioId, 'tarjeta_id': tarjetaId, 'tomada_por': nombre},
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3871,6 +3882,17 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         content: Text('✅ Tarjeta "$tarjetaNombre" tomada'),
         backgroundColor: const Color(0xFF1B5E20),
       ));
+
+      // Notificar a admin_territorios
+      final terDoc = await FirebaseFirestore.instance
+          .collection('territorios').doc(territorioId).get();
+      final terNombre = (terDoc.data()?['nombre'] as String?) ?? territorioId;
+      await NotificacionService.enviarAAdminTerritorios(
+        titulo: '🚗 Tarjeta tomada por conductor',
+        cuerpo: '$nombre tomó "$tarjetaNombre" del territorio "$terNombre"',
+        tipo: TipoNotificacion.tarjetaTomada,
+        extra: {'territorio_id': territorioId, 'tarjeta_id': tarjetaId, 'tomada_por': nombre},
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

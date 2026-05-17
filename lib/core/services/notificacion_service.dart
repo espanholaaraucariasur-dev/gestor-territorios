@@ -10,6 +10,7 @@ enum TipoNotificacion {
   alertaPredicacion,
   motivacional,
   avisoDevo,
+  tarjetaTomada,
 }
 
 extension TipoNotificacionExt on TipoNotificacion {
@@ -22,6 +23,7 @@ extension TipoNotificacionExt on TipoNotificacion {
       case TipoNotificacion.alertaPredicacion:    return 'alerta_predicacion';
       case TipoNotificacion.motivacional:         return 'motivacional';
       case TipoNotificacion.avisoDevo:            return 'aviso_devolucion';
+      case TipoNotificacion.tarjetaTomada:        return 'tarjeta_tomada';
     }
   }
 }

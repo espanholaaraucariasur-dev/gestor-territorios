@@ -62,6 +62,7 @@ class _NotificacionesDialog extends StatelessWidget {
       case 'solicitud_direccion':   return Icons.add_location_alt;
       case 'alerta_predicacion':    return Icons.warning_amber;
       case 'solicitud_acceso':      return Icons.person_add;
+      case 'tarjeta_tomada':        return Icons.assignment_ind;
       case 'devolucion_tarjeta':    return Icons.assignment_return;
       case 'devolucion_automatica': return Icons.assignment_late;
       default:                      return Icons.notifications;
@@ -75,6 +76,7 @@ class _NotificacionesDialog extends StatelessWidget {
       case 'solicitud_direccion':   return Colors.blue;
       case 'alerta_predicacion':    return Colors.red;
       case 'solicitud_acceso':      return Colors.purple;
+      case 'tarjeta_tomada':        return Colors.teal;
       case 'devolucion_tarjeta':    return Colors.orange;
       case 'devolucion_automatica': return Colors.deepOrange;
       default:                      return const Color(0xFF1B5E20);
