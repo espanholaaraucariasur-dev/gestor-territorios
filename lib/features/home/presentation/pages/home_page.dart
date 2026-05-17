@@ -1611,11 +1611,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   }
 
   Widget _detalleCard(String titulo, String valor, Color iconColor, Color backgroundColor) {
-    return DireccionDetalleDialog._infoCard(titulo, valor, iconColor, backgroundColor);
+    return DireccionDetalleDialog.infoCard(titulo, valor, iconColor, backgroundColor);
   }
 
   Widget _chipDetalle(String texto, bool activo) {
-    return DireccionDetalleDialog._chip(texto, activo);
+    return DireccionDetalleDialog.chip(texto, activo);
   }
 
 
