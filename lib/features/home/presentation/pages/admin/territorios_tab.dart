@@ -496,7 +496,16 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                 d['estado_predicacion']
                                                         as String? ??
                                                     'pendiente';
-                                            return ListTile(
+
+                                            // Detectar campos de campaña dinámicos
+                                            final campanaKeys = d.keys
+                                                .where((k) => k.startsWith('campana_invitacion_') && k != 'campana_invitacion_fecha')
+                                                .toList();
+
+                                            return Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                ListTile(
                                               dense: true,
                                               leading: const Icon(
                                                   Icons.location_on,
@@ -532,6 +541,62 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                             : Colors.grey
                                                                 .shade700)),
                                               ),
+                                                ),
+                                                // Badge campaña — solo si hay campaña activa en esta dirección
+                                                if (campanaKeys.isNotEmpty)
+                                                  StreamBuilder<DocumentSnapshot>(
+                                                    stream: FirebaseFirestore.instance
+                                                        .collection('configuraciones')
+                                                        .doc('comunicacion')
+                                                        .snapshots(),
+                                                    builder: (context, cfgSnap) {
+                                                      final cfg = (cfgSnap.data?.data() as Map<String, dynamic>?) ?? {};
+                                                      final campanaActiva = cfg['campana_especial_activa'] == true;
+                                                      final nombreCampana = cfg['nombre_campana_especial'] as String? ?? '';
+                                                      if (!campanaActiva || nombreCampana.isEmpty) return const SizedBox.shrink();
+                                                      final keyActiva = 'campana_invitacion_$nombreCampana';
+                                                      final entregada = d[keyActiva] == true;
+                                                      return Padding(
+                                                        padding: const EdgeInsets.only(left: 16, bottom: 6, right: 16),
+                                                        child: Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                          decoration: BoxDecoration(
+                                                            color: entregada
+                                                                ? Colors.green.shade50
+                                                                : Colors.orange.shade50,
+                                                            borderRadius: BorderRadius.circular(8),
+                                                            border: Border.all(
+                                                              color: entregada
+                                                                  ? Colors.green.shade300
+                                                                  : Colors.orange.shade300,
+                                                            ),
+                                                          ),
+                                                          child: Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              Icon(
+                                                                entregada ? Icons.check_circle : Icons.campaign,
+                                                                size: 12,
+                                                                color: entregada ? Colors.green : Colors.orange,
+                                                              ),
+                                                              const SizedBox(width: 4),
+                                                              Text(
+                                                                entregada
+                                                                    ? '✅ Invitación entregada · $nombreCampana'
+                                                                    : '📢 Pendiente · $nombreCampana',
+                                                                style: TextStyle(
+                                                                  fontSize: 10,
+                                                                  fontWeight: FontWeight.w600,
+                                                                  color: entregada ? Colors.green.shade800 : Colors.orange.shade800,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  ),
+                                              ],
                                             );
                                           }).toList(),
                                         );
