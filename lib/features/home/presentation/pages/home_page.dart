@@ -3795,13 +3795,88 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     }
   }
 
-  // ── _asignarTarjetaAPublicador ──────────────────────
-    Future<void> _asignarTarjetaAPublicador(
+  Future<void> _asignarTarjetaAPublicador(
     String territorioId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
+    try {
+      final ahora = DateTime.now();
+      final nombre = widget.usuarioData['nombre'] ?? '';
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .set({
+        'asignado_a': nombre,
+        'publicador_email': _usuarioEmail,
+        'publicador_nombre': nombre,
+        'enviado_nombre': nombre,
+        'enviado_tipo': 'publicador',
+        'enviado_a': _usuarioEmail,
+        'mes_asignacion': '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
+        'completada': false,
+        'disponible_para_publicadores': true,
+        'bloqueado': false,
+        'asignado_en': FieldValue.serverTimestamp(),
+        'tomado_en': FieldValue.serverTimestamp(),
+        'prioridad_admin': false,
+        'mes_prioridad': null,
+      }, SetOptions(merge: true));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('✅ Tarjeta "$tarjetaNombre" asignada'),
+        backgroundColor: const Color(0xFF1B5E20),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
 
-  // ── _asignarTarjetaAConductor ──────────────────────
-    Future<void> _asignarTarjetaAConductor(
+  Future<void> _asignarTarjetaAConductor(
     String territorioId,
+    String tarjetaId,
+    String tarjetaNombre,
+  ) async {
+    try {
+      final ahora = DateTime.now();
+      final nombre = widget.usuarioData['nombre'] ?? '';
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .set({
+        'asignado_a': nombre,
+        'enviado_nombre': nombre,
+        'enviado_tipo': 'conductor',
+        'conductor_email': _usuarioEmail,
+        'enviado_a': _usuarioEmail,
+        'mes_asignacion': '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}',
+        'completada': false,
+        'disponible_para_publicadores': false,
+        'bloqueado': false,
+        'asignado_en': FieldValue.serverTimestamp(),
+        'tomado_en': FieldValue.serverTimestamp(),
+        'prioridad_admin': false,
+        'mes_prioridad': null,
+      }, SetOptions(merge: true));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('✅ Tarjeta "$tarjetaNombre" tomada'),
+        backgroundColor: const Color(0xFF1B5E20),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
 
   void _verificarReinicioMensual() async {
     try {
