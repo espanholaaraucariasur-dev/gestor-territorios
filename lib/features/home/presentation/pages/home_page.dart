@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import '../../../auth/presentation/pages/login_page.dart';
 import '../../../../core/services/auto_return_service.dart';
+import '../../../../core/services/notificacion_service.dart';
 import 'admin/restauracion_mensual.dart';
 import 'notificaciones_widget.dart';
 import 'direccion_detalle_dialog.dart';
@@ -402,14 +403,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         label: context.t('notifications'),
                         subtitle: context.t('last_alerts'),
                         color: const Color(0xFF1B5E20),
-                        trailing: StreamBuilder<QuerySnapshot>(
-                          stream: FirebaseFirestore.instance
-                              .collection('notificaciones')
-                              .where('leida', isEqualTo: false)
-                              .limit(99)
-                              .snapshots(),
+                        trailing: StreamBuilder<int>(
+                          stream: NotificacionService.streamConteo(_usuarioEmail),
                           builder: (context, snap) {
-                            final count = snap.data?.docs.length ?? 0;
+                            final count = snap.data ?? 0;
                             if (count == 0) {
                               return const Icon(Icons.chevron_right,
                                   color: Colors.grey, size: 18);
