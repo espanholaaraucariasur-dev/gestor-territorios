@@ -8,6 +8,39 @@ mixin EditarDireccionMixin<T extends StatefulWidget> on State<T> {
   Map<String, dynamic> get usuarioData;
   bool get campanaEspecialActiva;
 
+  // Métodos helpers usados internamente
+  String _normalizarDireccion(String direccion) {
+    var texto = direccion.toLowerCase();
+    texto = texto.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
+    texto = texto.replaceAll(RegExp(r'\b\d{5}-?\d{3}\b'), ' ');
+    texto = texto.replaceAll(RegExp(r'\b(n\.?|no\.?|nº|n°)\b'), ' ');
+    texto = texto.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
+    texto = texto.replaceAll('apto', 'apartamento');
+    texto = texto.replaceAll('apt', 'apartamento');
+    texto = texto.replaceAll('ap.', 'apartamento');
+    texto = texto.replaceAll('dpto', 'departamento');
+    texto = texto.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return texto;
+  }
+
+  InputDecoration _inputStyleHelper(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      filled: true,
+      fillColor: const Color(0xFFF5F5F5),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFF1B5E20), width: 2),
+      ),
+    );
+  }
+
+  bool get _campanaEspecialActiva => campanaEspecialActiva;
+
   void _editarDireccion(QueryDocumentSnapshot dirDoc) {
     final data = dirDoc.data() as Map<String, dynamic>;
     final TextEditingController calleCtrl = TextEditingController(

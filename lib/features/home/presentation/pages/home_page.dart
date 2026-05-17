@@ -148,25 +148,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     texto = texto.replaceAll('apto', 'apartamento');
     texto = texto.replaceAll('apt', 'apartamento');
     texto = texto.replaceAll('ap.', 'apartamento');
-    texto = texto.replaceAll('ap.', 'apartamento');
     texto = texto.replaceAll('dpto', 'departamento');
     texto = texto.replaceAll(RegExp(r'\s+'), ' ').trim();
     return texto;
   }
-
-
-    String terId,
-    String tarjetaId,
-    String tarjetaNombre,
-  ) async {
-    await _mostrarDialogoProgramarEnvio(
-      terId,
-      tarjetaId: tarjetaId,
-      nombre: tarjetaNombre,
-      isTarjeta: true,
-    );
-  }
-
 
   InputDecoration _inputStyleHelper(String hint) {
     return InputDecoration(
