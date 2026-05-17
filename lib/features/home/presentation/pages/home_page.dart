@@ -4129,4 +4129,182 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       }
     }
   }
+
+  void _mostrarDialogoCrearTarjeta(BuildContext parentContext, String terId) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: parentContext,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.folder_open, size: 40, color: Colors.blue),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Crear Nueva Tarjeta',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: ctrl,
+                      textAlign: TextAlign.center,
+                      decoration: _inputStyleHelper('Ej: A01 - CENTRO 1'),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 45,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          if (ctrl.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Por favor ingresa un nombre para la tarjeta',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+
+                          try {
+                            String nombreTarjeta = ctrl.text.trim();
+                            await FirebaseFirestore.instance
+                                .collection('territorios')
+                                .doc(terId)
+                                .collection('tarjetas')
+                                .doc(nombreTarjeta)
+                                .set({
+                              'nombre': nombreTarjeta,
+                              'territorio_id': terId,
+                              'estado': 'disponible',
+                              'cantidad_direcciones': 0,
+                              'barrio': '',
+                              'created_at': FieldValue.serverTimestamp(),
+                              'bloqueado': true,
+                              'disponible_para_publicadores': false,
+                              'asignado_a': '',
+                              'asignado_en': null,
+                            });
+
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                            }
+
+                            if (parentContext.mounted) {
+                              await Future.delayed(
+                                const Duration(milliseconds: 500),
+                              );
+                              ScaffoldMessenger.of(parentContext).showSnackBar(
+                                const SnackBar(
+                                  content: Text('✅ ¡Tarjeta creada con éxito!'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('❌ Error al crear tarjeta: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          'Crear Tarjeta',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 0,
+                right: 0,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _procesarEnviosProgramados() async {
+    final now = DateTime.now();
+    try {
+      final queryTerritorios = await FirebaseFirestore.instance
+          .collection('territorios')
+          .where(
+            'programado_para',
+            isLessThanOrEqualTo: Timestamp.fromDate(now),
+          )
+          .where('estatus_envio', isEqualTo: 'programado')
+          .get();
+      final queryTarjetas = await FirebaseFirestore.instance
+          .collectionGroup('tarjetas')
+          .where(
+            'programado_para',
+            isLessThanOrEqualTo: Timestamp.fromDate(now),
+          )
+          .where('estatus_envio', isEqualTo: 'programado')
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in queryTerritorios.docs) {
+        final docData = doc.data();
+        batch.update(doc.reference, {
+          'estatus_envio': 'enviado',
+          'enviado_on': FieldValue.serverTimestamp(),
+          'enviado_a': docData.containsKey('conductor_email')
+              ? docData['conductor_email']
+              : '',
+        });
+      }
+      for (final doc in queryTarjetas.docs) {
+        final docData = doc.data();
+        batch.update(doc.reference, {
+          'estatus_envio': 'enviado',
+          'enviado_on': FieldValue.serverTimestamp(),
+          'enviado_a': docData.containsKey('conductor_email')
+              ? docData['conductor_email']
+              : '',
+        });
+      }
+      bool hasUpdates =
+          queryTerritorios.docs.isNotEmpty || queryTarjetas.docs.isNotEmpty;
+      if (hasUpdates) {
+        await batch.commit();
+      }
+    } catch (_) {
+      // No interrumpir la app si el procesamiento programado falla.
+    }
+  }
+
 }
