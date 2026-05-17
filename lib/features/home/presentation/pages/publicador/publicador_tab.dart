@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
@@ -65,15 +66,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
             duration: const Duration(seconds: 8),
           ),
         );
-        // Guardar también en Firestore para persistir
-        FirebaseFirestore.instance.collection('notificaciones').add({
-          'titulo': '⏰ Aviso de devolución',
-          'cuerpo': mensaje,
-          'tipo': 'auto_devolucion',
-          'destinatario': widget.usuarioEmail,
-          'leida': false,
-          'created_at': FieldValue.serverTimestamp(),
-        });
+        // Guardar aviso en Firestore
+        NotificacionService.enviar(
+          destinatario: widget.usuarioEmail,
+          titulo: '⏰ Aviso de devolución',
+          cuerpo: mensaje,
+          tipo: TipoNotificacion.avisoDevo,
+        );
       }
     };
     // Verificar tarjetas asignadas al iniciar
@@ -334,23 +333,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
           .collection('usuarios')
           .where('estado', isEqualTo: 'aprobado')
           .get();
-      for (final admin in adminsSnap.docs) {
-        final u = admin.data();
-        if (u['es_admin_territorios'] != true && u['es_admin'] != true) continue;
-        final adminEmail = u['email'] as String? ?? '';
-        if (adminEmail.isEmpty) continue;
-        await FirebaseFirestore.instance.collection('notificaciones').add({
-          'titulo': '↩️ Tarjeta devuelta',
-          'cuerpo': '$nombre devolvió la tarjeta "$tarjetaId"',
-          'tipo': 'devolucion_tarjeta',
-          'destinatario': adminEmail,
-          'territorio_id': territorioId,
-          'tarjeta_id': tarjetaId,
-          'devuelta_por': nombre,
-          'leida': false,
-          'created_at': FieldValue.serverTimestamp(),
-        });
-      }
+      await NotificacionService.enviarAAdminTerritorios(
+        titulo: '↩️ Tarjeta devuelta',
+        cuerpo: '$nombre devolvió la tarjeta "$tarjetaId"',
+        tipo: TipoNotificacion.devolucionTarjeta,
+        extra: {'territorio_id': territorioId, 'tarjeta_id': tarjetaId},
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -449,15 +437,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
           .replaceAll('{nombre}', nombre);
       if (texto.isEmpty) return;
 
-      // Enviar notificación
-      await FirebaseFirestore.instance.collection('notificaciones').add({
-        'titulo': '🌟 ¡Gracias por tu trabajo!',
-        'cuerpo': texto,
-        'tipo': 'motivacional',
-        'destinatario': email,
-        'leida': false,
-        'created_at': FieldValue.serverTimestamp(),
-      });
+      // Enviar notificación motivacional
+      await NotificacionService.enviar(
+        destinatario: email,
+        titulo: '🌟 ¡Gracias por tu trabajo!',
+        cuerpo: texto,
+        tipo: TipoNotificacion.motivacional,
+      );
 
       // Marcar tarea como enviada
       await FirebaseFirestore.instance
@@ -1490,27 +1476,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
           return '$calle — $motivo';
         }).join('\n');
 
-        // Notificar a admins de territorios (no al publicador)
-        final adminsSnap = await db.collection('usuarios')
-            .where('estado', isEqualTo: 'aprobado')
-            .get();
-        for (final adminDoc in adminsSnap.docs) {
-          final u = adminDoc.data() as Map<String, dynamic>;
-          if (u['es_admin'] != true && u['es_admin_territorios'] != true) continue;
-          final adminEmail = u['email'] as String? ?? '';
-          if (adminEmail.isEmpty) continue;
-          await db.collection('notificaciones').add({
-            'tipo': 'alerta_predicacion',
-            'titulo': '⚠️ Atención requerida',
-            'cuerpo': '$nombre reportó ${dirNoPredicadas.length} dirección(es) en "$tarjetaId":\n$resumen',
-            'tarjeta_id': tarjetaId,
-            'territorio_id': territorioId,
-            'destinatario': adminEmail,
-            'publicador': nombre,
-            'leida': false,
-            'created_at': FieldValue.serverTimestamp(),
-          });
-        }
+        // Notificar a admins de territorios
+        await NotificacionService.enviarAAdminTerritorios(
+          titulo: '⚠️ Atención requerida',
+          cuerpo: '$nombre reportó ${dirNoPredicadas.length} dirección(es) en "$tarjetaId":\n$resumen',
+          tipo: TipoNotificacion.alertaPredicacion,
+          extra: {'tarjeta_id': tarjetaId, 'territorio_id': territorioId},
+        );
       }
       // Las direcciones temporales no deben persistir en la BD
       final esTemporal = territorioId == 'temporales' ||

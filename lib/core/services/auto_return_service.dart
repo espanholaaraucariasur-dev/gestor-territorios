@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -187,27 +188,12 @@ class AutoReturnService {
 
       // Notificar a admins de territorios
       try {
-        final adminsSnap = await FirebaseFirestore.instance
-            .collection('usuarios')
-            .where('estado', isEqualTo: 'aprobado')
-            .get();
-        for (final admin in adminsSnap.docs) {
-          final u = admin.data() as Map<String, dynamic>;
-          if (u['es_admin_territorios'] != true && u['es_admin'] != true) continue;
-          final adminEmail = u['email'] as String? ?? '';
-          if (adminEmail.isEmpty) continue;
-          await FirebaseFirestore.instance.collection('notificaciones').add({
-            'titulo': '⏰ Tarjeta devuelta automáticamente',
-            'cuerpo': '$usuarioNombre no procesó "$tarjetaNombre" a tiempo — devuelta automáticamente',
-            'tipo': 'devolucion_automatica',
-            'destinatario': adminEmail,
-            'territorio_id': territorioId,
-            'tarjeta_id': tarjetaId,
-            'devuelta_por': usuarioNombre,
-            'leida': false,
-            'created_at': FieldValue.serverTimestamp(),
-          });
-        }
+        await NotificacionService.enviarAAdminTerritorios(
+          titulo: '⏰ Tarjeta devuelta automáticamente',
+          cuerpo: '$usuarioNombre no procesó "$tarjetaNombre" a tiempo — devuelta automáticamente',
+          tipo: TipoNotificacion.devolucionAutomatica,
+          extra: {'territorio_id': territorioId, 'tarjeta_id': tarjetaId},
+        );
       } catch (_) {}
 
       cancelarTimer(tarjetaId);

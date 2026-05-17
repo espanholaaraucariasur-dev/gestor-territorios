@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
@@ -245,16 +246,13 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
               final email = emailCtrl.text.trim();
               if (email.isEmpty) return;
 
-              // Guardar solicitud en Firestore
-              await _db.collection('notificaciones').add({
-                'titulo': '🔑 Solicitud de recuperación de contraseña',
-                'cuerpo': '$email solicita recuperar su contraseña.',
-                'tipo': 'recuperacion_password',
-                'email_solicitante': email,
-                'leida': false,
-                'para_roles': ['es_admin'],
-                'created_at': FieldValue.serverTimestamp(),
-              });
+              // Notificar a admins sobre recuperación
+              await NotificacionService.enviarAAdmins(
+                titulo: '🔑 Solicitud de recuperación de contraseña',
+                cuerpo: '$email solicita recuperar su contraseña.',
+                tipo: TipoNotificacion.solicitudAcceso,
+                extra: {'email_solicitante': email},
+              );
 
               if (c.mounted) Navigator.pop(c);
               _snack(context.t('recovery_request_sent'), _verde);
@@ -439,24 +437,15 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                   });
 
                   // Notificar a todos los admins
-                  final adminsSnap = await _db.collection('usuarios')
-                      .where('estado', isEqualTo: 'aprobado')
-                      .where('es_admin', isEqualTo: true)
-                      .get();
-                  for (final adminDoc in adminsSnap.docs) {
-                    final adminEmail = (adminDoc.data()['email'] as String?) ?? '';
-                    if (adminEmail.isEmpty) continue;
-                    await _db.collection('notificaciones').add({
-                      'titulo': '👤 Nueva solicitud de acceso',
-                      'cuerpo': '${nomCtrl.text.trim()} solicita acceso a la app.',
-                      'tipo': 'nueva_solicitud_usuario',
-                      'destinatario': adminEmail,
+                  await NotificacionService.enviarAAdmins(
+                    titulo: '👤 Nueva solicitud de acceso',
+                    cuerpo: '${nomCtrl.text.trim()} solicita acceso a la app.',
+                    tipo: TipoNotificacion.solicitudAcceso,
+                    extra: {
                       'solicitante_nombre': nomCtrl.text.trim(),
                       'solicitante_email': emailCtrl.text.trim(),
-                      'leida': false,
-                      'created_at': FieldValue.serverTimestamp(),
-                    });
-                  }
+                    },
+                  );
 
                   if (c.mounted) Navigator.pop(c);
                   _snack(context.t('request_sent'), _verde);

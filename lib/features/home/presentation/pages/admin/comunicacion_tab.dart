@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/services/gemini_service.dart';
 
@@ -379,15 +380,19 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         'enviado_por': widget.usuarioData['nombre'] ?? '',
       }, SetOptions(merge: true));
 
-      await FirebaseFirestore.instance.collection('notificaciones').add({
-        'titulo': '📢 Anuncio de la congregación',
-        'cuerpo': texto,
-        'cuerpo_pt': textoPT,
-        'tipo': 'anuncio_general',
-        'leida': false,
-        'created_at': FieldValue.serverTimestamp(),
-        'para_todos': true,
-      });
+      // Anuncio va a todos los usuarios aprobados
+      final todosSnap = await FirebaseFirestore.instance
+          .collection('usuarios').where('estado', isEqualTo: 'aprobado').get();
+      for (final doc in todosSnap.docs) {
+        final email = (doc.data()['email'] as String? ?? '').trim().toLowerCase();
+        if (email.isEmpty) continue;
+        await NotificacionService.enviar(
+          destinatario: email,
+          titulo: '📢 Anuncio de la congregación',
+          cuerpo: texto,
+          tipo: TipoNotificacion.motivacional,
+        );
+      }
 
       _anuncioCtrl.clear();
       if (mounted) {
