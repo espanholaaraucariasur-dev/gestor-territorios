@@ -429,7 +429,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
       final msgsSnap = await FirebaseFirestore.instance
           .collection('configuracion').doc('mensajes_motivacionales')
           .collection('mensajes').where('activo', isEqualTo: true).get();
-      if (msgsSnap.docs.isEmpty) return;
+      if (msgsSnap.docs.isEmpty) return; // sin mensajes configurados → no enviar nada
 
       final idx = DateTime.now().millisecondsSinceEpoch % msgsSnap.docs.length;
       final msgData = msgsSnap.docs[idx].data();
@@ -437,10 +437,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
           .replaceAll('{nombre}', nombre);
       if (texto.isEmpty) return;
 
-      // Enviar notificación motivacional
+      // Enviar solo el mensaje configurado, sin título redundante
       await NotificacionService.enviar(
         destinatario: email,
-        titulo: '🌟 ¡Gracias por tu trabajo!',
+        titulo: '🌟 Mensaje para ti',
         cuerpo: texto,
         tipo: TipoNotificacion.motivacional,
       );
