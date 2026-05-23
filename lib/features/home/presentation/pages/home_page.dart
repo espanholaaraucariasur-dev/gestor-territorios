@@ -3181,26 +3181,18 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       );
                     }
 
+                    // Filtrar UNA sola vez antes del builder
+                    const _especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
+                    final docsPublicador = snapshot.data!.docs.where((doc) {
+                      if (_especiales.contains(doc.id)) return false;
+                      final d = doc.data() as Map<String, dynamic>;
+                      return !((d['solo_conductores'] as bool?) ?? false);
+                    }).toList();
+
                     return ListView.builder(
-                      // Pre-filtrar lista: excluir especiales y solo_conductores
-                      // Los territorios con conductor SÍ se muestran (sus tarjetas van en gris)
-                      itemCount: (() {
-                        const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
-                        return snapshot.data!.docs.where((doc) {
-                          if (especiales.contains(doc.id)) return false;
-                          final d = doc.data() as Map<String, dynamic>;
-                          return !((d['solo_conductores'] as bool?) ?? false);
-                        }).length;
-                      })(),
+                      itemCount: docsPublicador.length,
                       itemBuilder: (context, i) {
-                        // Re-filtrar para obtener el doc en posición i
-                        const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
-                        final docs = snapshot.data!.docs.where((doc) {
-                          if (especiales.contains(doc.id)) return false;
-                          final d = doc.data() as Map<String, dynamic>;
-                          return !((d['solo_conductores'] as bool?) ?? false);
-                        }).toList();
-                        final terDoc = docs[i];
+                        final terDoc = docsPublicador[i];
                         final terData = terDoc.data() as Map<String, dynamic>;
                         final terNombre = terData['nombre'] ?? terDoc.id;
 
