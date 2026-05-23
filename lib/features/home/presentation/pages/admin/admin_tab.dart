@@ -1674,7 +1674,7 @@ class _AdminTabState extends State<AdminTab> {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1B5E20),
+                          color: Color(0xFF263238),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -1721,7 +1721,7 @@ class _AdminTabState extends State<AdminTab> {
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1B5E20),
+                          color: Color(0xFF263238),
                         ),
                       ),
                       const SizedBox(height: 12),
