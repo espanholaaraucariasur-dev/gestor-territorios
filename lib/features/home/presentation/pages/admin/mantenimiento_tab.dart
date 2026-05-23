@@ -1058,6 +1058,8 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
               'publicador_email': null,
               'publicador_nombre': null,
               'conductor_email': null,
+              'devuelta_por': null,
+              'devuelta_en': null,
               'estatus_envio': 'disponible',
               'bloqueado': true,
               'disponible_para_publicadores': false,

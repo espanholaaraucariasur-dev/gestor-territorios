@@ -221,8 +221,18 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                               final tarjetaNombre =
                                   tarjetaMap['nombre'] as String? ??
                                       'Sin nombre';
-                              final esPrioridad = tarjetaMap['prioridad_admin'] == true;
+                              final esPrioridadFlag = tarjetaMap['prioridad_admin'] == true;
                               final mesPrioridad = tarjetaMap['mes_prioridad'] as String? ?? '';
+                              // Usar StreamBuilder para contar dirs prioritarias en tiempo real
+                              return StreamBuilder<QuerySnapshot>(
+                                stream: FirebaseFirestore.instance
+                                    .collection('direcciones_globales')
+                                    .where('tarjeta_id', isEqualTo: tarjetaId)
+                                    .where('prioridad_mes_anterior', isEqualTo: true)
+                                    .snapshots(),
+                                builder: (context, priorSnap) {
+                                  final cantDirsPrioridad = priorSnap.data?.docs.length ?? 0;
+                                  final esPrioridad = esPrioridadFlag || cantDirsPrioridad > 0;
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 color: esPrioridad ? Colors.orange.shade50 : Colors.blue.shade50,
@@ -297,10 +307,20 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                         children: [
                                           Text('Dir. vinculadas: $count'
                                               '${cantPrioridad > 0 ? " · $cantPrioridad sin predicar" : ""}'),
-                                          if (esPrioridad && cantPrioridad > 0)
-                                            Text(
-                                              '⚠️ Enviar primero — $cantPrioridad dir. pendientes del mes anterior',
-                                              style: const TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.w600),
+                                          // Mostrar prioridad si hay dirs pendientes (con o sin flag en tarjeta)
+                                          if (cantPrioridad > 0)
+                                            Container(
+                                              margin: const EdgeInsets.only(top: 3),
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.orange.shade100,
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: Colors.orange.shade300),
+                                              ),
+                                              child: Text(
+                                                '⚠️ $cantPrioridad dirs. pendientes del mes anterior',
+                                                style: TextStyle(fontSize: 11, color: Colors.orange.shade800, fontWeight: FontWeight.w600),
+                                              ),
                                             ),
                                           if (enviadoNombre.isNotEmpty)
                                             Text(
@@ -605,6 +625,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                   ],
                                 ),
                               );
+                                  }); // cierra StreamBuilder prioridad
                             },
                           );
                         },
