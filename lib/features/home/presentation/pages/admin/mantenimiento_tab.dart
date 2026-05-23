@@ -928,8 +928,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           '• Marcar direcciones no predicadas como prioridad\n'
           '• Devolver tarjetas incompletas al conductor\n'
           '• Resetear predicaciones del mes\n'
-          '• Limpiar tarjetas temporales\n\n'
-          '⚠️ Las direcciones NO se eliminan.',
+          '• Temporales: devolver dirs a su tarjeta/territorio de origen\n'
+          '• Limpiar notificaciones antiguas\n\n'
+          '⚠️ Las direcciones NO se eliminan permanentemente.',
         ),
         actions: [
           TextButton(
@@ -1038,50 +1039,31 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
             final completada = td['completada'] == true;
             final asignado = (td['asignado_a'] as String?) ?? '';
 
-            if (!completada && (asignado.isNotEmpty || td['prioridad_admin'] == true)) {
-              // Tarjeta incompleta → liberar PERO marcar con prioridad para admin
-              batch.update(tarjeta.reference, {
-                'mes_anterior': mesAnterior,
-                'asignado_a': null,
-                'asignado_en': null,
-                'mes_asignacion': null,
-                'completada': false,
-                'fecha_completada': null,
-                'enviado_a': null,
-                'enviado_nombre': null,
-                'enviado_en': null,
-                'enviado_tipo': null,
-                'publicador_email': null,
-                'publicador_nombre': null,
-                'conductor_email': null,
-                'estatus_envio': 'disponible',
-                'bloqueado': true,
-                'disponible_para_publicadores': false,
-                'prioridad_admin': true,        // ← bandera para admin
-                'mes_prioridad': mesAnterior,   // ← qué mes quedó pendiente
-              });
-            } else {
-              // Tarjeta completada o libre → resetear normal
-              batch.update(tarjeta.reference, {
-                'mes_anterior': mesAnterior,
-                'asignado_a': null,
-                'asignado_en': null,
-                'mes_asignacion': null,
-                'completada': false,
-                'fecha_completada': null,
-                'enviado_a': null,
-                'enviado_nombre': null,
-                'enviado_en': null,
-                'enviado_tipo': null,
-                'publicador_email': null,
-                'publicador_nombre': null,
-                'conductor_email': null,
-                'estatus_envio': 'disponible',
-                'bloqueado': true,
-                'disponible_para_publicadores': false,
-                'tiene_pendientes_mes_anterior': false,
-              });
-            }
+            // Tarjeta con prioridad: estaba asignada y no fue completada,
+            // o ya tenía flag prioridad_admin de meses anteriores
+            final esPrioridad = (!completada && asignado.isNotEmpty) ||
+                td['prioridad_admin'] == true;
+
+            batch.update(tarjeta.reference, {
+              'mes_anterior': mesAnterior,
+              'asignado_a': null,
+              'asignado_en': null,
+              'mes_asignacion': null,
+              'completada': false,
+              'fecha_completada': null,
+              'enviado_a': null,
+              'enviado_nombre': null,
+              'enviado_en': null,
+              'enviado_tipo': null,
+              'publicador_email': null,
+              'publicador_nombre': null,
+              'conductor_email': null,
+              'estatus_envio': 'disponible',
+              'bloqueado': true,
+              'disponible_para_publicadores': false,
+              'prioridad_admin': esPrioridad,
+              'mes_prioridad': esPrioridad ? mesAnterior : null,
+            });
           }
           await batch.commit();
           await Future.delayed(const Duration(milliseconds: 150));
@@ -1099,6 +1081,54 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           'disponible_para_publicadores': false,
         });
       }
+
+      // ── PASO 4: Tarjetas temporales → devolver dirs a origen ──────────────
+      final db = FirebaseFirestore.instance;
+      final temporalesSnap = await db
+          .collection('territorios')
+          .doc('temporales')
+          .collection('tarjetas')
+          .get();
+
+      for (final tarjetaTemp in temporalesSnap.docs) {
+        // Devolver cada dirección a su tarjeta/territorio de origen
+        final dirsTemp = await db
+            .collection('direcciones_globales')
+            .where('tarjeta_id', isEqualTo: tarjetaTemp.id)
+            .get();
+
+        if (dirsTemp.docs.isNotEmpty) {
+          for (int i = 0; i < dirsTemp.docs.length; i += 400) {
+            final chunk = dirsTemp.docs.skip(i).take(400).toList();
+            final batchDir = db.batch();
+            for (final dir in chunk) {
+              final dd = dir.data();
+              final tarjetaOrigen = (dd['tarjeta_id_origen'] as String?) ?? '';
+              final territorioOrigen = (dd['territorio_id_origen'] as String?) ?? '';
+              if (tarjetaOrigen.isNotEmpty && territorioOrigen.isNotEmpty) {
+                // Restaurar al origen — resetear estado predicación
+                batchDir.update(dir.reference, {
+                  'tarjeta_id': tarjetaOrigen,
+                  'territorio_id': territorioOrigen,
+                  'barrio': territorioOrigen,
+                  'es_temporal': false,
+                  'tarjeta_id_origen': FieldValue.delete(),
+                  'territorio_id_origen': FieldValue.delete(),
+                  'predicado': false,
+                  'estado_predicacion': 'pendiente',
+                  'asignado_a': null,
+                  'motivo_temporal': null,
+                });
+              }
+            }
+            await batchDir.commit();
+          }
+        }
+
+        // Eliminar la tarjeta temporal (ya no tiene direcciones)
+        await tarjetaTemp.reference.delete();
+      }
+      debugPrint('🧹 ${temporalesSnap.docs.length} tarjetas temporales procesadas');
 
       // Limpiar datos basura automáticamente
       final fi = FirebaseFirestore.instance;

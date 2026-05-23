@@ -101,7 +101,50 @@ class RestauracionMensual {
         });
       }
 
-      // PASO 4: Limpiar datos basura
+      // PASO 4: Tarjetas temporales → devolver dirs a origen
+      final tempTarjetasSnap = await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc('temporales')
+          .collection('tarjetas')
+          .get();
+
+      for (final tarjetaTemp in tempTarjetasSnap.docs) {
+        final dirsTemp = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('tarjeta_id', isEqualTo: tarjetaTemp.id)
+            .get();
+
+        if (dirsTemp.docs.isNotEmpty) {
+          int n2 = 0;
+          WriteBatch bDir = FirebaseFirestore.instance.batch();
+          for (final dir in dirsTemp.docs) {
+            final dd = dir.data();
+            final tarjetaOrigen = (dd['tarjeta_id_origen'] as String?) ?? '';
+            final territorioOrigen = (dd['territorio_id_origen'] as String?) ?? '';
+            if (tarjetaOrigen.isNotEmpty && territorioOrigen.isNotEmpty) {
+              bDir.update(dir.reference, {
+                'tarjeta_id': tarjetaOrigen,
+                'territorio_id': territorioOrigen,
+                'barrio': territorioOrigen,
+                'es_temporal': false,
+                'tarjeta_id_origen': FieldValue.delete(),
+                'territorio_id_origen': FieldValue.delete(),
+                'predicado': false,
+                'estado_predicacion': 'pendiente',
+                'asignado_a': null,
+                'motivo_temporal': null,
+                'prioridad_mes_anterior': !((dd['predicado'] as bool?) ?? false),
+              });
+              if (++n2 >= 400) { await bDir.commit(); bDir = FirebaseFirestore.instance.batch(); n2 = 0; }
+            }
+          }
+          if (n2 > 0) await bDir.commit();
+        }
+        await tarjetaTemp.reference.delete();
+      }
+      debugPrint('🧹 ${tempTarjetasSnap.docs.length} tarjetas temporales procesadas al nuevo mes');
+
+      // PASO 5: Limpiar datos basura
       final hace30dias = Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 30)));
 
       // Notificaciones con más de 30 días
@@ -142,7 +185,7 @@ class RestauracionMensual {
         debugPrint('🗑️ ${solRefs.length} solicitudes localizador eliminadas');
       }
 
-      // PASO 5: Registrar ejecución — usa nuevoMesStr para no volver a correr este mes
+      // PASO 6: Registrar ejecución — usa nuevoMesStr para no volver a correr este mes
       await FirebaseFirestore.instance.collection('sistema').doc('restauracion_mensual').set({
         'ultimo_mes': nuevoMesStr,
         'ejecutado_en': FieldValue.serverTimestamp(),
