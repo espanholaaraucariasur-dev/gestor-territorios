@@ -3182,23 +3182,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                     }
 
                     return ListView.builder(
-                      itemCount: snapshot.data!.docs.length,
+                      // Pre-filtrar lista: excluir especiales y solo_conductores
+                      // Los territorios con conductor SÍ se muestran (sus tarjetas van en gris)
+                      itemCount: (() {
+                        const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
+                        return snapshot.data!.docs.where((doc) {
+                          if (especiales.contains(doc.id)) return false;
+                          final d = doc.data() as Map<String, dynamic>;
+                          return !((d['solo_conductores'] as bool?) ?? false);
+                        }).length;
+                      })(),
                       itemBuilder: (context, i) {
-                        final terDoc = snapshot.data!.docs[i];
+                        // Re-filtrar para obtener el doc en posición i
+                        const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
+                        final docs = snapshot.data!.docs.where((doc) {
+                          if (especiales.contains(doc.id)) return false;
+                          final d = doc.data() as Map<String, dynamic>;
+                          return !((d['solo_conductores'] as bool?) ?? false);
+                        }).toList();
+                        final terDoc = docs[i];
                         final terData = terDoc.data() as Map<String, dynamic>;
                         final terNombre = terData['nombre'] ?? terDoc.id;
-
-                        // Ocultar documentos especiales (no son territorios)
-                        const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
-                        if (especiales.contains(terDoc.id)) return const SizedBox.shrink();
-
-                        // Ocultar territorios solo para conductores
-                        final soloConductores = (terData['solo_conductores'] as bool?) ?? false;
-                        if (soloConductores) return const SizedBox.shrink();
-
-                        // Ocultar territorios que tienen conductor asignado
-                        final conductorEmail = (terData['conductor_email'] as String?) ?? '';
-                        if (conductorEmail.isNotEmpty) return const SizedBox.shrink();
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8),
@@ -3216,7 +3220,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                             subtitle: const Text('Toca para ver tarjetas'),
                             children: [
                               StreamBuilder<QuerySnapshot>(
-                                // ✅ Filtra SOLO por bloqueado == false en tarjetas
+                                // Carga todas las tarjetas no bloqueadas
                                 stream: FirebaseFirestore.instance
                                     .collection('territorios')
                                     .doc(terDoc.id)
@@ -3234,15 +3238,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                     );
                                   }
 
-                                  // Filtra tarjetas disponibles para publicadores
+                                  // Excluir solo_conductores; el resto se muestra
+                                  // (con conductor → gris, disponibles → Tomar)
                                   final tarjetas =
                                       (tarjetasSnap.data?.docs ?? []).where((doc) {
                                     final d = doc.data() as Map<String, dynamic>;
-                                    final asignado = d['asignado_a']?.toString() ?? '';
-                                    final conductorEmail = d['conductor_email']?.toString() ?? '';
-                                    final soloConductores = (d['solo_conductores'] as bool?) ?? false;
-                                    // Excluir: ya asignada, con conductor, o solo conductores
-                                    return asignado.isEmpty && conductorEmail.isEmpty && !soloConductores;
+                                    return !((d['solo_conductores'] as bool?) ?? false);
                                   }).toList();
 
                                   if (tarjetas.isEmpty) {
@@ -3259,86 +3260,116 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                     children: tarjetas.map((tarjetaDoc) {
                                       final data = tarjetaDoc.data()
                                           as Map<String, dynamic>;
-                                      final tarjetaData = data;
-                                      final tarjetaNombre =
-                                          data['nombre'] ?? tarjetaDoc.id;
+                                      final tarjetaNombre = data['nombre'] ?? tarjetaDoc.id;
 
-                                      // ✅ NUEVO: StreamBuilder para contar direcciones reales en tiempo real
+                                      // Detectar si está asignada a conductor
+                                      final conductorEmail = data['conductor_email']?.toString() ?? '';
+                                      final enviadoTipo = data['enviado_tipo']?.toString() ?? '';
+                                      final asignadoA = data['asignado_a']?.toString() ?? '';
+                                      final estaConConductor = conductorEmail.isNotEmpty ||
+                                          enviadoTipo == 'conductor' ||
+                                          (asignadoA.isNotEmpty && enviadoTipo != 'publicador' && enviadoTipo.isNotEmpty);
+                                      final enviadoNombre = data['enviado_nombre']?.toString() ?? '';
+
                                       return StreamBuilder<QuerySnapshot>(
                                         stream: FirebaseFirestore.instance
                                             .collection('direcciones_globales')
-                                            .where('tarjeta_id',
-                                                isEqualTo: tarjetaDoc.id)
+                                            .where('tarjeta_id', isEqualTo: tarjetaDoc.id)
                                             .snapshots(),
                                         builder: (context, dirSnapshot) {
-                                          final cantDirReal =
-                                              dirSnapshot.data?.docs.length ??
-                                                  0;
+                                          final cantDirReal = dirSnapshot.data?.docs.length ?? 0;
 
-                                          return ListTile(
-                                            leading: Icon(
-                                              Icons.credit_card,
-                                              color: tarjetaData['completada'] == true
-                                                  ? Colors.grey
-                                                  : Colors.blue,
-                                            ),
-                                            title: Text(
-                                              tarjetaNombre,
-                                              style: TextStyle(
-                                                color: tarjetaData['completada'] == true
-                                                    ? Colors.grey
-                                                    : Colors.black,
+                                          // 1. Con conductor → gris, no se puede tomar
+                                          if (estaConConductor) {
+                                            return Container(
+                                              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey.shade100,
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: Colors.grey.shade300),
                                               ),
-                                            ),
-                                            subtitle: Text(
-                                              tarjetaData['completada'] == true
-                                                  ? '✅ Completada este mes'
-                                                  : '$cantDirReal direcciones',
-                                            ),
-                                            trailing: tarjetaData['completada'] == true
-                                                ? OutlinedButton(
-                                                    onPressed: () async {
-                                                      final confirmar = await showDialog<bool>(
-                                                        context: context,
-                                                        builder: (c) => AlertDialog(
-                                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                                          title: const Row(children: [
-                                                            Icon(Icons.refresh, color: Color(0xFF1B5E20)),
-                                                            SizedBox(width: 8),
-                                                            Text('Reactivar tarjeta'),
-                                                          ]),
-                                                          content: Text('La tarjeta "$tarjetaNombre" ya fue completada este mes.\n\n¿Deseas reactivarla para que pueda ser tomada nuevamente?'),
-                                                          actions: [
-                                                            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-                                                            ElevatedButton(
-                                                              onPressed: () => Navigator.pop(c, true),
-                                                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white),
-                                                              child: const Text('Reactivar'),
-                                                            ),
-                                                          ],
+                                              child: ListTile(
+                                                dense: true,
+                                                leading: const Icon(Icons.credit_card, color: Colors.grey),
+                                                title: Text(
+                                                  tarjetaNombre,
+                                                  style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
+                                                ),
+                                                subtitle: Text(
+                                                  enviadoNombre.isNotEmpty
+                                                      ? '🚗 Con conductor: $enviadoNombre'
+                                                      : '🚗 Asignada a conductor',
+                                                  style: const TextStyle(color: Colors.grey, fontSize: 11),
+                                                ),
+                                                trailing: Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.grey.shade300,
+                                                    borderRadius: BorderRadius.circular(8),
+                                                  ),
+                                                  child: const Text('No disp.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                                                ),
+                                              ),
+                                            );
+                                          }
+
+                                          // 2. Completada → botón Reactivar
+                                          if (data['completada'] == true) {
+                                            return ListTile(
+                                              leading: const Icon(Icons.credit_card, color: Colors.grey),
+                                              title: Text(tarjetaNombre, style: const TextStyle(color: Colors.grey)),
+                                              subtitle: const Text('✅ Completada este mes'),
+                                              trailing: OutlinedButton(
+                                                onPressed: () async {
+                                                  final confirmar = await showDialog<bool>(
+                                                    context: context,
+                                                    builder: (c) => AlertDialog(
+                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                                      title: const Row(children: [
+                                                        Icon(Icons.refresh, color: Color(0xFF1B5E20)),
+                                                        SizedBox(width: 8),
+                                                        Text('Reactivar tarjeta'),
+                                                      ]),
+                                                      content: Text('La tarjeta "$tarjetaNombre" ya fue completada este mes.\n\n¿Deseas reactivarla?'),
+                                                      actions: [
+                                                        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+                                                        ElevatedButton(
+                                                          onPressed: () => Navigator.pop(c, true),
+                                                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20), foregroundColor: Colors.white),
+                                                          child: const Text('Reactivar'),
                                                         ),
-                                                      );
-                                                      if (confirmar == true) {
-                                                        await FirebaseFirestore.instance
-                                                            .collection('territorios')
-                                                            .doc(terDoc.id)
-                                                            .collection('tarjetas')
-                                                            .doc(tarjetaDoc.id)
-                                                            .update({
-                                                          'completada': false,
-                                                          'fecha_completada': null,
-                                                          'asignado_a': null,
-                                                          'publicador_email': null,
-                                                          'bloqueado': false,
-                                                          'disponible_para_publicadores': true,
-                                                        });
-                                                        if (context.mounted) Navigator.pop(context);
-                                                      }
-                                                    },
-                                                    style: OutlinedButton.styleFrom(foregroundColor: Colors.orange, side: const BorderSide(color: Colors.orange)),
-                                                    child: const Text('Reactivar', style: TextStyle(fontSize: 12)),
-                                                  )
-                                                : ElevatedButton(
+                                                      ],
+                                                    ),
+                                                  );
+                                                  if (confirmar == true) {
+                                                    await FirebaseFirestore.instance
+                                                        .collection('territorios')
+                                                        .doc(terDoc.id)
+                                                        .collection('tarjetas')
+                                                        .doc(tarjetaDoc.id)
+                                                        .update({
+                                                      'completada': false,
+                                                      'fecha_completada': null,
+                                                      'asignado_a': null,
+                                                      'publicador_email': null,
+                                                      'bloqueado': false,
+                                                      'disponible_para_publicadores': true,
+                                                    });
+                                                    if (context.mounted) Navigator.pop(context);
+                                                  }
+                                                },
+                                                style: OutlinedButton.styleFrom(foregroundColor: Colors.orange, side: const BorderSide(color: Colors.orange)),
+                                                child: const Text('Reactivar', style: TextStyle(fontSize: 12)),
+                                              ),
+                                            );
+                                          }
+
+                                          // 3. Disponible → botón Tomar
+                                          return ListTile(
+                                            leading: const Icon(Icons.credit_card, color: Colors.blue),
+                                            title: Text(tarjetaNombre),
+                                            subtitle: Text('$cantDirReal direcciones'),
+                                            trailing: ElevatedButton(
                                               onPressed: cantDirReal > 0
                                                   ? () async {
                                                       Navigator.pop(context);
