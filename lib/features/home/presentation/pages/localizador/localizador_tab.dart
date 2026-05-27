@@ -156,20 +156,27 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           final calleLower = calle.toLowerCase();
           final calleNormFields = (d['calle_normalizada'] as String?) ?? calleNorm;
 
-          // Match si CUALQUIER palabra del query aparece en la calle
-          // "rua C" → busca "rua" Y "c" en la calle
-          final queryWords = norm.split(' ').where((w) => w.isNotEmpty).toList();
-          final queryWordsOrig = queryLower.split(' ').where((w) => w.isNotEmpty).toList();
-          
+          // Match con 4 estrategias para máxima cobertura:
+          final tokens = norm.split(' ').where((w) => w.isNotEmpty).toList();
           bool match = false;
-          if (queryWords.length == 1) {
-            // Una sola palabra: buscar como prefijo o contiene
-            final w = queryWords[0];
-            match = calleNorm.contains(w) || calleLower.contains(queryWordsOrig[0]);
-          } else {
-            // Múltiples palabras: TODAS deben aparecer en la calle
-            match = queryWords.every((w) => calleNorm.contains(w)) ||
-                    queryWordsOrig.every((w) => calleLower.contains(w));
+
+          // 1: string completo normalizado contenido en la calle
+          if (calleNorm.contains(norm)) {
+            match = true;
+          }
+          // 2: cada token por separado (permite "rua capi" → matchea "R. Capivara")
+          if (!match && tokens.isNotEmpty) {
+            match = tokens.every((t) => calleNorm.contains(t));
+          }
+          // 3: texto original lowercase
+          if (!match) {
+            match = calleLower.contains(queryLower);
+          }
+          // 4: "rua" = "r." — busca "rua tibagi" en "R. Tibagi"
+          if (!match && tokens.isNotEmpty && (tokens[0] == 'rua' || tokens[0] == 'r')) {
+            final sinPrimero = tokens.skip(1).join(' ');
+            final esAbrev = calleNorm.startsWith('r ') || calleNorm.startsWith('r.');
+            match = esAbrev && (sinPrimero.isEmpty || calleNorm.contains(sinPrimero));
           }
 
           if (match && !callesVistas.contains(calle)) {
@@ -180,26 +187,37 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         }
       }
 
-      // ── Estrategia 2 (FIRESTORE): calle_normalizada range query ──────────
+        // ── Estrategia 2 (FIRESTORE): calle_normalizada por último token ────────
       if (sugs.length < 5 && norm.length >= 2) {
-        final snap = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .where('calle_normalizada', isGreaterThanOrEqualTo: norm)
-            .where('calle_normalizada', isLessThanOrEqualTo: '$norm')
-            .limit(15)
-            .get();
-
-        for (final doc in snap.docs) {
-          final d = doc.data() as Map<String, dynamic>;
-          final calle = (d['calle'] as String?) ?? '';
-          if (calle.isEmpty || callesVistas.contains(calle)) continue;
-          callesVistas.add(calle);
-          sugs.add(d);
+        // Buscar por el último token (el que se está escribiendo)
+        // Y también por el texto completo normalizado
+        final lastToken = norm.split(' ').where((t) => t.isNotEmpty).last;
+        final queries = <String>{norm, lastToken};
+        for (final q in queries) {
           if (sugs.length >= 6) break;
+          if (q.length < 2) continue;
+          final snap = await FirebaseFirestore.instance
+              .collection('direcciones_globales')
+              .where('calle_normalizada', isGreaterThanOrEqualTo: q)
+              .where('calle_normalizada', isLessThanOrEqualTo: q + '')
+              .limit(15)
+              .get();
+          for (final doc in snap.docs) {
+            final d = doc.data() as Map<String, dynamic>;
+            final calle = (d['calle'] as String?) ?? '';
+            if (calle.isEmpty || callesVistas.contains(calle)) continue;
+            // Verificar que los tokens anteriores también están en la calle
+            final calleN = _normalizarBusqueda(calle);
+            final prevTokens = norm.split(' ').where((t) => t.isNotEmpty && t != lastToken).toList();
+            if (prevTokens.isNotEmpty && !prevTokens.every((t) => calleN.contains(t))) continue;
+            callesVistas.add(calle);
+            sugs.add(d);
+            if (sugs.length >= 6) break;
+          }
         }
       }
 
-      // ── Estrategia 3 (FIRESTORE): palabras_clave arrayContainsAny ────────
+    // ── Estrategia 3 (FIRESTORE): palabras_clave arrayContainsAny ────────
       if (sugs.length < 5 && norm.length >= 2) {
         final tokens = norm.split(' ').where((t) => t.length >= 2).toList();
         if (tokens.isNotEmpty) {
