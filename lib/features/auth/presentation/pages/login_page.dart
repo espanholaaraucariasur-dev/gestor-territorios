@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -133,6 +134,11 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   Future<void> _loginConEmail(String email, {String? password}) async {
     setState(() => _isLoading = true);
     try {
+      // Autenticar con Firebase Auth primero para satisfacer reglas de seguridad
+      if (FirebaseAuth.instance.currentUser == null) {
+        await FirebaseAuth.instance.signInAnonymously();
+      }
+
       final snap = await _db
           .collection('usuarios')
           .where('email', isEqualTo: email)
