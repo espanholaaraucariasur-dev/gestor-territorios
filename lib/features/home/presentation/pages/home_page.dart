@@ -3150,7 +3150,13 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       return na.compareTo(nb);
     });
 
-    debugPrint('📋 Territorios para publicador: ${territorios.length} (de ${snap.docs.length} docs)');
+    for (final doc in snap.docs) {
+      final d = doc.data() as Map<String, dynamic>;
+      final esEsp = especiales.contains(doc.id);
+      final soloCond = (d['solo_conductores'] as bool?) ?? false;
+      debugPrint('  [TERR] id:${doc.id} nombre:${d['nombre']} especial:$esEsp solo_cond:$soloCond PASA:${!esEsp && !soloCond}');
+    }
+    debugPrint('TOTAL: ${territorios.length} de ${snap.docs.length} docs pasan el filtro');
 
     if (!mounted) return;
 
