@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -182,8 +183,9 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
           ),
         );
       }
-    } catch (_) {
-      _snack('Error de conexión.', Colors.red);
+    } catch (e) {
+      debugPrint('LOGIN ERROR: $e');
+      _snack('Error: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
