@@ -582,57 +582,39 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                       if (!campanaActiva || nombreCampana.isEmpty) return const SizedBox.shrink();
                                                       final keyActiva = 'campana_invitacion_$nombreCampana';
                                                       final entregada = d[keyActiva] == true;
-                                                      // Badge tappable — toca para marcar/desmarcar invitación
+                                                      // Badge solo visual — el estado lo actualiza el publicador al guardar
                                                       return Padding(
                                                         padding: const EdgeInsets.only(left: 16, bottom: 6, right: 16),
-                                                        child: GestureDetector(
-                                                          onTap: () async {
-                                                            await FirebaseFirestore.instance
-                                                                .collection('direcciones_globales')
-                                                                .doc(dirDoc.id)
-                                                                .update({keyActiva: !entregada});
-                                                          },
-                                                          child: Container(
-                                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                                            decoration: BoxDecoration(
-                                                              color: entregada
-                                                                  ? Colors.green.shade50
-                                                                  : Colors.orange.shade50,
-                                                              borderRadius: BorderRadius.circular(8),
-                                                              border: Border.all(
-                                                                color: entregada
-                                                                    ? Colors.green.shade400
-                                                                    : Colors.orange.shade400,
-                                                                width: 1.5,
+                                                        child: Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                                          decoration: BoxDecoration(
+                                                            color: entregada ? Colors.green.shade50 : Colors.orange.shade50,
+                                                            borderRadius: BorderRadius.circular(8),
+                                                            border: Border.all(
+                                                              color: entregada ? Colors.green.shade400 : Colors.orange.shade400,
+                                                              width: 1.5,
+                                                            ),
+                                                          ),
+                                                          child: Row(
+                                                            mainAxisSize: MainAxisSize.min,
+                                                            children: [
+                                                              Icon(
+                                                                entregada ? Icons.check_circle : Icons.campaign,
+                                                                size: 14,
+                                                                color: entregada ? Colors.green : Colors.orange,
                                                               ),
-                                                            ),
-                                                            child: Row(
-                                                              mainAxisSize: MainAxisSize.min,
-                                                              children: [
-                                                                Icon(
-                                                                  entregada ? Icons.check_circle : Icons.campaign,
-                                                                  size: 14,
-                                                                  color: entregada ? Colors.green : Colors.orange,
+                                                              const SizedBox(width: 5),
+                                                              Text(
+                                                                entregada
+                                                                    ? '✅ Invitación entregada'
+                                                                    : '📢 Pendiente invitación',
+                                                                style: TextStyle(
+                                                                  fontSize: 11,
+                                                                  fontWeight: FontWeight.w600,
+                                                                  color: entregada ? Colors.green.shade800 : Colors.orange.shade800,
                                                                 ),
-                                                                const SizedBox(width: 5),
-                                                                Text(
-                                                                  entregada
-                                                                      ? '✅ Invitación entregada'
-                                                                      : '📢 Pendiente invitación',
-                                                                  style: TextStyle(
-                                                                    fontSize: 11,
-                                                                    fontWeight: FontWeight.w600,
-                                                                    color: entregada ? Colors.green.shade800 : Colors.orange.shade800,
-                                                                  ),
-                                                                ),
-                                                                const SizedBox(width: 5),
-                                                                Icon(
-                                                                  Icons.touch_app,
-                                                                  size: 12,
-                                                                  color: entregada ? Colors.green.shade400 : Colors.orange.shade400,
-                                                                ),
-                                                              ],
-                                                            ),
+                                                              ),
+                                                            ],
                                                           ),
                                                         ),
                                                       );
