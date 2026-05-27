@@ -126,38 +126,68 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   // ─────────────────────────────────────────────────────────
 
   // ─────────────────────────────────────────────────────────
-  // AUTOCOMPLETADO — funciona desde 1 caracter
-  // Prioriza dirs cercanas al GPS si están precargadas
+  // AUTOCOMPLETADO — busca en dirs locales primero (sin lat/lng)
+  // luego en Firestore con múltiples estrategias
   // ─────────────────────────────────────────────────────────
   Future<void> _actualizarSugerencias(String texto) async {
     final query = texto.trim();
-
     if (query.isEmpty) {
       if (mounted && _sugerencias.isNotEmpty) setState(() => _sugerencias = []);
       return;
     }
 
     try {
-      final norm = _normalizarBusqueda(query);
+      // Normalizar la búsqueda: sin tildes, minúsculas, permite espacios
+      final norm = _normalizarBusqueda(query); // "rua ivai 68"
+      final queryLower = query.toLowerCase();  // "rua ivaí 68"
+
       final callesVistas = <String>{};
       final sugs = <Map<String, dynamic>>[];
 
-      // ── Estrategia 1: buscar en dirs locales precargadas (GPS) ──────────
+      // ── Estrategia 1 (LOCAL): buscar en dirs precargadas ─────────────────
+      // Funciona desde 1 letra, sin llamadas a Firestore
       if (_dirsLocales.isNotEmpty) {
         for (final d in _dirsLocales) {
           final calle = (d['calle'] as String?) ?? '';
+          if (calle.isEmpty) continue;
+
+          // Comparar con versión normalizada Y versión original
           final calleNorm = _normalizarBusqueda(calle);
-          if (calleNorm.contains(norm) || calle.toLowerCase().contains(query.toLowerCase())) {
-            if (calle.isNotEmpty && !callesVistas.contains(calle)) {
-              callesVistas.add(calle);
-              sugs.add(d);
-              if (sugs.length >= 5) break;
-            }
+          final calleLower = calle.toLowerCase();
+          final calleNormFields = (d['calle_normalizada'] as String?) ?? calleNorm;
+
+          final match = calleNorm.contains(norm) ||
+              calleLower.contains(queryLower) ||
+              calleNormFields.contains(norm);
+
+          if (match && !callesVistas.contains(calle)) {
+            callesVistas.add(calle);
+            sugs.add(d);
+            if (sugs.length >= 6) break;
           }
         }
       }
 
-      // ── Estrategia 2: palabras_clave (si hay tokens de >= 2 chars) ──────
+      // ── Estrategia 2 (FIRESTORE): calle_normalizada range query ──────────
+      if (sugs.length < 5 && norm.length >= 2) {
+        final snap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('calle_normalizada', isGreaterThanOrEqualTo: norm)
+            .where('calle_normalizada', isLessThanOrEqualTo: '$norm')
+            .limit(15)
+            .get();
+
+        for (final doc in snap.docs) {
+          final d = doc.data() as Map<String, dynamic>;
+          final calle = (d['calle'] as String?) ?? '';
+          if (calle.isEmpty || callesVistas.contains(calle)) continue;
+          callesVistas.add(calle);
+          sugs.add(d);
+          if (sugs.length >= 6) break;
+        }
+      }
+
+      // ── Estrategia 3 (FIRESTORE): palabras_clave arrayContainsAny ────────
       if (sugs.length < 5 && norm.length >= 2) {
         final tokens = norm.split(' ').where((t) => t.length >= 2).toList();
         if (tokens.isNotEmpty) {
@@ -167,20 +197,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
               .limit(15)
               .get();
 
-          // Si hay GPS, ordenar por distancia
-          final docs = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
-          if (_gpsCargado && _gpsLat != null && _gpsLng != null) {
-            docs.sort((a, b) {
-              final aLat = (a['lat'] as num?)?.toDouble() ?? 0;
-              final aLng = (a['lng'] as num?)?.toDouble() ?? 0;
-              final bLat = (b['lat'] as num?)?.toDouble() ?? 0;
-              final bLng = (b['lng'] as num?)?.toDouble() ?? 0;
-              return _distanciaMetros(_gpsLat!, _gpsLng!, aLat, aLng)
-                  .compareTo(_distanciaMetros(_gpsLat!, _gpsLng!, bLat, bLng));
-            });
-          }
-
-          for (final d in docs) {
+          for (final doc in snap.docs) {
+            final d = doc.data() as Map<String, dynamic>;
             final calle = (d['calle'] as String?) ?? '';
             if (calle.isEmpty || callesVistas.contains(calle)) continue;
             callesVistas.add(calle);
@@ -190,31 +208,14 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         }
       }
 
-      // ── Estrategia 3: range query por calle_normalizada ─────────────────
-      if (sugs.length < 5 && norm.length >= 2) {
-        final snap = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .where('calle_normalizada', isGreaterThanOrEqualTo: norm)
-            .where('calle_normalizada', isLessThanOrEqualTo: '$norm\uf8ff')
-            .limit(10)
-            .get();
-
-        for (final doc in snap.docs) {
-          final d = doc.data() as Map<String, dynamic>;
-          final calle = (d['calle'] as String?) ?? '';
-          if (calle.isEmpty || callesVistas.contains(calle)) continue;
-          callesVistas.add(calle);
-          sugs.add(d);
-          if (sugs.length >= 6) break;
-        }
-      }
-
-      // ── Estrategia 4: range query por calle (texto original) ────────────
+      // ── Estrategia 4 (FIRESTORE): calle uppercase range query ────────────
       if (sugs.length < 5 && query.length >= 2) {
+        // Intenta con primera letra en mayúscula (ej: "Rua")
+        final queryCapitalized = query[0].toUpperCase() + query.substring(1);
         final snap = await FirebaseFirestore.instance
             .collection('direcciones_globales')
-            .where('calle', isGreaterThanOrEqualTo: query)
-            .where('calle', isLessThanOrEqualTo: '$query\uf8ff')
+            .where('calle', isGreaterThanOrEqualTo: queryCapitalized)
+            .where('calle', isLessThanOrEqualTo: '$queryCapitalized')
             .limit(10)
             .get();
 
@@ -228,7 +229,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         }
       }
 
-      debugPrint('🔍 Sugerencias para "$query": ${sugs.length} (${_dirsLocales.length} locales disponibles)');
+      debugPrint('🔍 Sugerencias para "$query" (norm:"$norm"): ${sugs.length} (${_dirsLocales.length} locales)');
       if (mounted) setState(() => _sugerencias = sugs);
     } catch (e) {
       debugPrint('Autocompletado error: $e');
@@ -567,44 +568,49 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     _precargarDirsCercanas();
   }
 
-  /// Pre-carga GPS + dirs cercanas al abrir la pantalla
+  /// Pre-carga GPS + TODAS las dirs (para busqueda local sin depender de lat/lng)
   Future<void> _precargarDirsCercanas() async {
     try {
-      final perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        await Geolocator.requestPermission();
-      }
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
-      );
-      if (!mounted) return;
-      _gpsLat = pos.latitude;
-      _gpsLng = pos.longitude;
-      _gpsCargado = true;
+      // Intentar GPS (no bloquea si falla)
+      try {
+        final perm = await Geolocator.checkPermission();
+        if (perm == LocationPermission.denied) await Geolocator.requestPermission();
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+        );
+        if (mounted) { _gpsLat = pos.latitude; _gpsLng = pos.longitude; _gpsCargado = true; }
+      } catch (_) { _gpsCargado = false; }
 
-      // Cargar hasta 200 dirs en radio ~1.5km alrededor del usuario
+      // Cargar TODAS las dirs (o las primeras 500) para busqueda local
+      // Esto funciona aunque las dirs no tengan lat/lng
       final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
-          .where('lat', isGreaterThan: _gpsLat! - 0.015)
-          .where('lat', isLessThan: _gpsLat! + 0.015)
-          .limit(200)
+          .orderBy('calle')
+          .limit(500)
           .get();
 
       if (!mounted) return;
       setState(() {
         _dirsLocales = snap.docs
             .map((d) => d.data() as Map<String, dynamic>)
-            .where((d) {
-              final dLng = (d['lng'] as num?)?.toDouble();
-              if (dLng == null) return true;
-              return (dLng - _gpsLng!).abs() < 0.015;
-            })
             .toList();
       });
-      debugPrint('📍 ${_dirsLocales.length} dirs locales precargadas');
+      debugPrint('📍 ${_dirsLocales.length} dirs precargadas (GPS: $_gpsCargado)');
     } catch (e) {
-      debugPrint('GPS preload: $e');
-      _gpsCargado = false;
+      debugPrint('Preload error: $e');
+      // Fallback: intentar sin orderBy
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .limit(500)
+            .get();
+        if (mounted) {
+          setState(() {
+            _dirsLocales = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+          });
+          debugPrint('📍 ${_dirsLocales.length} dirs precargadas (fallback)');
+        }
+      } catch (_) {}
     }
   }
 

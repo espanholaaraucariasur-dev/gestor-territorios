@@ -3131,7 +3131,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   Future<void> _mostrarDialogoSolicitarTerritorioPublicador() async {
     const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
 
-    // Cargar territorios ANTES de mostrar el diálogo (evita problemas de ListView)
+    // Carga los territorios UNA SOLA VEZ antes de abrir el diálogo
     final snap = await FirebaseFirestore.instance
         .collection('territorios')
         .orderBy('nombre')
@@ -3139,24 +3139,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
     final territorios = snap.docs.where((doc) {
       if (especiales.contains(doc.id)) return false;
-      final d = doc.data();
+      final d = doc.data() as Map<String, dynamic>;
       return !((d['solo_conductores'] as bool?) ?? false);
     }).toList();
+
+    debugPrint('📋 Territorios para publicador: ${territorios.length}');
 
     if (!mounted) return;
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (ctx) {
         return Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
           child: SizedBox(
             width: double.maxFinite,
-            height: MediaQuery.of(context).size.height * 0.85,
+            height: MediaQuery.of(ctx).size.height * 0.85,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ── Header ──────────────────────────────────────────────
                 Padding(
                   padding: const EdgeInsets.fromLTRB(24, 20, 8, 0),
                   child: Row(
@@ -3166,18 +3169,19 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       IconButton(
                         icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(24, 4, 24, 12),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
                   child: Text(
-                    'Selecciona un territorio para ver sus tarjetas disponibles',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                    '${territorios.length} territorios disponibles',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
+                // ── Lista ────────────────────────────────────────────────
                 Expanded(
                   child: territorios.isEmpty
                       ? const Center(
@@ -3186,16 +3190,15 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       : ListView.builder(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                           itemCount: territorios.length,
-                          itemBuilder: (context, index) {
+                          itemBuilder: (ctx2, index) {
                             final terDoc = territorios[index];
                             final terData = terDoc.data() as Map<String, dynamic>;
-                            final terNombre = terData['nombre'] ?? terDoc.id;
+                            final terNombre = (terData['nombre'] as String?) ?? terDoc.id;
 
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),
                               child: ExpansionTile(
-                                leading: const Icon(Icons.folder,
-                                    color: Color(0xFF1B5E20)),
+                                leading: const Icon(Icons.folder, color: Color(0xFF1B5E20)),
                                 title: Text(terNombre,
                                     style: const TextStyle(fontWeight: FontWeight.bold)),
                                 subtitle: const Text('Toca para ver tarjetas'),
@@ -3464,7 +3467,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       },
     );
   }
-
   void _editarDireccion(QueryDocumentSnapshot dirDoc) {
     final data = dirDoc.data() as Map<String, dynamic>;
     final TextEditingController calleCtrl = TextEditingController(
