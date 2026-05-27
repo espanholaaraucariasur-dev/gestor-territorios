@@ -569,22 +569,28 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                                 .shade700)),
                                               ),
                                                 ),
-                                                // Badge campaña — para TODAS las dirs cuando hay campaña activa
-                                                StreamBuilder<DocumentSnapshot>(
+                                                // Badge campaña — lee de la misma colección que usa el publicador
+                                                StreamBuilder<QuerySnapshot>(
                                                     stream: FirebaseFirestore.instance
-                                                        .collection('configuraciones')
-                                                        .doc('comunicacion')
+                                                        .collection('configuracion')
                                                         .snapshots(),
                                                     builder: (context, cfgSnap) {
-                                                      final cfg = (cfgSnap.data?.data() as Map<String, dynamic>?) ?? {};
-                                                      final campanaActiva = cfg['campana_especial_activa'] == true;
-                                                      final nombreCampana = cfg['nombre_campana_especial'] as String? ?? '';
-                                                      if (!campanaActiva || nombreCampana.isEmpty) return const SizedBox.shrink();
-                                                      final keyActiva = 'campana_invitacion_$nombreCampana';
-                                                      final entregada = d[keyActiva] == true;
-                                                      // Badge solo visual — el estado lo actualiza el publicador al guardar
+                                                      // Buscar campañas activas (misma lógica que publicador)
+                                                      final campanas = (cfgSnap.data?.docs ?? []).where((doc) {
+                                                        final data = (doc.data() as Map<String, dynamic>?) ?? {};
+                                                        return (data['activa'] as bool?) == true;
+                                                      }).toList();
+                                                      if (campanas.isEmpty) return const SizedBox.shrink();
+                                                      // Mostrar badge para cada campaña activa
+                                                      final badges = campanas.map((campDoc) {
+                                                        final campData = (campDoc.data() as Map<String, dynamic>?) ?? {};
+                                                        final nombreCampana = (campData['nombre'] as String?) ?? '';
+                                                        if (nombreCampana.isEmpty) return const SizedBox.shrink();
+                                                        final keyActiva = 'campana_invitacion_$nombreCampana';
+                                                        final entregada = d[keyActiva] == true;
+                                                      // Badge solo visual — estado actualizado por el publicador al guardar
                                                       return Padding(
-                                                        padding: const EdgeInsets.only(left: 16, bottom: 6, right: 16),
+                                                        padding: const EdgeInsets.only(left: 16, bottom: 4, right: 16),
                                                         child: Container(
                                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                                           decoration: BoxDecoration(
@@ -606,8 +612,8 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                               const SizedBox(width: 5),
                                                               Text(
                                                                 entregada
-                                                                    ? '✅ Invitación entregada'
-                                                                    : '📢 Pendiente invitación',
+                                                                    ? '✅ $nombreCampana — entregada'
+                                                                    : '📢 $nombreCampana — pendiente',
                                                                 style: TextStyle(
                                                                   fontSize: 11,
                                                                   fontWeight: FontWeight.w600,
@@ -617,6 +623,11 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                             ],
                                                           ),
                                                         ),
+                                                      );
+                                                      }).toList();
+                                                      return Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: badges,
                                                       );
                                                     },
                                                   ),
