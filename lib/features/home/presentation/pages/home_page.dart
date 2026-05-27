@@ -3129,96 +3129,84 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   }
 
   Future<void> _mostrarDialogoSolicitarTerritorioPublicador() async {
-    // IDs que NO son territorios reales
-    const _especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
+    const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
+
+    // Cargar territorios ANTES de mostrar el diálogo (evita problemas de ListView)
+    final snap = await FirebaseFirestore.instance
+        .collection('territorios')
+        .orderBy('nombre')
+        .get();
+
+    final territorios = snap.docs.where((doc) {
+      if (especiales.contains(doc.id)) return false;
+      final d = doc.data();
+      return !((d['solo_conductores'] as bool?) ?? false);
+    }).toList();
+
+    if (!mounted) return;
 
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          width: double.maxFinite,
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.85,
-          ),
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Solicitar tarjeta',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          child: SizedBox(
+            width: double.maxFinite,
+            height: MediaQuery.of(context).size.height * 0.85,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 8, 0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Solicitar tarjeta',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(24, 4, 24, 12),
+                  child: Text(
+                    'Selecciona un territorio para ver sus tarjetas disponibles',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
-                ],
-              ),
-              const Text(
-                'Selecciona un territorio para ver sus tarjetas disponibles',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('territorios')
-                      .orderBy('nombre')
-                      .snapshots(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                      return const Center(
-                        child: Text('No hay territorios.',
-                            style: TextStyle(color: Colors.grey)),
-                      );
-                    }
+                ),
+                Expanded(
+                  child: territorios.isEmpty
+                      ? const Center(
+                          child: Text('No hay territorios disponibles.',
+                              style: TextStyle(color: Colors.grey)))
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          itemCount: territorios.length,
+                          itemBuilder: (context, index) {
+                            final terDoc = territorios[index];
+                            final terData = terDoc.data() as Map<String, dynamic>;
+                            final terNombre = terData['nombre'] ?? terDoc.id;
 
-                    // Filtrar una sola vez: excluir especiales y solo_conductores
-                    final territorios = snapshot.data!.docs.where((doc) {
-                      if (_especiales.contains(doc.id)) return false;
-                      final d = doc.data() as Map<String, dynamic>;
-                      return !((d['solo_conductores'] as bool?) ?? false);
-                    }).toList();
-
-                    if (territorios.isEmpty) {
-                      return const Center(
-                        child: Text('No hay territorios disponibles.',
-                            style: TextStyle(color: Colors.grey)),
-                      );
-                    }
-
-                    // ListView con children (no builder) para garantizar
-                    // que TODOS los territorios se renderizan
-                    return ListView(
-                      children: territorios.map((terDoc) {
-                        final terData = terDoc.data() as Map<String, dynamic>;
-                        final terNombre = terData['nombre'] ?? terDoc.id;
-
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ExpansionTile(
-                            leading: const Icon(Icons.folder,
-                                color: Color(0xFF1B5E20)),
-                            title: Text(terNombre,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                            subtitle: const Text('Toca para ver tarjetas'),
-                            children: [
-                              StreamBuilder<QuerySnapshot>(
-                                stream: FirebaseFirestore.instance
-                                    .collection('territorios')
-                                    .doc(terDoc.id)
-                                    .collection('tarjetas')
-                                    .where('bloqueado', isEqualTo: false)
-                                    .snapshots(),
+                            return Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ExpansionTile(
+                                leading: const Icon(Icons.folder,
+                                    color: Color(0xFF1B5E20)),
+                                title: Text(terNombre,
+                                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                                subtitle: const Text('Toca para ver tarjetas'),
+                                children: [
+                                  StreamBuilder<QuerySnapshot>(
+                                    stream: FirebaseFirestore.instance
+                                        .collection('territorios')
+                                        .doc(terDoc.id)
+                                        .collection('tarjetas')
+                                        .where('bloqueado', isEqualTo: false)
+                                        .snapshots(),
                                 builder: (context, tarjetasSnap) {
                                   if (tarjetasSnap.connectionState ==
                                       ConnectionState.waiting) {
@@ -3464,17 +3452,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                 },
                               ),
                             ],
-                          ),
-                        );
-                      }).toList(),
-                    );
-                  },
+                              ),
+                            );
+                          },
+                        ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
