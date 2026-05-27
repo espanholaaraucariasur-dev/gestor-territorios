@@ -2347,6 +2347,18 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         .where('asignado_a', isGreaterThan: '')
         .get();
 
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      final tomadoEn = (data['tomado_en'] as Timestamp?)?.toDate();
+      if (tomadoEn != null && tomadoEn.isBefore(limite)) {
+        // alerta a los 10 min antes = 2h50min
+        await doc.reference.update({
+          'alerta_vencimiento': true,
+          'asignado_a': '',
+          'disponible_para_publicadores': true,
+          'tomado_en': null,
+        });
+      }
     }
   }
 
@@ -3125,18 +3137,18 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         .collection('territorios')
         .get();
 
-    // Solo excluir IDs especiales del sistema (NO filtrar por solo_conductores)
+    // Solo excluir IDs especiales del sistema — NO filtrar por solo_conductores
+    // (ese campo aplica a tarjetas individuales, no a territorios enteros)
     final territorios = snap.docs.where((doc) {
       return !especiales.contains(doc.id);
     }).toList();
 
-    // Ordenar en memoria para no depender del collation de Firestore
+    // Ordenar en memoria
     territorios.sort((a, b) {
       final na = ((a.data() as Map<String, dynamic>)['nombre'] as String? ?? a.id).toLowerCase();
       final nb = ((b.data() as Map<String, dynamic>)['nombre'] as String? ?? b.id).toLowerCase();
       return na.compareTo(nb);
     });
-
 
     if (!mounted) return;
 
@@ -4518,3 +4530,4 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     );
   }
 
+}
