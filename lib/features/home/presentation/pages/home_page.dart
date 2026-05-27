@@ -3131,10 +3131,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   Future<void> _mostrarDialogoSolicitarTerritorioPublicador() async {
     const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
 
-    // Carga los territorios UNA SOLA VEZ antes de abrir el diálogo
+    // Carga los territorios SIN orderBy (evita que Firestore excluya
+    // documentos con caracteres especiales como Ç, tildes, ñ)
     final snap = await FirebaseFirestore.instance
         .collection('territorios')
-        .orderBy('nombre')
         .get();
 
     final territorios = snap.docs.where((doc) {
@@ -3143,7 +3143,14 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       return !((d['solo_conductores'] as bool?) ?? false);
     }).toList();
 
-    debugPrint('📋 Territorios para publicador: ${territorios.length}');
+    // Ordenar en memoria para no depender del collation de Firestore
+    territorios.sort((a, b) {
+      final na = ((a.data() as Map<String, dynamic>)['nombre'] as String? ?? a.id).toLowerCase();
+      final nb = ((b.data() as Map<String, dynamic>)['nombre'] as String? ?? b.id).toLowerCase();
+      return na.compareTo(nb);
+    });
+
+    debugPrint('📋 Territorios para publicador: ${territorios.length} (de ${snap.docs.length} docs)');
 
     if (!mounted) return;
 
@@ -3174,11 +3181,11 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(24, 4, 24, 8),
                   child: Text(
-                    '${territorios.length} territorios disponibles',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    'Selecciona un territorio para ver sus tarjetas disponibles',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
                 // ── Lista ────────────────────────────────────────────────
