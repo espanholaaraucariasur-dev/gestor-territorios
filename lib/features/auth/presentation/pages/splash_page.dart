@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -27,11 +28,25 @@ class _SplashPageState extends State<SplashPage> {
     if (!mounted) return;
 
     if (loggedIn && email.isNotEmpty) {
-      final snap = await FirebaseFirestore.instance
-          .collection('usuarios')
-          .where('email', isEqualTo: email)
-          .get();
-      if (snap.docs.isNotEmpty && mounted) {
+      QuerySnapshot? snap;
+      try {
+        snap = await FirebaseFirestore.instance
+            .collection('usuarios')
+            .where('email', isEqualTo: email)
+            .get(const GetOptions(source: Source.serverAndCache))
+            .timeout(const Duration(seconds: 6));
+      } catch (_) {
+        // Timeout o error de red — intentar con cache local
+        try {
+          snap = await FirebaseFirestore.instance
+              .collection('usuarios')
+              .where('email', isEqualTo: email)
+              .get(const GetOptions(source: Source.cache));
+        } catch (_) {
+          snap = null;
+        }
+      }
+      if (snap != null && snap.docs.isNotEmpty && mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
