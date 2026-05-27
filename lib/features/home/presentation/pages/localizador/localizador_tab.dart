@@ -156,9 +156,21 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           final calleLower = calle.toLowerCase();
           final calleNormFields = (d['calle_normalizada'] as String?) ?? calleNorm;
 
-          final match = calleNorm.contains(norm) ||
-              calleLower.contains(queryLower) ||
-              calleNormFields.contains(norm);
+          // Match si CUALQUIER palabra del query aparece en la calle
+          // "rua C" → busca "rua" Y "c" en la calle
+          final queryWords = norm.split(' ').where((w) => w.isNotEmpty).toList();
+          final queryWordsOrig = queryLower.split(' ').where((w) => w.isNotEmpty).toList();
+          
+          bool match = false;
+          if (queryWords.length == 1) {
+            // Una sola palabra: buscar como prefijo o contiene
+            final w = queryWords[0];
+            match = calleNorm.contains(w) || calleLower.contains(queryWordsOrig[0]);
+          } else {
+            // Múltiples palabras: TODAS deben aparecer en la calle
+            match = queryWords.every((w) => calleNorm.contains(w)) ||
+                    queryWordsOrig.every((w) => calleLower.contains(w));
+          }
 
           if (match && !callesVistas.contains(calle)) {
             callesVistas.add(calle);
@@ -208,24 +220,38 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         }
       }
 
-      // ── Estrategia 4 (FIRESTORE): calle uppercase range query ────────────
+      // ── Estrategia 4 (FIRESTORE): múltiples variantes del query ──────────
       if (sugs.length < 5 && query.length >= 2) {
-        // Intenta con primera letra en mayúscula (ej: "Rua")
-        final queryCapitalized = query[0].toUpperCase() + query.substring(1);
-        final snap = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .where('calle', isGreaterThanOrEqualTo: queryCapitalized)
-            .where('calle', isLessThanOrEqualTo: '$queryCapitalized')
-            .limit(10)
-            .get();
-
-        for (final doc in snap.docs) {
-          final d = doc.data() as Map<String, dynamic>;
-          final calle = (d['calle'] as String?) ?? '';
-          if (calle.isEmpty || callesVistas.contains(calle)) continue;
-          callesVistas.add(calle);
-          sugs.add(d);
+        // Genera variantes: "rua c" → ["Rua C", "Rua c", "rua C"]
+        final variants = <String>{
+          query,
+          query[0].toUpperCase() + query.substring(1),
+          query.toUpperCase(),
+          // Capitalizar cada palabra: "rua costa" → "Rua Costa"
+          query.split(' ').map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1)).join(' '),
+        };
+        
+        for (final variant in variants) {
           if (sugs.length >= 6) break;
+          final snap = await FirebaseFirestore.instance
+              .collection('direcciones_globales')
+              .where('calle', isGreaterThanOrEqualTo: variant)
+              .where('calle', isLessThanOrEqualTo: '$variant')
+              .limit(10)
+              .get();
+
+          for (final doc in snap.docs) {
+            final d = doc.data() as Map<String, dynamic>;
+            final calle = (d['calle'] as String?) ?? '';
+            if (calle.isEmpty || callesVistas.contains(calle)) continue;
+            // Verificar que realmente contiene el query (no solo tiene el mismo prefijo)
+            final calleN = _normalizarBusqueda(calle);
+            final queryN = _normalizarBusqueda(query);
+            if (!calleN.contains(queryN.split(' ')[0])) continue;
+            callesVistas.add(calle);
+            sugs.add(d);
+            if (sugs.length >= 6) break;
+          }
         }
       }
 
@@ -581,11 +607,10 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         if (mounted) { _gpsLat = pos.latitude; _gpsLng = pos.longitude; _gpsCargado = true; }
       } catch (_) { _gpsCargado = false; }
 
-      // Cargar TODAS las dirs (o las primeras 500) para busqueda local
-      // Esto funciona aunque las dirs no tengan lat/lng
+      // Cargar TODAS las dirs sin orderBy (evita problemas de índice)
+      // Ordenar en memoria después
       final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
-          .orderBy('calle')
           .limit(500)
           .get();
 
