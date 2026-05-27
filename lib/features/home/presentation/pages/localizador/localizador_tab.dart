@@ -43,6 +43,12 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   List<Map<String, dynamic>> _sugerencias = [];
   Timer? _debounceTimer;
 
+  // Cache de posición GPS para sugerencias contextuales
+  double? _gpsLat;
+  double? _gpsLng;
+  bool _gpsCargado = false;
+  List<Map<String, dynamic>> _dirsLocales = []; // dirs cercanas precargadas
+
   static const Color _verde = Color(0xFF1B5E20);
   static const Color _verdeClaro = Color(0xFF2E7D32);
 
@@ -119,50 +125,110 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   // BUSCAR CON ARRAY-CONTAINS-ANY + FALLBACK RANGE QUERY
   // ─────────────────────────────────────────────────────────
 
-  // Autocompletado mientras el usuario escribe
+  // ─────────────────────────────────────────────────────────
+  // AUTOCOMPLETADO — funciona desde 1 caracter
+  // Prioriza dirs cercanas al GPS si están precargadas
+  // ─────────────────────────────────────────────────────────
   Future<void> _actualizarSugerencias(String texto) async {
-    if (texto.length < 3) {
-      if (mounted && _sugerencias.isNotEmpty) {
-        setState(() => _sugerencias = []);
-      }
+    final query = texto.trim();
+
+    if (query.isEmpty) {
+      if (mounted && _sugerencias.isNotEmpty) setState(() => _sugerencias = []);
       return;
     }
+
     try {
-      final norm = _normalizarBusqueda(texto);
-      final tokens = norm.split(' ').where((t) => t.length >= 2).toList();
-      if (tokens.isEmpty) return;
-
-      // Estrategia 1: por palabras_clave
-      var snap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .where('palabras_clave', arrayContainsAny: tokens.take(5).toList())
-          .limit(10)
-          .get();
-
-      // Estrategia 2: si no hay resultados, buscar por rango en calle
-      if (snap.docs.isEmpty && texto.length >= 3) {
-        final textoNorm = texto.trim();
-        snap = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .where('calle', isGreaterThanOrEqualTo: textoNorm)
-            .where('calle', isLessThanOrEqualTo: '$textoNorm\uf8ff')
-            .limit(10)
-            .get();
-      }
-
-      // Agrupar calles únicas
+      final norm = _normalizarBusqueda(query);
       final callesVistas = <String>{};
       final sugs = <Map<String, dynamic>>[];
-      for (final doc in snap.docs) {
-        final d = doc.data();
-        final calle = d['calle'] as String? ?? '';
-        if (calle.isEmpty || callesVistas.contains(calle)) continue;
-        callesVistas.add(calle);
-        sugs.add(d);
-        if (sugs.length >= 5) break;
+
+      // ── Estrategia 1: buscar en dirs locales precargadas (GPS) ──────────
+      if (_dirsLocales.isNotEmpty) {
+        for (final d in _dirsLocales) {
+          final calle = (d['calle'] as String?) ?? '';
+          final calleNorm = _normalizarBusqueda(calle);
+          if (calleNorm.contains(norm) || calle.toLowerCase().contains(query.toLowerCase())) {
+            if (calle.isNotEmpty && !callesVistas.contains(calle)) {
+              callesVistas.add(calle);
+              sugs.add(d);
+              if (sugs.length >= 5) break;
+            }
+          }
+        }
       }
 
-      debugPrint('🔍 Sugerencias para "$texto": ${sugs.length} resultados');
+      // ── Estrategia 2: palabras_clave (si hay tokens de >= 2 chars) ──────
+      if (sugs.length < 5 && norm.length >= 2) {
+        final tokens = norm.split(' ').where((t) => t.length >= 2).toList();
+        if (tokens.isNotEmpty) {
+          final snap = await FirebaseFirestore.instance
+              .collection('direcciones_globales')
+              .where('palabras_clave', arrayContainsAny: tokens.take(5).toList())
+              .limit(15)
+              .get();
+
+          // Si hay GPS, ordenar por distancia
+          final docs = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+          if (_gpsCargado && _gpsLat != null && _gpsLng != null) {
+            docs.sort((a, b) {
+              final aLat = (a['lat'] as num?)?.toDouble() ?? 0;
+              final aLng = (a['lng'] as num?)?.toDouble() ?? 0;
+              final bLat = (b['lat'] as num?)?.toDouble() ?? 0;
+              final bLng = (b['lng'] as num?)?.toDouble() ?? 0;
+              return _distanciaMetros(_gpsLat!, _gpsLng!, aLat, aLng)
+                  .compareTo(_distanciaMetros(_gpsLat!, _gpsLng!, bLat, bLng));
+            });
+          }
+
+          for (final d in docs) {
+            final calle = (d['calle'] as String?) ?? '';
+            if (calle.isEmpty || callesVistas.contains(calle)) continue;
+            callesVistas.add(calle);
+            sugs.add(d);
+            if (sugs.length >= 6) break;
+          }
+        }
+      }
+
+      // ── Estrategia 3: range query por calle_normalizada ─────────────────
+      if (sugs.length < 5 && norm.length >= 2) {
+        final snap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('calle_normalizada', isGreaterThanOrEqualTo: norm)
+            .where('calle_normalizada', isLessThanOrEqualTo: '$norm\uf8ff')
+            .limit(10)
+            .get();
+
+        for (final doc in snap.docs) {
+          final d = doc.data() as Map<String, dynamic>;
+          final calle = (d['calle'] as String?) ?? '';
+          if (calle.isEmpty || callesVistas.contains(calle)) continue;
+          callesVistas.add(calle);
+          sugs.add(d);
+          if (sugs.length >= 6) break;
+        }
+      }
+
+      // ── Estrategia 4: range query por calle (texto original) ────────────
+      if (sugs.length < 5 && query.length >= 2) {
+        final snap = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('calle', isGreaterThanOrEqualTo: query)
+            .where('calle', isLessThanOrEqualTo: '$query\uf8ff')
+            .limit(10)
+            .get();
+
+        for (final doc in snap.docs) {
+          final d = doc.data() as Map<String, dynamic>;
+          final calle = (d['calle'] as String?) ?? '';
+          if (calle.isEmpty || callesVistas.contains(calle)) continue;
+          callesVistas.add(calle);
+          sugs.add(d);
+          if (sugs.length >= 6) break;
+        }
+      }
+
+      debugPrint('🔍 Sugerencias para "$query": ${sugs.length} (${_dirsLocales.length} locales disponibles)');
       if (mounted) setState(() => _sugerencias = sugs);
     } catch (e) {
       debugPrint('Autocompletado error: $e');
@@ -496,6 +562,53 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   }
 
   @override
+  void initState() {
+    super.initState();
+    _precargarDirsCercanas();
+  }
+
+  /// Pre-carga GPS + dirs cercanas al abrir la pantalla
+  Future<void> _precargarDirsCercanas() async {
+    try {
+      final perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+      );
+      if (!mounted) return;
+      _gpsLat = pos.latitude;
+      _gpsLng = pos.longitude;
+      _gpsCargado = true;
+
+      // Cargar hasta 200 dirs en radio ~1.5km alrededor del usuario
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('lat', isGreaterThan: _gpsLat! - 0.015)
+          .where('lat', isLessThan: _gpsLat! + 0.015)
+          .limit(200)
+          .get();
+
+      if (!mounted) return;
+      setState(() {
+        _dirsLocales = snap.docs
+            .map((d) => d.data() as Map<String, dynamic>)
+            .where((d) {
+              final dLng = (d['lng'] as num?)?.toDouble();
+              if (dLng == null) return true;
+              return (dLng - _gpsLng!).abs() < 0.015;
+            })
+            .toList();
+      });
+      debugPrint('📍 ${_dirsLocales.length} dirs locales precargadas');
+    } catch (e) {
+      debugPrint('GPS preload: $e');
+      _gpsCargado = false;
+    }
+  }
+
+  @override
   void dispose() {
     _debounceTimer?.cancel();
     _calleCtrl.dispose();
@@ -680,12 +793,16 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                               ),
                               onChanged: (v) {
                                 _debounceTimer?.cancel();
+                                // Desde 1 caracter si hay dirs locales, 2+ si no
+                                final minChars = _dirsLocales.isNotEmpty ? 1 : 2;
+                                if (v.trim().length < minChars) {
+                                  if (_sugerencias.isNotEmpty) setState(() => _sugerencias = []);
+                                  return;
+                                }
                                 _debounceTimer = Timer(
-                                  const Duration(milliseconds: 400),
+                                  const Duration(milliseconds: 300),
                                   () async {
-                                    if (mounted) {
-                                      await _actualizarSugerencias(v);
-                                    }
+                                    if (mounted) await _actualizarSugerencias(v);
                                   },
                                 );
                               },
@@ -728,11 +845,41 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                             children: _sugerencias.map((sug) {
                               final calle = sug['calle'] as String? ?? '';
                               final comp = sug['complemento'] as String? ?? '';
+                              // Calcular distancia si hay GPS
+                              final dLat = (sug['lat'] as num?)?.toDouble();
+                              final dLng = (sug['lng'] as num?)?.toDouble();
+                              String distStr = '';
+                              if (_gpsCargado && _gpsLat != null && dLat != null && dLng != null) {
+                                final dist = _distanciaMetros(_gpsLat!, _gpsLng!, dLat, dLng);
+                                distStr = dist < 1000
+                                    ? '${dist.round()}m'
+                                    : '${(dist / 1000).toStringAsFixed(1)}km';
+                              }
+                              final territorio = (sug['barrio'] as String?) ?? (sug['territorio_id'] as String?) ?? '';
+
                               return ListTile(
                                 dense: true,
                                 leading: const Icon(Icons.location_on_outlined, color: _verde, size: 18),
-                                title: Text(calle, style: const TextStyle(fontSize: 13)),
-                                subtitle: comp.isNotEmpty ? Text(comp, style: const TextStyle(fontSize: 11)) : null,
+                                title: Text(calle, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                subtitle: Row(
+                                  children: [
+                                    if (comp.isNotEmpty)
+                                      Expanded(child: Text(comp, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis)),
+                                    if (territorio.isNotEmpty)
+                                      Text(territorio, style: const TextStyle(fontSize: 10, color: _verde)),
+                                    if (distStr.isNotEmpty) ...[ 
+                                      const SizedBox(width: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: _verde.withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(distStr, style: const TextStyle(fontSize: 10, color: _verde, fontWeight: FontWeight.w600)),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                                 onTap: () {
                                   _calleCtrl.text = calle;
                                   setState(() => _sugerencias = []);
