@@ -135,12 +135,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   Future<void> _loginConEmail(String email, {String? password}) async {
     setState(() => _isLoading = true);
     try {
-      // Autenticar anónimamente para satisfacer reglas (request.auth != null)
-      // Requiere Anonymous Auth habilitado en Firebase Console
-      if (FirebaseAuth.instance.currentUser == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-      }
-
       final snap = await _db
           .collection('usuarios')
           .where('email', isEqualTo: email)
