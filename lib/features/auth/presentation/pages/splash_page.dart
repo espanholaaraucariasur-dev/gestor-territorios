@@ -51,7 +51,7 @@ class _SplashPageState extends State<SplashPage> {
           context,
           MaterialPageRoute(
             builder: (_) => PantallaHomeLegacy(
-              usuarioData: snap.docs.first.data(),
+              usuarioData: snap!.docs.first.data() as Map<String, dynamic>,
             ),
           ),
         );
