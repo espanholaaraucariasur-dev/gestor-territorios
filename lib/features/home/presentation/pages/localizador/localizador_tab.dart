@@ -411,7 +411,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           setState(() {
             _buscando = false; _buscado = true; _encontrada = true;
             _direccionEncontrada = mejorLocal;
-            _mensaje = comp.isNotEmpty ? '\$calle · \$comp' : calle;
+            _mensaje = comp.isNotEmpty ? '$calle · $comp' : calle;
             _mostrarFormulario = false;
           });
           return;
