@@ -371,6 +371,53 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     });
 
     try {
+      final consultaNormLocal = _normalizarBusqueda(consulta);
+      final consultaLower = consulta.toLowerCase();
+
+      // ── Estrategia 0: buscar en dirs locales precargadas ──────────────────
+      // Funciona aunque las dirs no tengan palabras_clave ni calle_normalizada
+      if (_dirsLocales.isNotEmpty) {
+        Map<String, dynamic>? mejorLocal;
+        int mejorScoreLocal = -1;
+
+        for (final d in _dirsLocales) {
+          final calle = (d['calle'] as String?) ?? '';
+          if (calle.isEmpty) continue;
+          final calleNorm = _normalizarBusqueda(calle);
+          final calleLower = calle.toLowerCase();
+
+          // Score basado en qué tan completo es el match
+          int score = 0;
+          if (calleNorm == consultaNormLocal || calleLower == consultaLower) {
+            score = 100; // match exacto
+          } else if (calleNorm.contains(consultaNormLocal) || calleLower.contains(consultaLower)) {
+            score = 80; // contiene completo
+          } else {
+            // Match por tokens
+            final tokens = consultaNormLocal.split(' ').where((t) => t.isNotEmpty).toList();
+            final coinciden = tokens.where((t) => calleNorm.contains(t)).length;
+            if (tokens.isNotEmpty) score = coinciden * 100 ~/ tokens.length;
+          }
+
+          if (score > mejorScoreLocal) {
+            mejorScoreLocal = score;
+            mejorLocal = d;
+          }
+        }
+
+        if (mejorLocal != null && mejorScoreLocal >= 60) {
+          final calle = mejorLocal['calle']?.toString() ?? '';
+          final comp = mejorLocal['complemento']?.toString() ?? '';
+          setState(() {
+            _buscando = false; _buscado = true; _encontrada = true;
+            _direccionEncontrada = mejorLocal;
+            _mensaje = comp.isNotEmpty ? '\$calle · \$comp' : calle;
+            _mostrarFormulario = false;
+          });
+          return;
+        }
+      }
+
       // Generar tokens de la consulta del usuario
       final tokens = _generarTokens(consulta);
       if (tokens.isEmpty) {
