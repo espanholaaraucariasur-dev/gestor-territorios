@@ -374,10 +374,29 @@ class _PublicadorTabState extends State<PublicadorTab> {
           .where('completada', isEqualTo: false)
           .get();
 
-      // Si ya no tiene tarjetas, programar mensaje para dentro de 10 min
+      // Si ya no tiene tarjetas, programar mensaje para dentro de 5 min
       if (activas.docs.isEmpty) {
-        final enviarEn = DateTime.now().add(const Duration(minutes: 10));
-        // Guardar tarea en Firestore (sobrescribe si ya existe)
+        // Verificar si ya hay una tarea pendiente o enviada recientemente
+        final tareaExistente = await FirebaseFirestore.instance
+            .collection('tareas_motivacionales').doc(email).get();
+
+        if (tareaExistente.exists) {
+          final t = tareaExistente.data() as Map<String, dynamic>;
+          // No sobrescribir si ya está programado o enviado recientemente
+          if (t['enviado'] != true) {
+            debugPrint('📅 Ya hay tarea motivacional pendiente — no crear otra');
+            return;
+          }
+          // Si ya fue enviado, verificar cooldown de 2h
+          final ultimoEnvio = (t['ultimo_envio'] as Timestamp?)?.toDate();
+          if (ultimoEnvio != null &&
+              DateTime.now().difference(ultimoEnvio).inHours < 2) {
+            debugPrint('⏳ Cooldown activo — no programar nuevo mensaje');
+            return;
+          }
+        }
+
+        final enviarEn = DateTime.now().add(const Duration(minutes: 5));
         await FirebaseFirestore.instance
             .collection('tareas_motivacionales')
             .doc(email)
@@ -388,10 +407,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
           'enviado': false,
           'created_at': FieldValue.serverTimestamp(),
         });
-        debugPrint('📅 Mensaje motivacional programado para $nombre en 10 min');
+        debugPrint('📅 Mensaje motivacional programado para $nombre en 5 min');
 
-        // También intentar con Future.delayed por si la app sigue abierta
-        Future.delayed(const Duration(minutes: 10), () => _enviarMensajeMotivacional());
+        // Future.delayed como respaldo (solo uno por llamada)
+        Future.delayed(const Duration(minutes: 5), () => _enviarMensajeMotivacional());
       }
     } catch (e) {
       debugPrint('Error programando motivacional: $e');
@@ -411,6 +430,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
       if (!tareaDoc.exists) return;
       final tarea = tareaDoc.data() as Map<String, dynamic>;
       if (tarea['enviado'] == true) return;
+
+      // Cooldown: no enviar si ya se envió uno en las últimas 2 horas
+      final ultimoEnvio = (tarea['ultimo_envio'] as Timestamp?)?.toDate();
+      if (ultimoEnvio != null &&
+          DateTime.now().difference(ultimoEnvio).inHours < 2) {
+        debugPrint('⏳ Cooldown motivacional activo — último envío hace ${DateTime.now().difference(ultimoEnvio).inMinutes} min');
+        return;
+      }
 
       // Verificar que sigue sin tarjetas
       final activas = await FirebaseFirestore.instance
@@ -445,10 +472,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
         tipo: TipoNotificacion.motivacional,
       );
 
-      // Marcar tarea como enviada
+      // Marcar tarea como enviada con timestamp para cooldown
       await FirebaseFirestore.instance
           .collection('tareas_motivacionales').doc(email)
-          .update({'enviado': true});
+          .update({
+            'enviado': true,
+            'ultimo_envio': FieldValue.serverTimestamp(),
+          });
 
       debugPrint('✅ Mensaje motivacional enviado a $nombre');
     } catch (e) {
