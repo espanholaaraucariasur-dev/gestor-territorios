@@ -357,7 +357,7 @@ class _ConductorTabState extends State<ConductorTab> {
                         .snapshots(),
                     builder: (context, snapTarjetas) {
                       if (snapTarjetas.hasError) debugPrint('conductor snap2 error: \${snapTarjetas.error}');
-                      final mesActual = '\${DateTime.now().year}-\${DateTime.now().month.toString().padLeft(2, '0')}';
+                      final mesActual = '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
                       final todas = snapTarjetas.data?.docs ?? [];
 
                       // Tarjetas del conductor (ya filtradas por conductor_email)
