@@ -281,10 +281,8 @@ class _ConductorTabState extends State<ConductorTab> {
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collectionGroup('tarjetas')
-                        .where('conductor_email', isEqualTo: widget.usuarioEmail)
                         .snapshots(),
                     builder: (context, snap) {
-                      if (snap.hasError) debugPrint('conductor snap1 error: \${snap.error}');
                       final todas = snap.data?.docs ?? [];
 
                       return StreamBuilder<QuerySnapshot>(
@@ -353,15 +351,17 @@ class _ConductorTabState extends State<ConductorTab> {
                   StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
                         .collectionGroup('tarjetas')
-                        .where('conductor_email', isEqualTo: widget.usuarioEmail)
                         .snapshots(),
                     builder: (context, snapTarjetas) {
-                      if (snapTarjetas.hasError) debugPrint('conductor snap2 error: \${snapTarjetas.error}');
                       final mesActual = '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
                       final todas = snapTarjetas.data?.docs ?? [];
 
-                      // Tarjetas del conductor (ya filtradas por conductor_email)
-                      final delConductor = todas;
+                      // Solo tarjetas del conductor este mes
+                      final delConductor = todas.where((t) {
+                        final d = (t.data() as Map<String, dynamic>?) ?? {};
+                        return d['conductor_email'] == widget.usuarioEmail ||
+                            d['enviado_a'] == widget.usuarioEmail;
+                      }).toList();
 
                       final total = delConductor.length;
                       final enviadas = delConductor.where((t) {
@@ -804,10 +804,8 @@ class _ConductorTabState extends State<ConductorTab> {
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collectionGroup('tarjetas')
-                    .where('conductor_email', isEqualTo: widget.usuarioEmail)
                     .snapshots(),
                 builder: (context, snapshot) {
-                  if (snapshot.hasError) debugPrint('conductor snap3 error: \${snapshot.error}');
                   if (!snapshot.hasData) {
                     return const Text(
                       'Cargando...',

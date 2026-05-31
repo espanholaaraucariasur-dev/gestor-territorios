@@ -12,6 +12,13 @@
       "collectionGroup": "tarjetas",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
+        { "fieldPath": "conductor_email", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tarjetas",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
         { "fieldPath": "asignado_a", "order": "ASCENDING" },
         { "fieldPath": "completada", "order": "ASCENDING" }
       ]
@@ -22,6 +29,14 @@
       "fields": [
         { "fieldPath": "asignado_a", "order": "ASCENDING" },
         { "fieldPath": "mes_asignacion", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "solicitudes_localizador",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
       ]
     }
   ],
