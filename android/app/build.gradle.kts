@@ -1,3 +1,13 @@
+import java.util.Properties
+import java.io.FileInputStream
+
+// 1. Cargar las propiedades del archivo key.properties
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -23,10 +33,11 @@ android {
 
     signingConfigs {
         create("release") {
-            keyAlias = "araucaria_sur"
-            keyPassword = "Araucaria2024"
-            storeFile = file("araucaria_sur.jks")
-            storePassword = "Araucaria2024"
+            // Se leen dinámicamente desde key.properties, cayendo en tus valores por defecto si no existe el archivo.
+            keyAlias = keystoreProperties["keyAlias"] as? String ?: "araucaria_sur"
+            keyPassword = keystoreProperties["keyPassword"] as? String ?: "Araucaria2024"
+            storeFile = file(keystoreProperties["storeFile"] as? String ?: "araucaria_sur.jks")
+            storePassword = keystoreProperties["storePassword"] as? String ?: "Araucaria2024"
         }
     }
 
@@ -41,8 +52,10 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            
+            // ✅ Recomendado activar minificación para el paquete de producción en la tienda
+            isMinifyEnabled = true
+            isShrinkResources = true
         }
     }
 }
