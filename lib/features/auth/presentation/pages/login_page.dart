@@ -135,30 +135,57 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   Future<void> _loginConEmail(String email, {String? password}) async {
     setState(() => _isLoading = true);
     try {
-      // Autenticar con Firebase Auth para satisfacer reglas de seguridad
-      if (FirebaseAuth.instance.currentUser == null) {
+      // 1. Autenticar con Firebase Auth real
+      if (password != null) {
         try {
-          await FirebaseAuth.instance.signInAnonymously();
-        } catch (e) {
-          debugPrint('signInAnonymously error: $e');
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'user-not-found') {
+            _snack('Usuario no encontrado.', Colors.red);
+            return;
+          } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+            _snack('Contraseña incorrecta.', Colors.red);
+            return;
+          } else if (e.code == 'invalid-email') {
+            _snack('Email inválido.', Colors.red);
+            return;
+          } else if (e.code == 'user-disabled') {
+            _snack('Cuenta deshabilitada.', Colors.red);
+            return;
+          } else {
+            // Usuario existe en Firestore pero no en Firebase Auth — migrarlo
+            debugPrint('Firebase Auth error: ${e.code} — intentando migración');
+            await _migrarUsuarioAFirebaseAuth(email, password);
+          }
+        }
+      } else {
+        // Login por biometría — ya hay sesión de Firebase Auth
+        if (FirebaseAuth.instance.currentUser == null) {
+          _snack('Sesión expirada. Inicia sesión con contraseña.', Colors.orange);
+          return;
         }
       }
 
+      // 2. Obtener datos del usuario desde Firestore
       final snap = await _db
           .collection('usuarios')
           .where('email', isEqualTo: email)
           .get();
 
       if (snap.docs.isEmpty) {
-        _snack('Usuario no encontrado.', Colors.red);
+        _snack('Usuario no encontrado en el directorio.', Colors.red);
         return;
       }
 
       final u = snap.docs.first.data();
+      final uid = FirebaseAuth.instance.currentUser?.uid;
 
-      if (password != null && u['password'] != password) {
-        _snack('Contraseña incorrecta.', Colors.red);
-        return;
+      // Guardar uid en el doc de Firestore si no lo tiene
+      if (uid != null && u['uid'] == null) {
+        await snap.docs.first.reference.update({'uid': uid});
       }
 
       if (u['estado'] == 'pendiente') {
@@ -171,6 +198,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         return;
       }
 
+      // 3. Guardar sesión local
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isLoggedIn', true);
       await prefs.setString('userEmail', email);
@@ -189,7 +217,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       }
     } catch (e) {
       debugPrint('LOGIN ERROR: $e');
-      _snack('Error: $e', Colors.red);
+      _snack('Error al iniciar sesión.', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -203,6 +231,27 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       return;
     }
     _loginConEmail(email, password: pass);
+  }
+
+  /// Migra usuario de Firestore a Firebase Auth automáticamente
+  Future<void> _migrarUsuarioAFirebaseAuth(String email, String password) async {
+    try {
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      debugPrint('✅ Usuario migrado a Firebase Auth: $email');
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } else {
+        debugPrint('Error migrando: ${e.code}');
+        rethrow;
+      }
+    }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -435,10 +484,23 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                   return;
                 }
                 try {
+                  final emailNorm = emailCtrl.text.trim().toLowerCase();
+                  final pass = passCtrl.text.trim();
+
+                  // Crear cuenta en Firebase Auth
+                  try {
+                    await FirebaseAuth.instance.createUserWithEmailAndPassword(
+                      email: emailNorm,
+                      password: pass,
+                    );
+                  } on FirebaseAuthException catch (e) {
+                    if (e.code != 'email-already-in-use') rethrow;
+                  }
+
+                  // Guardar en Firestore (sin password en texto plano)
                   await _db.collection('usuarios').add({
                     'nombre': nomCtrl.text.trim(),
-                    'email': emailCtrl.text.trim().toLowerCase(),
-                    'password': passCtrl.text.trim(),
+                    'email': emailNorm,
                     'estado': 'pendiente',
                     'es_admin': false,
                     'es_admin_territorios': false,
