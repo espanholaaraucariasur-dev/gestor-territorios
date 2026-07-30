@@ -22,8 +22,9 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _db = FirebaseFirestore.instance;
-  final _localAuth = LocalAuthentication();
-  final _secureStorage = const FlutterSecureStorage(
+  // local_auth y secure_storage no funcionan en web
+  final _localAuth = kIsWeb ? null : LocalAuthentication();
+  final _secureStorage = kIsWeb ? null : const FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
     ),
@@ -64,10 +65,11 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   // ─────────────────────────────────────────────────────────
 
   Future<void> _checkBiometrics() async {
+    if (kIsWeb || _localAuth == null) return;
     try {
-      final canCheck = await _localAuth.canCheckBiometrics;
-      final isSupported = await _localAuth.isDeviceSupported();
-      final stored = await _secureStorage.read(key: 'biometric_email');
+      final canCheck = await _localAuth!.canCheckBiometrics;
+      final isSupported = await _localAuth!.isDeviceSupported();
+      final stored = await _secureStorage!.read(key: 'biometric_email');
       final canUse = canCheck && isSupported;
       final hasAccount = stored != null && stored.isNotEmpty && canUse;
       if (!mounted) return;
@@ -83,8 +85,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
   Future<void> _loginBiometrico() async {
     try {
-      final canCheck = await _localAuth.canCheckBiometrics;
-      final isSupported = await _localAuth.isDeviceSupported();
+      final canCheck = await _localAuth!.canCheckBiometrics;
+      final isSupported = await _localAuth!.isDeviceSupported();
 
       if (!isSupported) {
         _snack('Dispositivo no soporta autenticación segura', Colors.orange);
@@ -96,13 +98,13 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       }
 
       // Verificar que hay email guardado ANTES de autenticar
-      final email = await _secureStorage.read(key: 'biometric_email');
+      final email = await _secureStorage!.read(key: 'biometric_email');
       if (email == null || email.isEmpty) {
         _snack('Primero inicia sesión con email para activar biometría', Colors.orange);
         return;
       }
 
-      final ok = await _localAuth.authenticate(
+      final ok = await _localAuth!.authenticate(
         localizedReason: 'Autentícate para ingresar a Araucaria Sur',
         options: const AuthenticationOptions(
           biometricOnly: false,
@@ -204,7 +206,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       await prefs.setString('userEmail', email);
 
       if (_canCheckBiometrics) {
-        await _secureStorage.write(key: 'biometric_email', value: email);
+        await _secureStorage!.write(key: 'biometric_email', value: email);
       }
 
       if (mounted) {
