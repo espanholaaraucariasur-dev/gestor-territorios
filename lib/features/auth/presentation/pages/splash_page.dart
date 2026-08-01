@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../../../core/services/update_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -22,6 +23,10 @@ class _SplashPageState extends State<SplashPage> {
 
   Future<void> _verificarSesion() async {
     await Future.delayed(const Duration(seconds: 1));
+    if (!mounted) return;
+
+    // Verificar actualización forzada (solo Android con Play Store)
+    await UpdateService.verificarActualizacion(context);
     if (!mounted) return;
 
     // Esperar a que Firebase Auth inicialice

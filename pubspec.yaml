@@ -43,6 +43,9 @@ dependencies:
   pdf: ^3.11.0
   printing: ^5.13.0
 
+  # Actualizaciones forzadas
+  in_app_update: ^4.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
