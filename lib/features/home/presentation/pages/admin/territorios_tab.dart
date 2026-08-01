@@ -223,16 +223,21 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                       'Sin nombre';
                               final esPrioridadFlag = tarjetaMap['prioridad_admin'] == true;
                               final mesPrioridad = tarjetaMap['mes_prioridad'] as String? ?? '';
-                              // Usar StreamBuilder para contar dirs prioritarias en tiempo real
+                              // Solo mostrar prioridad si el FLAG en la tarjeta está activo
+                              // Esto evita parpadeos durante la limpieza en batch
                               return StreamBuilder<QuerySnapshot>(
-                                stream: FirebaseFirestore.instance
-                                    .collection('direcciones_globales')
-                                    .where('tarjeta_id', isEqualTo: tarjetaId)
-                                    .where('prioridad_mes_anterior', isEqualTo: true)
-                                    .snapshots(),
+                                stream: esPrioridadFlag
+                                    ? FirebaseFirestore.instance
+                                        .collection('direcciones_globales')
+                                        .where('tarjeta_id', isEqualTo: tarjetaId)
+                                        .where('prioridad_mes_anterior', isEqualTo: true)
+                                        .snapshots()
+                                    : const Stream.empty(),
                                 builder: (context, priorSnap) {
                                   final cantDirsPrioridad = priorSnap.data?.docs.length ?? 0;
-                                  final esPrioridad = esPrioridadFlag || cantDirsPrioridad > 0;
+                                  // Requiere AMBOS: flag en tarjeta Y dirs con prioridad
+                                  // Si el admin limpió prioridad_admin=false, desaparece inmediatamente
+                                  final esPrioridad = esPrioridadFlag && cantDirsPrioridad > 0;
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 10),
                                 color: esPrioridad ? Colors.orange.shade50 : Colors.blue.shade50,

@@ -386,6 +386,10 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                   _snack('Ingresa exactamente 4 dígitos', Colors.orange);
                   return;
                 }
+                // Autenticar antes de consultar Firestore
+                if (FirebaseAuth.instance.currentUser == null) {
+                  try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+                }
                 // Verificar contra Firestore
                 final doc = await _db.collection('configuracion').doc('codigo_acceso').get();
                 final codigoCorrecto = (doc.data()?['codigo'] as String?) ?? '';
