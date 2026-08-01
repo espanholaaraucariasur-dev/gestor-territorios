@@ -380,6 +380,10 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         Map<String, dynamic>? mejorLocal;
         int mejorScoreLocal = -1;
 
+        // Extraer número del query si existe (ej: "rua das flores 370" → numero="370")
+        final regexNumero = RegExp(r'\b(\d+)\b');
+        final numeroQuery = regexNumero.firstMatch(consultaNormLocal)?.group(1) ?? '';
+
         for (final d in _dirsLocales) {
           final calle = (d['calle'] as String?) ?? '';
           if (calle.isEmpty) continue;
@@ -397,6 +401,17 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             final tokens = consultaNormLocal.split(' ').where((t) => t.isNotEmpty).toList();
             final coinciden = tokens.where((t) => calleNorm.contains(t)).length;
             if (tokens.isNotEmpty) score = coinciden * 100 ~/ tokens.length;
+          }
+
+          // Si el query tiene número, verificar que la calle también tenga ese número
+          // Si no coincide, penalizar fuertemente el score
+          if (numeroQuery.isNotEmpty && score >= 60) {
+            final tieneNumero = calleNorm.contains(numeroQuery);
+            if (!tieneNumero) {
+              score = score ~/ 3; // penalizar: 80 → 26, no pasa el umbral de 60
+            } else {
+              score = (score * 1.2).round().clamp(0, 100); // bonificar si coincide
+            }
           }
 
           if (score > mejorScoreLocal) {
