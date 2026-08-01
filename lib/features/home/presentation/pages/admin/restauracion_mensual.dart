@@ -24,6 +24,22 @@ class RestauracionMensual {
       debugPrint('🗓️ Reinicio automático de mes...');
       final ahora = DateTime.now();
       final mesAnterior = '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+
+      // ── MARCAR COMO EJECUTADO AL INICIO (evita race condition) ──────────
+      // Si dos usuarios abren la app al mismo tiempo el día 1,
+      // el segundo verá que ya está marcado y no ejecutará de nuevo.
+      try {
+        await FirebaseFirestore.instance
+            .collection('sistema').doc('restauracion_mensual').set({
+          'ultimo_mes': mesAnterior,
+          'ejecutado_en': FieldValue.serverTimestamp(),
+          'estado': 'en_progreso',
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Error marcando inicio: $e');
+        return; // Si no puede marcar, mejor no ejecutar
+      }
+      // ────────────────────────────────────────────────────────────────────
       final nuevoMes = ahora.month == 12
           ? DateTime(ahora.year + 1, 1, 1)
           : DateTime(ahora.year, ahora.month + 1, 1);
@@ -194,6 +210,12 @@ class RestauracionMensual {
         'no_predicadas_mes_anterior': noPredicadas,
       });
 
+      // Marcar como completado
+      await FirebaseFirestore.instance
+          .collection('sistema').doc('restauracion_mensual').update({
+        'estado': 'completado',
+        'completado_en': FieldValue.serverTimestamp(),
+      });
       debugPrint('✅ Reinicio completado: $mesAnterior → $nuevoMesStr');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
