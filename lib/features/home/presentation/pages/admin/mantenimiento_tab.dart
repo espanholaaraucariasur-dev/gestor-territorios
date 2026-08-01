@@ -955,6 +955,54 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
 
       final ahora = DateTime.now();
       final mesAnterior = '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+
+      // ── GUARD: verificar si ya se ejecutó este mes ──────────────────────
+      final sistemaDoc = await FirebaseFirestore.instance
+          .collection('sistema').doc('restauracion_mensual').get();
+      if (sistemaDoc.exists) {
+        final ultimoMes = sistemaDoc.data()?['ultimo_mes_ejecutado'] as String? ?? '';
+        if (ultimoMes == mesAnterior) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            final continuar = await showDialog<bool>(
+              context: context,
+              builder: (c) => AlertDialog(
+                title: const Row(children: [
+                  Icon(Icons.warning, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('Ya ejecutado este mes'),
+                ]),
+                content: Text(
+                  'El nuevo mes ya fue iniciado para $mesAnterior.
+
+'
+                  '⚠️ Ejecutarlo de nuevo puede marcar como PRIORIDAD direcciones '
+                  'que ya fueron trabajadas este mes.
+
+'
+                  '¿Deseas continuar de todas formas?',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(c, false),
+                    child: const Text('Cancelar', style: TextStyle(color: Colors.green)),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(c, true),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                    child: const Text('Ejecutar de nuevo'),
+                  ),
+                ],
+              ),
+            );
+            if (continuar != true) return;
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('🔄 Iniciando nuevo mes...'), duration: Duration(seconds: 60)),
+            );
+          }
+        }
+      }
+      // ── FIN GUARD ────────────────────────────────────────────────────────
       final nuevoMes = ahora.month == 12
           ? DateTime(ahora.year + 1, 1, 1)
           : DateTime(ahora.year, ahora.month + 1, 1);
