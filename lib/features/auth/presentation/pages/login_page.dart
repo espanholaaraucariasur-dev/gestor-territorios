@@ -306,19 +306,45 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
           ),
           ElevatedButton(
             onPressed: () async {
-              final email = emailCtrl.text.trim();
+              final email = emailCtrl.text.trim().toLowerCase();
               if (email.isEmpty) return;
 
-              // Notificar a admins sobre recuperación
-              await NotificacionService.enviarAAdmins(
-                titulo: '🔑 Solicitud de recuperación de contraseña',
-                cuerpo: '$email solicita recuperar su contraseña.',
-                tipo: TipoNotificacion.solicitudAcceso,
-                extra: {'email_solicitante': email},
-              );
+              try {
+                // Autenticar anónimamente si no hay sesión
+                if (FirebaseAuth.instance.currentUser == null) {
+                  try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+                }
 
-              if (c.mounted) Navigator.pop(c);
-              _snack(context.t('recovery_request_sent'), _verde);
+                // Verificar que existe en Firestore
+                final snap = await _db.collection('usuarios')
+                    .where('email', isEqualTo: email).get();
+
+                if (snap.docs.isEmpty) {
+                  _snack('Email no registrado en el directorio.', Colors.red);
+                  return;
+                }
+
+                // Enviar email de recuperación por Firebase Auth
+                await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                if (c.mounted) Navigator.pop(c);
+                _snack('✅ Email de recuperación enviado a $email', _verde);
+              } on FirebaseAuthException catch (e) {
+                if (e.code == 'user-not-found') {
+                  // Aún no migrado a Firebase Auth → notificar admin
+                  await NotificacionService.enviarAAdmins(
+                    titulo: '🔑 Solicitud recuperación contraseña',
+                    cuerpo: '$email necesita recuperar su contraseña.',
+                    tipo: TipoNotificacion.solicitudAcceso,
+                    extra: {'email_solicitante': email},
+                  );
+                  if (c.mounted) Navigator.pop(c);
+                  _snack('Solicitud enviada al administrador.', _verde);
+                } else {
+                  _snack('Error: ${e.message}', Colors.red);
+                }
+              } catch (e) {
+                _snack('Error al enviar email de recuperación.', Colors.red);
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: _verde),
             child: Text(context.t('send_request')),

@@ -3334,93 +3334,19 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                             );
                                           }
 
-                                          // Completada → Reactivar
+                                          // Completada → solo informativo (solo admin territorios puede reactivar)
                                           if (data['completada'] == true) {
                                             return ListTile(
-                                              leading: const Icon(
-                                                  Icons.credit_card,
-                                                  color: Colors.grey),
-                                              title: Text(tarjetaNombre,
-                                                  style: const TextStyle(
-                                                      color: Colors.grey)),
-                                              subtitle: const Text(
-                                                  '✅ Completada este mes'),
-                                              trailing: OutlinedButton(
-                                                onPressed: () async {
-                                                  final confirmar =
-                                                      await showDialog<bool>(
-                                                    context: context,
-                                                    builder: (c) => AlertDialog(
-                                                      shape: RoundedRectangleBorder(
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(
-                                                                      16)),
-                                                      title: const Row(
-                                                          children: [
-                                                            Icon(Icons.refresh,
-                                                                color: Color(
-                                                                    0xFF1B5E20)),
-                                                            SizedBox(width: 8),
-                                                            Text(
-                                                                'Reactivar tarjeta'),
-                                                          ]),
-                                                      content: Text(
-                                                          'Reactivar "$tarjetaNombre"?'),
-                                                      actions: [
-                                                        TextButton(
-                                                            onPressed: () =>
-                                                                Navigator.pop(
-                                                                    c, false),
-                                                            child: const Text(
-                                                                'Cancelar')),
-                                                        ElevatedButton(
-                                                          onPressed: () =>
-                                                              Navigator.pop(
-                                                                  c, true),
-                                                          style: ElevatedButton
-                                                              .styleFrom(
-                                                                  backgroundColor:
-                                                                      const Color(
-                                                                          0xFF1B5E20),
-                                                                  foregroundColor:
-                                                                      Colors
-                                                                          .white),
-                                                          child: const Text(
-                                                              'Reactivar'),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  );
-                                                  if (confirmar == true) {
-                                                    await FirebaseFirestore
-                                                        .instance
-                                                        .collection(
-                                                            'territorios')
-                                                        .doc(terDoc.id)
-                                                        .collection('tarjetas')
-                                                        .doc(tarjetaDoc.id)
-                                                        .update({
-                                                      'completada': false,
-                                                      'fecha_completada': null,
-                                                      'asignado_a': null,
-                                                      'publicador_email': null,
-                                                      'bloqueado': false,
-                                                      'disponible_para_publicadores':
-                                                          true,
-                                                    });
-                                                    if (context.mounted)
-                                                      Navigator.pop(context);
-                                                  }
-                                                },
-                                                style: OutlinedButton.styleFrom(
-                                                    foregroundColor:
-                                                        Colors.orange,
-                                                    side: const BorderSide(
-                                                        color: Colors.orange)),
-                                                child: const Text('Reactivar',
-                                                    style:
-                                                        TextStyle(fontSize: 12)),
+                                              leading: const Icon(Icons.credit_card, color: Colors.grey),
+                                              title: Text(tarjetaNombre, style: const TextStyle(color: Colors.grey)),
+                                              subtitle: const Text('✅ Completada este mes'),
+                                              trailing: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.grey.shade200,
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: const Text('No disp.', style: TextStyle(fontSize: 11, color: Colors.grey)),
                                               ),
                                             );
                                           }

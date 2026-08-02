@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../../../../core/services/update_service.dart';
+import '../../../../core/services/auto_return_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,6 +29,12 @@ class _SplashPageState extends State<SplashPage> {
     // Verificar actualización forzada (solo Android con Play Store)
     await UpdateService.verificarActualizacion(context);
     if (!mounted) return;
+
+    // Verificar y devolver tarjetas vencidas globalmente
+    // Funciona aunque el publicador no haya abierto la app
+    AutoReturnService.verificarYDevolverVencidas().catchError((e) {
+      debugPrint('Auto-return check: $e');
+    });
 
     // Esperar a que Firebase Auth inicialice
     User? firebaseUser = FirebaseAuth.instance.currentUser;

@@ -76,7 +76,11 @@ class NotificationService {
   }
 
   void _onNotificationTapped(NotificationResponse notificationResponse) {
-    debugPrint('🔔 Notification tapped: ${notificationResponse.payload}');
+    final payload = notificationResponse.payload ?? '';
+    debugPrint('🔔 Notification tapped: $payload');
+    if (payload.isNotEmpty) {
+      _pendingAction = payload;
+    }
   }
 
   void _handleForegroundMessage(RemoteMessage message) {
@@ -140,9 +144,43 @@ class NotificationService {
   }
 
   void _navigateBasedOnMessage(RemoteMessage message) {
-    if (message.data['screen'] != null) {
-      debugPrint('🧭 Navigating to: ${message.data['screen']}');
-    }
+    final tipo = message.data['tipo'] as String? ?? '';
+    final screen = message.data['screen'] as String? ?? '';
+    debugPrint('🧭 Notificación tap: tipo=$tipo screen=$screen');
+
+    // Pequeño delay para que la app esté lista
+    Future.delayed(const Duration(milliseconds: 500), () {
+      final context = navigatorKey.currentContext;
+      if (context == null) return;
+
+      switch (tipo) {
+        case 'solicitud_acceso':
+          // Navegar a admin → usuarios pendientes
+          navigatorKey.currentState?.pushNamedAndRemoveUntil(
+            '/', (route) => false,
+          );
+          // Guardar pendiente para que home_page lo procese al abrir
+          _pendingAction = 'usuarios_pendientes';
+          break;
+        case 'solicitud_direccion':
+          // Navegar a admin → localizador solicitudes
+          _pendingAction = 'solicitudes_localizador';
+          navigatorKey.currentState?.pushNamedAndRemoveUntil(
+            '/', (route) => false,
+          );
+          break;
+        default:
+          debugPrint('🔔 Tipo sin navegación específica: $tipo');
+      }
+    });
+  }
+
+  // Acción pendiente después de tap en notificación
+  static String? _pendingAction;
+  static String? getPendingAction() {
+    final action = _pendingAction;
+    _pendingAction = null;
+    return action;
   }
 
   void dispose() {

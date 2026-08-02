@@ -202,6 +202,53 @@ class AutoReturnService {
     }
   }
 
+  /// Verifica TODAS las tarjetas vencidas globalmente.
+  /// Llamar desde admin o cualquier usuario al abrir la app.
+  /// Devuelve tarjetas que superaron el tiempo límite aunque el publicador no haya abierto la app.
+  static Future<int> verificarYDevolverVencidas() async {
+    int devueltas = 0;
+    try {
+      final limite = DateTime.now().subtract(_tiempoLimite);
+      final snap = await FirebaseFirestore.instance
+          .collectionGroup('tarjetas')
+          .where('completada', isEqualTo: false)
+          .get();
+
+      for (final doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final asignadoA = data['asignado_a'] as String? ?? '';
+        final asignadoEn = data['asignado_en'] as Timestamp?;
+        if (asignadoA.isEmpty || asignadoEn == null) continue;
+
+        // Si ya pasó el tiempo límite → devolver
+        if (asignadoEn.toDate().isBefore(limite)) {
+          final territorioId = doc.reference.parent.parent?.id ?? '';
+          if (territorioId.isEmpty) continue;
+
+          await doc.reference.update({
+            'asignado_a': null,
+            'asignado_en': null,
+            'enviado_a': null,
+            'enviado_nombre': null,
+            'publicador_email': null,
+            'conductor_email': null,
+            'estatus_envio': 'disponible',
+            'bloqueado': false,
+            'disponible_para_publicadores': true,
+            'devuelta_automaticamente': true,
+            'devuelta_en': FieldValue.serverTimestamp(),
+          });
+          devueltas++;
+          debugPrint('🔄 Auto-devuelta: ${data['nombre']} (asignada a $asignadoA)');
+        }
+      }
+      if (devueltas > 0) debugPrint('✅ $devueltas tarjetas devueltas automáticamente');
+    } catch (e) {
+      debugPrint('❌ verificarYDevolverVencidas: $e');
+    }
+    return devueltas;
+  }
+
   /// Verifica tarjetas asignadas al iniciar la app y reactiva timers si corresponde.
   Future<void> verificarTarjetasAlIniciar(String usuarioNombre) async {
     try {

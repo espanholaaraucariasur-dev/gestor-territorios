@@ -403,14 +403,13 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             if (tokens.isNotEmpty) score = coinciden * 100 ~/ tokens.length;
           }
 
-          // Si el query tiene número, verificar que la calle también tenga ese número
-          // Si no coincide, penalizar fuertemente el score
-          if (numeroQuery.isNotEmpty && score >= 60) {
-            final tieneNumero = calleNorm.contains(numeroQuery);
+          // Si el query tiene número, DEBE coincidir exactamente
+          // Si no → score = 0 (dirección descartada completamente)
+          if (numeroQuery.isNotEmpty) {
+            final regex = RegExp('\\b' + numeroQuery + '\\b');
+            final tieneNumero = regex.hasMatch(calleNorm);
             if (!tieneNumero) {
-              score = score ~/ 3; // penalizar: 80 → 26, no pasa el umbral de 60
-            } else {
-              score = (score * 1.2).round().clamp(0, 100); // bonificar si coincide
+              score = 0;
             }
           }
 
@@ -420,7 +419,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           }
         }
 
-        if (mejorLocal != null && mejorScoreLocal >= 60) {
+        if (mejorLocal != null && mejorScoreLocal >= 70) {
           final calle = mejorLocal['calle']?.toString() ?? '';
           final comp = mejorLocal['complemento']?.toString() ?? '';
           setState(() {
@@ -615,8 +614,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         'created_at': FieldValue.serverTimestamp(),
       });
 
-      // Notificar a todos los admins y admin_territorios
-      await NotificacionService.enviarAAdminTerritorios(
+      // Notificar SOLO a admin principal
+      await NotificacionService.enviarAAdmins(
         titulo: '📍 Nueva dirección reportada',
         cuerpo: '${widget.usuarioNombre} envió una dirección nueva: "$calle"'
             '${_complementoCtrl.text.isNotEmpty ? ' · ${_complementoCtrl.text}' : ''}',
