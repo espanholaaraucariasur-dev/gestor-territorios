@@ -502,12 +502,16 @@ class _LocalizadorTabState extends State<LocalizadorTab>
               .limit(20)
               .get();
           if (snap2.docs.isNotEmpty) {
+            // Extraer número del query para verificación exacta
+            final numQ = RegExp(r'\b(\d+)\b').firstMatch(consultaNorm)?.group(1) ?? '';
             int mejorScore = -1;
             Map<String, dynamic>? encontrada;
             for (final doc in snap2.docs) {
               final data = doc.data();
-              final calleNorm = (data['calle_normalizada'] as String?) ?? _normalizarBusqueda(data['calle']?.toString() ?? '');
-              int coinciden = prefijoTokens.where((t) => calleNorm.contains(t)).length;
+              final calleNorm2 = (data['calle_normalizada'] as String?) ?? _normalizarBusqueda(data['calle']?.toString() ?? '');
+              // Si el query tiene número, DEBE coincidir
+              if (numQ.isNotEmpty && !RegExp('\\b$numQ\\b').hasMatch(calleNorm2)) continue;
+              int coinciden = prefijoTokens.where((t) => calleNorm2.contains(t)).length;
               int score = (coinciden * 100 ~/ prefijoTokens.length);
               if (score > mejorScore) { mejorScore = score; encontrada = data; }
             }
@@ -527,6 +531,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       }
 
       // ── Estrategia 3: Mapbox geocoding ──
+      final numQGlobal = RegExp(r'\b(\d+)\b').firstMatch(_normalizarBusqueda(consulta))?.group(1) ?? '';
       final coords = await MapboxService.geocodificar(consulta);
       if (coords != null) {
         final snap3 = await FirebaseFirestore.instance
@@ -539,6 +544,11 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           final lat = (data['lat'] as num?)?.toDouble();
           final lng = (data['lng'] as num?)?.toDouble();
           if (lat != null && lng != null && _distanciaKm(coords[0], coords[1], lat, lng) < 0.1) {
+            // Verificar número si el query lo tiene
+            if (numQGlobal.isNotEmpty) {
+              final calleN = _normalizarBusqueda(data['calle']?.toString() ?? '');
+              if (!RegExp('\\b$numQGlobal\\b').hasMatch(calleN)) continue;
+            }
             final calle = data['calle']?.toString() ?? '';
             final comp = data['complemento']?.toString() ?? '';
             setState(() {
