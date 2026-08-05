@@ -374,6 +374,12 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       final consultaNormLocal = _normalizarBusqueda(consulta);
       final consultaLower = consulta.toLowerCase();
 
+      // Log para diagnóstico
+      debugPrint('🔍 BUSCAR: query="$consulta" norm="$consultaNormLocal" dirsLocales=${_dirsLocales.length}');
+      final regexNumLog = RegExp(r'\b(\d+)\b');
+      final numLog = regexNumLog.firstMatch(consultaNormLocal)?.group(1) ?? '';
+      debugPrint('🔍 Número extraído: "$numLog"');
+
       // ── Estrategia 0: buscar en dirs locales precargadas ──────────────────
       // Funciona aunque las dirs no tengan palabras_clave ni calle_normalizada
       if (_dirsLocales.isNotEmpty) {
@@ -384,6 +390,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         final regexNumero = RegExp(r'\b(\d+)\b');
         final numeroQuery = regexNumero.firstMatch(consultaNormLocal)?.group(1) ?? '';
 
+        debugPrint('🔍 Revisando ${_dirsLocales.length} dirs locales, numeroQuery="$numeroQuery"');
         for (final d in _dirsLocales) {
           final calle = (d['calle'] as String?) ?? '';
           if (calle.isEmpty) continue;
@@ -404,12 +411,14 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           }
 
           // Si el query tiene número, DEBE coincidir exactamente
-          // Si no → score = 0 (dirección descartada completamente)
           if (numeroQuery.isNotEmpty) {
             final regex = RegExp('\\b' + numeroQuery + '\\b');
             final tieneNumero = regex.hasMatch(calleNorm);
-            if (!tieneNumero) {
+            if (!tieneNumero && score > 0) {
+              debugPrint('❌ Número NO coincide: calle="$calle" norm="$calleNorm" buscado="$numeroQuery" score era $score → 0');
               score = 0;
+            } else if (tieneNumero && score > 0) {
+              debugPrint('✅ Número SÍ coincide: calle="$calle"');
             }
           }
 
