@@ -542,14 +542,16 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     'created_at': FieldValue.serverTimestamp(),
                   });
 
-                  // Notificar a todos los admins
+                  // Notificar a todos los admins (solo admin principal)
                   await NotificacionService.enviarAAdmins(
                     titulo: '👤 Nueva solicitud de acceso',
-                    cuerpo: '${nomCtrl.text.trim()} solicita acceso a la app.',
+                    cuerpo: '${nomCtrl.text.trim()} solicita acceso a la app. Toca para aprobar.',
                     tipo: TipoNotificacion.solicitudAcceso,
                     extra: {
                       'solicitante_nombre': nomCtrl.text.trim(),
                       'solicitante_email': emailCtrl.text.trim(),
+                      'screen': 'usuarios_pendientes',
+                      'tipo': 'solicitud_acceso',
                     },
                   );
 

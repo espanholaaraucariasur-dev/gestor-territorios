@@ -10,6 +10,7 @@ import 'dart:io';
 import '../../../auth/presentation/pages/login_page.dart';
 import '../../../../core/services/auto_return_service.dart';
 import '../../../../core/services/notificacion_service.dart';
+import '../../../../core/services/notification_service.dart';
 import 'admin/restauracion_mensual.dart';
 import 'notificaciones_widget.dart';
 import 'direccion_detalle_dialog.dart';
@@ -77,6 +78,43 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       _modoAdminTerritoriosActivo = true;
     }
     _verificarReinicioMensual();
+    // Verificar si hay acción pendiente de notificación
+    WidgetsBinding.instance.addPostFrameCallback((_) => _procesarPendingAction());
+  }
+
+  void _procesarPendingAction() {
+    final action = NotificationService.getPendingAction();
+    if (action == null || !mounted) return;
+
+    final esAdmin = widget.usuarioData['es_admin'] == true;
+    if (!esAdmin) return; // Solo admin puede navegar desde notificaciones
+
+    switch (action) {
+      case 'usuarios_pendientes':
+        // Navegar a la tab de Usuarios en admin
+        setState(() {
+          _tabControllerAdmin.animateTo(2); // Tab Usuarios
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('👤 Revisa los usuarios pendientes de aprobación'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        break;
+      case 'solicitudes_localizador':
+        // Navegar a la tab de Comunicación en admin
+        setState(() {
+          _tabControllerAdmin.animateTo(1); // Tab Comunicación
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📍 Revisa las solicitudes de direcciones'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+        break;
+    }
   }
 
   @override
