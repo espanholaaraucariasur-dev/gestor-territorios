@@ -374,12 +374,6 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       final consultaNormLocal = _normalizarBusqueda(consulta);
       final consultaLower = consulta.toLowerCase();
 
-      // Log para diagnóstico
-      debugPrint('🔍 BUSCAR: query="$consulta" norm="$consultaNormLocal" dirsLocales=${_dirsLocales.length}');
-      final regexNumLog = RegExp(r'\b(\d+)\b');
-      final numLog = regexNumLog.firstMatch(consultaNormLocal)?.group(1) ?? '';
-      debugPrint('🔍 Número extraído: "$numLog"');
-
       // ── Estrategia 0: buscar en dirs locales precargadas ──────────────────
       // Funciona aunque las dirs no tengan palabras_clave ni calle_normalizada
       if (_dirsLocales.isNotEmpty) {
@@ -390,7 +384,6 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         final regexNumero = RegExp(r'\b(\d+)\b');
         final numeroQuery = regexNumero.firstMatch(consultaNormLocal)?.group(1) ?? '';
 
-        debugPrint('🔍 Revisando ${_dirsLocales.length} dirs locales, numeroQuery="$numeroQuery"');
         for (final d in _dirsLocales) {
           final calle = (d['calle'] as String?) ?? '';
           if (calle.isEmpty) continue;
@@ -413,13 +406,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           // Si el query tiene número, DEBE coincidir exactamente
           if (numeroQuery.isNotEmpty) {
             final regex = RegExp('\\b' + numeroQuery + '\\b');
-            final tieneNumero = regex.hasMatch(calleNorm);
-            if (!tieneNumero && score > 0) {
-              debugPrint('❌ Número NO coincide: calle="$calle" norm="$calleNorm" buscado="$numeroQuery" score era $score → 0');
-              score = 0;
-            } else if (tieneNumero && score > 0) {
-              debugPrint('✅ Número SÍ coincide: calle="$calle"');
-            }
+            if (!regex.hasMatch(calleNorm)) score = 0;
           }
 
           if (score > mejorScoreLocal) {
@@ -922,6 +909,16 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                               ),
                               onChanged: (v) {
                                 _debounceTimer?.cancel();
+                                // Limpiar resultado anterior cuando el usuario sigue escribiendo
+                                if (_buscado || _encontrada) {
+                                  setState(() {
+                                    _buscado = false;
+                                    _encontrada = false;
+                                    _direccionEncontrada = null;
+                                    _mensaje = '';
+                                    _mostrarFormulario = false;
+                                  });
+                                }
                                 // Desde 1 caracter si hay dirs locales, 2+ si no
                                 final minChars = _dirsLocales.isNotEmpty ? 1 : 2;
                                 if (v.trim().length < minChars) {
