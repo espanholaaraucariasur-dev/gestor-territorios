@@ -727,66 +727,66 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
           title: Text('Enviar: $nombre'),
           content: SizedBox(
             width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (conductoresSnap.docs.isEmpty)
-                  const Text('No hay conductores disponibles.',
-                      style: TextStyle(color: Colors.grey))
-                else ...[
-                  const Text('Conductores disponibles:',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  ...conductoresSnap.docs.map((doc) {
-                    final data = doc.data();
-                    return ListTile(
-                      dense: true,
-                      leading:
-                          const Icon(Icons.drive_eta, color: Color(0xFF1B5E20)),
-                      title: Text(data['nombre'] ?? 'Conductor'),
-                      subtitle: Text(data['email'] ?? ''),
-                      onTap: () async {
-                        Navigator.pop(context);
-                        await _ejecutarEnvio(
-                            terId: terId,
-                            tarjetaId: tarjetaId,
-                            nombre: nombre,
-                            destinatarioEmail: data['email'],
-                            tipo: 'conductor');
-                      },
-                    );
-                  }),
+            height: 400,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (conductoresSnap.docs.isNotEmpty) ...[
+                    const Text('Conductores:',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 4),
+                    ...conductoresSnap.docs.map((doc) {
+                      final data = doc.data();
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.drive_eta, color: Color(0xFF1B5E20)),
+                        title: Text(data['nombre'] ?? 'Conductor'),
+                        subtitle: Text(data['email'] ?? ''),
+                        onTap: () async {
+                          Navigator.pop(context);
+                          await _ejecutarEnvio(
+                              terId: terId,
+                              tarjetaId: tarjetaId,
+                              nombre: nombre,
+                              destinatarioEmail: data['email'],
+                              tipo: 'conductor');
+                        },
+                      );
+                    }),
+                    const Divider(),
+                  ],
+                  const Text('Publicadores:',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 4),
+                  if (publicadoresSnap.docs.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Text('No hay publicadores disponibles.',
+                          style: TextStyle(color: Colors.grey)),
+                    )
+                  else
+                    ...publicadoresSnap.docs.map((doc) {
+                      final data = doc.data();
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.person, color: Colors.blue),
+                        title: Text(data['nombre'] ?? 'Publicador'),
+                        subtitle: Text(data['email'] ?? ''),
+                        onTap: () async {
+                          Navigator.pop(context);
+                          await _ejecutarEnvio(
+                              terId: terId,
+                              tarjetaId: tarjetaId,
+                              nombre: nombre,
+                              destinatarioEmail: data['email'],
+                              tipo: 'publicador');
+                        },
+                      );
+                    }),
                 ],
-                const Divider(),
-                const Text('Enviar a publicador:',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                const SizedBox(height: 8),
-                if (publicadoresSnap.docs.isEmpty)
-                  const Text('No hay publicadores disponibles.',
-                      style: TextStyle(color: Colors.grey))
-                else
-                  ...publicadoresSnap.docs.map((doc) {
-                    final data = doc.data();
-                    return ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.person, color: Colors.blue),
-                      title: Text(data['nombre'] ?? 'Publicador'),
-                      subtitle: Text(data['email'] ?? ''),
-                      onTap: () async {
-                        Navigator.pop(context);
-                        await _ejecutarEnvio(
-                            terId: terId,
-                            tarjetaId: tarjetaId,
-                            nombre: nombre,
-                            destinatarioEmail: data['email'],
-                            tipo: 'publicador');
-                      },
-                    );
-                  }),
-              ],
+              ),
             ),
           ),
           actions: [

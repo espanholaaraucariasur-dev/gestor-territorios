@@ -437,7 +437,20 @@ class _TemporalesTabState extends State<TemporalesTab> {
                 return const Center(child: CircularProgressIndicator());
               }
 
+              // Separar dirs normales de dirs con motivo "Otro"
               final docs = snapshot.data!.docs;
+              final docsConMotivo = docs.where((d) {
+                final data = d.data() as Map<String, dynamic>;
+                final motivo = data['motivo_temporal'] as String? ?? '';
+                return motivo.isNotEmpty && motivo != 'no_predicado' && motivo != 'no_hispano';
+              }).toList();
+
+              if (docsConMotivo.isNotEmpty) {
+                // Mostrar banner de dirs con motivo especial
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  // Notificación silenciosa para admin
+                });
+              }
 
               if (docs.isEmpty) {
                 return Center(
@@ -561,26 +574,55 @@ class _TemporalesTabState extends State<TemporalesTab> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          // Muestra primeras 3 direcciones como preview
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
+                          // Muestra primeras 3 direcciones con motivo si existe
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: dirs.take(3).map((d) {
-                              final data =
-                                  (d.data() as Map<String, dynamic>?) ?? {};
+                              final data = (d.data() as Map<String, dynamic>?) ?? {};
                               final calle = (data['calle'] as String?) ?? '';
+                              final motivo = (data['motivo_temporal'] as String?) ?? '';
+                              final tieneMotivo = motivo.isNotEmpty &&
+                                  motivo != 'no_predicado' &&
+                                  motivo != 'no_hispano';
                               return Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 4),
+                                margin: const EdgeInsets.only(bottom: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: Colors.grey.shade100,
+                                  color: tieneMotivo ? Colors.orange.shade50 : Colors.grey.shade100,
                                   borderRadius: BorderRadius.circular(6),
+                                  border: tieneMotivo
+                                      ? Border.all(color: Colors.orange.shade300)
+                                      : null,
                                 ),
-                                child: Text(
-                                  calle,
-                                  style: const TextStyle(
-                                      fontSize: 10, color: Colors.black87),
-                                  overflow: TextOverflow.ellipsis,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      calle,
+                                      style: const TextStyle(fontSize: 11, color: Colors.black87),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (tieneMotivo)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.info_outline, size: 11, color: Colors.orange),
+                                            const SizedBox(width: 3),
+                                            Expanded(
+                                              child: Text(
+                                                motivo,
+                                                style: const TextStyle(
+                                                    fontSize: 10,
+                                                    color: Colors.orange,
+                                                    fontStyle: FontStyle.italic),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               );
                             }).toList(),
