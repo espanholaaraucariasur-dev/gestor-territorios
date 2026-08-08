@@ -89,6 +89,19 @@ class AppTranslations {
       'cards': 'Tarjetas',
       'locator': 'Localizador',
       'clear_mode': 'Limpiar modo',
+
+      // === ASISTENCIA (Contador) ===
+      'attendance_counter': 'Contador de Asistencia',
+      'attendance_hispanos': 'Hispanos',
+      'attendance_locales': 'Locales',
+      'attendance_total': 'Total',
+      'attendance_reset': 'Reiniciar',
+      'attendance_reset_confirm': '¿Reiniciar todos los contadores a 0?',
+      'attendance_copy': 'Copiar texto',
+      'attendance_share_whatsapp': 'Compartir en WhatsApp',
+      'attendance_copied': '¡Resultado copiado al portapapeles!',
+      'attendance_share_error': 'No se pudo abrir WhatsApp. Intenta de nuevo.',
+      'attendance_no_negative': 'El valor no puede ser menor a 0',
       'no_new_notifications': 'No hay notificaciones nuevas',
 
       // === LOGIN PAGE ===
@@ -394,6 +407,19 @@ class AppTranslations {
       'locator': 'Localizador',
       'clear_mode': 'Limpar modo',
       'no_new_notifications': 'Sem novas notificações',
+
+      // === ASSIDUIDADE (Contador) ===
+      'attendance_counter': 'Contador de Assiduidade',
+      'attendance_hispanos': 'Hispanos',
+      'attendance_locales': 'Locais',
+      'attendance_total': 'Total',
+      'attendance_reset': 'Reiniciar',
+      'attendance_reset_confirm': 'Reiniciar todos os contadores para 0?',
+      'attendance_copy': 'Copiar texto',
+      'attendance_share_whatsapp': 'Compartilhar no WhatsApp',
+      'attendance_copied': 'Resultado copiado para a área de transferência!',
+      'attendance_share_error': 'Não foi possível abrir o WhatsApp. Tente novamente.',
+      'attendance_no_negative': 'O valor não pode ser menor que 0',
 
       // === LOGIN PAGE ===
       'sign_in': 'Entrar',
