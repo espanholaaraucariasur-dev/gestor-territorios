@@ -973,13 +973,9 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                   Text('Ya ejecutado este mes'),
                 ]),
                 content: Text(
-                  'El nuevo mes ya fue iniciado para $mesAnterior.
-
-'
+                  'El nuevo mes ya fue iniciado para $mesAnterior.\n\n'
                   '⚠️ Ejecutarlo de nuevo puede marcar como PRIORIDAD direcciones '
-                  'que ya fueron trabajadas este mes.
-
-'
+                  'que ya fueron trabajadas este mes.\n\n'
                   '¿Deseas continuar de todas formas?',
                 ),
                 actions: [
