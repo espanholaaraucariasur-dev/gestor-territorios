@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import '../../../../../core/services/notificacion_service.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -98,13 +99,45 @@ class _LocalizadorTabState extends State<LocalizadorTab>
   }
 
   double _distanciaKm(double lat1, double lon1, double lat2, double lon2) {
-    const p = 0.017453292519943295;
-    final a = 0.5 -
-        ((lat2 - lat1) * p / 2).abs() +
-        ((lat1 * p).abs()) *
-            ((lat2 * p).abs()) *
-            ((lon2 - lon1) * p / 2).abs();
-    return 12742 * (a < 0 ? -a : a);
+    return _distanciaMetros(lat1, lon1, lat2, lon2) / 1000;
+  }
+
+  // Haversine corregida — distancia en metros entre dos coordenadas
+  double _distanciaMetros(double lat1, double lng1, double lat2, double lng2) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * math.pi / 180;
+    final dLng = (lng2 - lng1) * math.pi / 180;
+    final la1 = lat1 * math.pi / 180;
+    final la2 = lat2 * math.pi / 180;
+    final a = math.pow(math.sin(dLat / 2), 2).toDouble() +
+        math.cos(la1) * math.cos(la2) * math.pow(math.sin(dLng / 2), 2).toDouble();
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  }
+
+  // Dirección completa normalizada (calle + complemento): "rua das tulipas 475"
+  String _fullNorm(Map<String, dynamic> d) {
+    final calle = (d['calle'] as String?) ?? '';
+    final comp = (d['complemento'] as String?) ?? '';
+    return _normalizarBusqueda('$calle $comp');
+  }
+
+  // Último token numérico de una cadena normalizada (el número de la casa)
+  String _numeroQuery(String norm) {
+    final nums = RegExp(r'\d+').allMatches(norm).map((m) => m.group(0)!).toList();
+    return nums.isEmpty ? '' : nums.last;
+  }
+
+  // ¿La dirección contiene EXACTAMENTE ese número?
+  bool _coincideNumero(String fullNorm, String num) {
+    if (num.isEmpty) return true;
+    return RegExp('\\b$num\\b').hasMatch(fullNorm);
+  }
+
+  // ¿Algún número de la dirección EMPIEZA con el texto tipeado? (autocompletado)
+  bool _numeroEmpiezaCon(String fullNorm, String num) {
+    if (num.isEmpty) return true;
+    final tokens = fullNorm.split(' ').where((t) => RegExp(r'^\d+$').hasMatch(t));
+    return tokens.any((t) => t.startsWith(num));
   }
 
   // Genera lista de tokens para guardar en palabras_clave
@@ -140,6 +173,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       // Normalizar la búsqueda: sin tildes, minúsculas, permite espacios
       final norm = _normalizarBusqueda(query); // "rua ivai 68"
       final queryLower = query.toLowerCase();  // "rua ivaí 68"
+      // Si el usuario tipeó un número, solo sugerir direcciones con ese número
+      final numeroQ = _numeroQuery(norm);
 
       final callesVistas = <String>{};
       final sugs = <Map<String, dynamic>>[];
@@ -151,10 +186,12 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           final calle = (d['calle'] as String?) ?? '';
           if (calle.isEmpty) continue;
 
+          // Si hay número tipeado, descartar direcciones que no lo tengan
+          if (numeroQ.isNotEmpty && !_numeroEmpiezaCon(_fullNorm(d), numeroQ)) continue;
+
           // Comparar con versión normalizada Y versión original
           final calleNorm = _normalizarBusqueda(calle);
           final calleLower = calle.toLowerCase();
-          final calleNormFields = (d['calle_normalizada'] as String?) ?? calleNorm;
 
           // Match con 4 estrategias para máxima cobertura:
           final tokens = norm.split(' ').where((w) => w.isNotEmpty).toList();
@@ -206,6 +243,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             final d = doc.data() as Map<String, dynamic>;
             final calle = (d['calle'] as String?) ?? '';
             if (calle.isEmpty || callesVistas.contains(calle)) continue;
+            if (numeroQ.isNotEmpty && !_numeroEmpiezaCon(_fullNorm(d), numeroQ)) continue;
             // Verificar que los tokens anteriores también están en la calle
             final calleN = _normalizarBusqueda(calle);
             final prevTokens = norm.split(' ').where((t) => t.isNotEmpty && t != lastToken).toList();
@@ -231,6 +269,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             final d = doc.data() as Map<String, dynamic>;
             final calle = (d['calle'] as String?) ?? '';
             if (calle.isEmpty || callesVistas.contains(calle)) continue;
+            if (numeroQ.isNotEmpty && !_numeroEmpiezaCon(_fullNorm(d), numeroQ)) continue;
             callesVistas.add(calle);
             sugs.add(d);
             if (sugs.length >= 6) break;
@@ -262,6 +301,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             final d = doc.data() as Map<String, dynamic>;
             final calle = (d['calle'] as String?) ?? '';
             if (calle.isEmpty || callesVistas.contains(calle)) continue;
+            if (numeroQ.isNotEmpty && !_numeroEmpiezaCon(_fullNorm(d), numeroQ)) continue;
             // Verificar que realmente contiene el query (no solo tiene el mismo prefijo)
             final calleN = _normalizarBusqueda(calle);
             final queryN = _normalizarBusqueda(query);
@@ -342,16 +382,6 @@ class _LocalizadorTabState extends State<LocalizadorTab>
     }
   }
 
-  double _distanciaMetros(double lat1, double lng1, double lat2, double lng2) {
-    const r = 6371000.0;
-    final dLat = (lat2 - lat1) * 3.14159265358979 / 180;
-    final dLng = (lng2 - lng1) * 3.14159265358979 / 180;
-    final a = (dLat / 2) * (dLat / 2) +
-        (lat1 * 3.14159265358979 / 180) * (lat2 * 3.14159265358979 / 180) *
-            (dLng / 2) * (dLng / 2);
-    return r * 2 * (a < 1 ? a : 1);
-  }
-
   Future<void> _buscar() async {
     final consulta = _calleCtrl.text.trim();
     if (consulta.isEmpty) return;
@@ -372,7 +402,6 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
     try {
       final consultaNormLocal = _normalizarBusqueda(consulta);
-      final consultaLower = consulta.toLowerCase();
 
       // ── Estrategia 0: buscar en dirs locales precargadas ──────────────────
       // Funciona aunque las dirs no tengan palabras_clave ni calle_normalizada
@@ -381,32 +410,31 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         int mejorScoreLocal = -1;
 
         // Extraer número del query si existe (ej: "rua das flores 370" → numero="370")
-        final regexNumero = RegExp(r'\b(\d+)\b');
-        final numeroQuery = regexNumero.firstMatch(consultaNormLocal)?.group(1) ?? '';
+        final numeroQuery = _numeroQuery(consultaNormLocal);
 
         for (final d in _dirsLocales) {
           final calle = (d['calle'] as String?) ?? '';
           if (calle.isEmpty) continue;
+          // Comparar contra la dirección COMPLETA (calle + complemento)
+          final fullN = _fullNorm(d);
           final calleNorm = _normalizarBusqueda(calle);
-          final calleLower = calle.toLowerCase();
 
           // Score basado en qué tan completo es el match
           int score = 0;
-          if (calleNorm == consultaNormLocal || calleLower == consultaLower) {
+          if (fullN == consultaNormLocal || calleNorm == consultaNormLocal) {
             score = 100; // match exacto
-          } else if (calleNorm.contains(consultaNormLocal) || calleLower.contains(consultaLower)) {
+          } else if (fullN.contains(consultaNormLocal) || calleNorm.contains(consultaNormLocal)) {
             score = 80; // contiene completo
           } else {
             // Match por tokens
             final tokens = consultaNormLocal.split(' ').where((t) => t.isNotEmpty).toList();
-            final coinciden = tokens.where((t) => calleNorm.contains(t)).length;
+            final coinciden = tokens.where((t) => fullN.contains(t)).length;
             if (tokens.isNotEmpty) score = coinciden * 100 ~/ tokens.length;
           }
 
           // Si el query tiene número, DEBE coincidir exactamente
-          if (numeroQuery.isNotEmpty) {
-            final regex = RegExp('\\b' + numeroQuery + '\\b');
-            if (!regex.hasMatch(calleNorm)) score = 0;
+          if (numeroQuery.isNotEmpty && !_coincideNumero(fullN, numeroQuery)) {
+            score = 0;
           }
 
           if (score > mejorScoreLocal) {
@@ -458,8 +486,10 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
           // Si la consulta tiene número, debe coincidir EXACTAMENTE
           if (numeroConsulta.isNotEmpty) {
+            final fullN = _fullNorm(data);
             final tieneNumeroExacto = keywords.contains(numeroConsulta) ||
-                calleDir.contains(numeroConsulta);
+                calleDir.contains(numeroConsulta) ||
+                _coincideNumero(fullN, numeroConsulta);
             if (!tieneNumeroExacto) continue; // descarta si el número no coincide
           }
 
@@ -487,7 +517,41 @@ class _LocalizadorTabState extends State<LocalizadorTab>
 
       // ── Estrategia 2: range query en calle_normalizada ──
       final consultaNorm = _normalizarBusqueda(consulta);
+      final numQ = _numeroQuery(consultaNorm);
       final prefijoTokens = consultaNorm.split(' ').where((t) => t.length >= 2).toList();
+
+      void mostrarEncontrada(Map<String, dynamic> data) {
+        final calle = data['calle']?.toString() ?? '';
+        final comp = data['complemento']?.toString() ?? '';
+        setState(() {
+          _buscando = false; _buscado = true; _encontrada = true;
+          _direccionEncontrada = data;
+          _mensaje = comp.isNotEmpty ? '$calle · $comp' : calle;
+          _mostrarFormulario = false;
+        });
+      }
+
+      // 2a) Match EXACTO sobre dirección completa (calle + complemento)
+      //     "rua das tulipas 480" → busca exactamente ese string normalizado
+      if (consultaNorm.length >= 3) {
+        final snapExact = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .where('direccion_normalizada', isGreaterThanOrEqualTo: consultaNorm)
+            .where('direccion_normalizada', isLessThanOrEqualTo: '$consultaNorm\uf8ff')
+            .limit(10)
+            .get();
+        if (snapExact.docs.isNotEmpty) {
+          for (final doc in snapExact.docs) {
+            final data = doc.data();
+            final fullN = _fullNorm(data);
+            if (numQ.isNotEmpty && !_coincideNumero(fullN, numQ)) continue;
+            mostrarEncontrada(data);
+            return;
+          }
+        }
+      }
+
+      // 2b) Range query por prefijo de calle_normalizada
       if (prefijoTokens.isNotEmpty) {
         for (int n = prefijoTokens.length.clamp(1, 3); n >= 1; n--) {
           final prefijo = prefijoTokens.take(n).join(' ');
@@ -498,28 +562,19 @@ class _LocalizadorTabState extends State<LocalizadorTab>
               .limit(20)
               .get();
           if (snap2.docs.isNotEmpty) {
-            // Extraer número del query para verificación exacta
-            final numQ = RegExp(r'\b(\d+)\b').firstMatch(consultaNorm)?.group(1) ?? '';
             int mejorScore = -1;
             Map<String, dynamic>? encontrada;
             for (final doc in snap2.docs) {
               final data = doc.data();
-              final calleNorm2 = (data['calle_normalizada'] as String?) ?? _normalizarBusqueda(data['calle']?.toString() ?? '');
-              // Si el query tiene número, DEBE coincidir
-              if (numQ.isNotEmpty && !RegExp('\\b$numQ\\b').hasMatch(calleNorm2)) continue;
-              int coinciden = prefijoTokens.where((t) => calleNorm2.contains(t)).length;
+              final fullN2 = _fullNorm(data);
+              // Si el query tiene número, DEBE coincidir (calle + complemento)
+              if (numQ.isNotEmpty && !_coincideNumero(fullN2, numQ)) continue;
+              int coinciden = prefijoTokens.where((t) => fullN2.contains(t)).length;
               int score = (coinciden * 100 ~/ prefijoTokens.length);
               if (score > mejorScore) { mejorScore = score; encontrada = data; }
             }
             if (encontrada != null && mejorScore >= 60) {
-              final calle = encontrada['calle']?.toString() ?? '';
-              final comp = encontrada['complemento']?.toString() ?? '';
-              setState(() {
-                _buscando = false; _buscado = true; _encontrada = true;
-                _direccionEncontrada = encontrada;
-                _mensaje = comp.isNotEmpty ? '$calle · $comp' : calle;
-                _mostrarFormulario = false;
-              });
+              mostrarEncontrada(encontrada);
               return;
             }
           }
@@ -527,7 +582,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
       }
 
       // ── Estrategia 3: Mapbox geocoding ──
-      final numQGlobal = RegExp(r'\b(\d+)\b').firstMatch(_normalizarBusqueda(consulta))?.group(1) ?? '';
+      final numQGlobal = _numeroQuery(_normalizarBusqueda(consulta));
       final coords = await MapboxService.geocodificar(consulta);
       if (coords != null) {
         final snap3 = await FirebaseFirestore.instance
@@ -540,11 +595,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
           final lat = (data['lat'] as num?)?.toDouble();
           final lng = (data['lng'] as num?)?.toDouble();
           if (lat != null && lng != null && _distanciaKm(coords[0], coords[1], lat, lng) < 0.1) {
-            // Verificar número si el query lo tiene
-            if (numQGlobal.isNotEmpty) {
-              final calleN = _normalizarBusqueda(data['calle']?.toString() ?? '');
-              if (!RegExp('\\b$numQGlobal\\b').hasMatch(calleN)) continue;
-            }
+            // Verificar número si el query lo tiene (calle + complemento)
+            if (numQGlobal.isNotEmpty && !_coincideNumero(_fullNorm(data), numQGlobal)) continue;
             final calle = data['calle']?.toString() ?? '';
             final comp = data['complemento']?.toString() ?? '';
             setState(() {
@@ -692,23 +744,27 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         if (mounted) { _gpsLat = pos.latitude; _gpsLng = pos.longitude; _gpsCargado = true; }
       } catch (_) { _gpsCargado = false; }
 
-      // Cargar TODAS las dirs sin orderBy (evita problemas de índice)
-      // Ordenar en memoria después
-      final snap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .limit(500)
-          .get();
+      // Cargar TODAS las dirs paginadas (sin orderBy, evita problemas de índice)
+      final todas = <Map<String, dynamic>>[];
+      DocumentSnapshot? ultimo;
+      for (int i = 0; i < 6; i++) {
+        Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+            .collection('direcciones_globales');
+        if (ultimo != null) query = query.startAfterDocument(ultimo);
+        final snap = await query.limit(500).get();
+        if (snap.docs.isEmpty) break;
+        todas.addAll(snap.docs.map((d) => d.data()));
+        ultimo = snap.docs.last;
+      }
 
       if (!mounted) return;
       setState(() {
-        _dirsLocales = snap.docs
-            .map((d) => d.data() as Map<String, dynamic>)
-            .toList();
+        _dirsLocales = todas;
       });
       debugPrint('📍 ${_dirsLocales.length} dirs precargadas (GPS: $_gpsCargado)');
     } catch (e) {
       debugPrint('Preload error: $e');
-      // Fallback: intentar sin orderBy
+      // Fallback: cargar un lote sin paginar
       try {
         final snap = await FirebaseFirestore.instance
             .collection('direcciones_globales')
@@ -716,7 +772,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
             .get();
         if (mounted) {
           setState(() {
-            _dirsLocales = snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+            _dirsLocales = snap.docs.map((d) => d.data()).toList();
           });
           debugPrint('📍 ${_dirsLocales.length} dirs precargadas (fallback)');
         }
@@ -1008,8 +1064,18 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                                 ),
                                 onTap: () {
                                   _calleCtrl.text = calle;
-                                  setState(() => _sugerencias = []);
-                                  _buscar();
+                                  setState(() {
+                                    _sugerencias = [];
+                                    // Mostrar EXACTAMENTE la dirección tocada
+                                    // (conserva calle + complemento / número)
+                                    _buscando = false;
+                                    _buscado = true;
+                                    _encontrada = true;
+                                    _direccionEncontrada = sug;
+                                    _mensaje =
+                                        comp.isNotEmpty ? '$calle · $comp' : calle;
+                                    _mostrarFormulario = false;
+                                  });
                                 },
                               );
                             }).toList(),
