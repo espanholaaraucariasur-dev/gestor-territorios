@@ -1443,6 +1443,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
           batch.update(dir.reference, {
             'estado': 'temporal',
             'estado_predicacion': 'temporal',
+            if (estado == 'otro') 'tarjeta_id': '',
             'tarjeta_id_origen': origenReal,
             'territorio_origen_id': territorioOrigenId,
             'territorio_origen_nombre': territorioOrigenNombre,

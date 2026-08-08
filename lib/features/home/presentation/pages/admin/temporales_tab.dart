@@ -75,11 +75,15 @@ class _TemporalesTabState extends State<TemporalesTab> {
       // tarjeta_id_origen se mantiene, tarjeta_id apunta a nueva tarjeta temporal
       for (final dir in seleccionadas) {
         final data = (dir.data() as Map<String, dynamic>?) ?? {};
-        final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? '';
+        final tarjetaIdOriginal =
+            (data['tarjeta_id_origen'] as String?)?.isNotEmpty == true
+                ? data['tarjeta_id_origen'] as String
+                : ((data['tarjeta_id'] as String?) ?? '');
 
         batch.update(dir.reference, {
           'tarjeta_id': nombreTarjeta, // apunta a tarjeta temporal
-          'tarjeta_id_origen': tarjetaIdOriginal, // guarda origen
+          if (tarjetaIdOriginal.isNotEmpty)
+            'tarjeta_id_origen': tarjetaIdOriginal, // guarda origen
           'territorio_id': 'temporales',
           'estado': 'temporal_asignada',
           'estado_predicacion': 'pendiente',
@@ -440,20 +444,7 @@ class _TemporalesTabState extends State<TemporalesTab> {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              // Separar dirs normales de dirs con motivo "Otro"
               final docs = snapshot.data!.docs;
-              final docsConMotivo = docs.where((d) {
-                final data = d.data() as Map<String, dynamic>;
-                final motivo = data['motivo_temporal'] as String? ?? '';
-                return motivo.isNotEmpty && motivo != 'no_predicado' && motivo != 'no_hispano';
-              }).toList();
-
-              if (docsConMotivo.isNotEmpty) {
-                // Mostrar banner de dirs con motivo especial
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  // Notificación silenciosa para admin
-                });
-              }
 
               if (docs.isEmpty) {
                 return Center(
@@ -577,19 +568,21 @@ class _TemporalesTabState extends State<TemporalesTab> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          // Muestra primeras 3 direcciones con motivo si existe
+                          // Direcciones con acciones por dirección
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
-                            children: dirs.take(3).map((d) {
+                            children: dirs.map((d) {
                               final data = (d.data() as Map<String, dynamic>?) ?? {};
                               final calle = (data['calle'] as String?) ?? '';
                               final motivo = (data['motivo_temporal'] as String?) ?? '';
                               final tieneMotivo = motivo.isNotEmpty &&
                                   motivo != 'no_predicado' &&
                                   motivo != 'no_hispano';
+                              final puedeRestaurar =
+                                  (data['tarjeta_id_origen'] as String?)?.isNotEmpty ?? false;
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 4),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                padding: const EdgeInsets.fromLTRB(8, 6, 4, 6),
                                 decoration: BoxDecoration(
                                   color: tieneMotivo ? Colors.orange.shade50 : Colors.grey.shade100,
                                   borderRadius: BorderRadius.circular(6),
@@ -597,48 +590,65 @@ class _TemporalesTabState extends State<TemporalesTab> {
                                       ? Border.all(color: Colors.orange.shade300)
                                       : null,
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                child: Row(
                                   children: [
-                                    Text(
-                                      calle,
-                                      style: const TextStyle(fontSize: 11, color: Colors.black87),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (tieneMotivo)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 2),
-                                        child: Row(
-                                          children: [
-                                            const Icon(Icons.info_outline, size: 11, color: Colors.orange),
-                                            const SizedBox(width: 3),
-                                            Expanded(
-                                              child: Text(
-                                                motivo,
-                                                style: const TextStyle(
-                                                    fontSize: 10,
-                                                    color: Colors.orange,
-                                                    fontStyle: FontStyle.italic),
-                                                overflow: TextOverflow.ellipsis,
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            calle,
+                                            style: const TextStyle(fontSize: 11, color: Colors.black87),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          if (tieneMotivo)
+                                            Padding(
+                                              padding: const EdgeInsets.only(top: 2),
+                                              child: Row(
+                                                children: [
+                                                  const Icon(Icons.info_outline, size: 11, color: Colors.orange),
+                                                  const SizedBox(width: 3),
+                                                  Expanded(
+                                                    child: Text(
+                                                      motivo,
+                                                      style: const TextStyle(
+                                                          fontSize: 10,
+                                                          color: Colors.orange,
+                                                          fontStyle: FontStyle.italic),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                          ],
-                                        ),
+                                        ],
                                       ),
+                                    ),
+                                    IconButton(
+                                      onPressed: puedeRestaurar
+                                          ? () => _restaurarDireccion(d)
+                                          : null,
+                                      icon: const Icon(Icons.restore,
+                                          size: 16, color: Colors.green),
+                                      tooltip: 'Restaurar a tarjeta original',
+                                      visualDensity: VisualDensity.compact,
+                                      constraints: const BoxConstraints(),
+                                      padding: const EdgeInsets.all(4),
+                                    ),
+                                    IconButton(
+                                      onPressed: () => _moverDireccionADevueltas(d),
+                                      icon: const Icon(Icons.delete_forever,
+                                          size: 16, color: Colors.red),
+                                      tooltip: 'Mover a devueltas',
+                                      visualDensity: VisualDensity.compact,
+                                      constraints: const BoxConstraints(),
+                                      padding: const EdgeInsets.all(4),
+                                    ),
                                   ],
                                 ),
                               );
                             }).toList(),
                           ),
-                          if (dirs.length > 3)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                '+ ${dirs.length - 3} más...',
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.grey),
-                              ),
-                            ),
                         ],
                       ),
                     ),
@@ -902,6 +912,158 @@ class _TemporalesTabState extends State<TemporalesTab> {
         );
       },
     );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // RESTAURAR DIRECCIÓN A SU TARJETA ORIGINAL
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _restaurarDireccion(DocumentSnapshot dir) async {
+    try {
+      final data = (dir.data() as Map<String, dynamic>?) ?? {};
+      final origenTarjeta = (data['tarjeta_id_origen'] as String?) ?? '';
+      if (origenTarjeta.isEmpty) return;
+
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Restaurar dirección'),
+          content: Text(
+              '¿Devolver esta dirección a su tarjeta original ("$origenTarjeta")?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Restaurar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmar != true) return;
+
+      final territorioOrigenId =
+          (data['territorio_origen_id'] as String?) ?? '';
+      final territorioOrigenNombre =
+          (data['territorio_origen_nombre'] as String?) ?? '';
+
+      await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .doc(dir.id)
+          .update({
+        'tarjeta_id': origenTarjeta,
+        'estado': 'activa',
+        'estado_predicacion': '',
+        if (territorioOrigenId.isNotEmpty)
+          'territorio_id': territorioOrigenId,
+        if (territorioOrigenNombre.isNotEmpty)
+          'territorio_nombre': territorioOrigenNombre,
+        'tarjeta_id_origen': FieldValue.delete(),
+        'territorio_origen_id': FieldValue.delete(),
+        'territorio_origen_nombre': FieldValue.delete(),
+        'motivo_temporal': FieldValue.delete(),
+        'fecha_temporal': FieldValue.delete(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Dirección restaurada a su tarjeta original'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al restaurar: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // MOVER DIRECCIÓN A DEVUELTAS
+  // ─────────────────────────────────────────────────────────
+
+  Future<void> _moverDireccionADevueltas(DocumentSnapshot dir) async {
+    try {
+      final db = FirebaseFirestore.instance;
+      final data = (dir.data() as Map<String, dynamic>?) ?? {};
+
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Mover a devueltas'),
+          content: const Text(
+              '¿Mover esta dirección a devueltas? Será eliminada de la lista temporal.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(c, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Mover a devueltas'),
+            ),
+          ],
+        ),
+      );
+      if (confirmar != true) return;
+
+      final territorioOrigenId =
+          (data['territorio_origen_id'] as String?) ?? '';
+      final territorioOrigenNombre =
+          (data['territorio_origen_nombre'] as String?) ?? '';
+
+      final batch = db.batch();
+      batch.set(db.collection('direcciones_removidas').doc(dir.id), {
+        'calle': data['calle'],
+        'complemento': data['complemento'],
+        'direccion_normalizada': _normalizarDireccionTemporal(
+            '${data['calle'] ?? ''} ${data['complemento'] ?? ''}'),
+        'territorio_id': territorioOrigenId,
+        'territorio_nombre': territorioOrigenNombre,
+        'tarjeta_id_origen': data['tarjeta_id_origen'] ?? '',
+        'motivo': 'otro',
+        'motivo_texto': data['motivo_temporal'] ?? '',
+        'removida_por': widget.usuarioData['nombre'] ?? '',
+        'removida_en': FieldValue.serverTimestamp(),
+        'doc_id_original': dir.id,
+        'alerta_30_enviada': false,
+        'alerta_60_enviada': false,
+      });
+      batch.delete(dir.reference);
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Dirección movida a devueltas'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al mover: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  String _normalizarDireccionTemporal(String direccion) {
+    return direccion.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
   }
 
   // ─────────────────────────────────────────────────────────
