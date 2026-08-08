@@ -149,8 +149,11 @@ class _TemporalesTabState extends State<TemporalesTab> {
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Enviar: $tarjetaNombre'),
-        content: SizedBox(
-          width: double.maxFinite,
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: double.maxFinite,
+            maxHeight: MediaQuery.of(context).size.height * 0.6,
+          ),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

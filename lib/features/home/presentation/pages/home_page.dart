@@ -2919,12 +2919,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       builder: (context) {
         return AlertDialog(
           title: Text('Enviar: $nombre'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: double.maxFinite,
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                 if (conductoresSnap.docs.isEmpty)
                   const Text(
                     'No hay conductores disponibles.',
@@ -2990,7 +2994,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                       },
                     );
                   }),
-              ],
+                ],
+              ),
             ),
           ),
           actions: [

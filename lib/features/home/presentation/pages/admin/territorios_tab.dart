@@ -725,9 +725,11 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
       builder: (context) {
         return AlertDialog(
           title: Text('Enviar: $nombre'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 400,
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: double.maxFinite,
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,

@@ -138,9 +138,11 @@ class _ConductorTabState extends State<ConductorTab> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Seleccionar Publicador'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 300,
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: double.maxFinite,
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
             child: ListView.builder(
               itemCount: publicadoresSnapshot.docs.length,
               itemBuilder: (context, index) {
