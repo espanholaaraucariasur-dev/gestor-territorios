@@ -39,11 +39,11 @@ class _AsistenciaCounterScreenState extends State<AsistenciaCounterScreen> {
 
   String get _textoResultado {
     final ahora = _formatearFechaHora(DateTime.now());
-    final cabecera = _nombre.isNotEmpty ? '$_nombre\n$ahora\n' : '$ahora\n';
-    return '$cabecera'
-        'Hispanos: $_hispanos\n'
+    final pie = _nombre.isNotEmpty ? '$_nombre' : '';
+    return 'Hispanos: $_hispanos\n'
         'Locales: $_locales\n\n'
-        'Total: $_total';
+        'Total: $_total'
+        '${pie.isNotEmpty ? '\n$ahora   $pie' : '\n$ahora'}';
   }
 
   Future<void> _reiniciar() async {
