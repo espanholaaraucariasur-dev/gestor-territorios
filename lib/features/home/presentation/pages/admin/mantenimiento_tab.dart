@@ -276,6 +276,58 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     }
   }
 
+  Future<void> _limpiarHistorialContador() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('🗑️ Limpiar historial del contador'),
+        content: const Text(
+          'Esto eliminará PERMANENTEMENTE todos los registros del historial de asistencia del contador.\n\n'
+          '⚠️ Esta acción NO se puede deshacer.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Borrar todo'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('🗑️ Limpiando historial del contador...'), duration: Duration(seconds: 30)),
+    );
+    try {
+      int total = 0;
+      while (true) {
+        final snap = await FirebaseFirestore.instance
+            .collection('asistencia_historial')
+            .limit(500)
+            .get();
+        if (snap.docs.isEmpty) break;
+        final batch = FirebaseFirestore.instance.batch();
+        for (final d in snap.docs) {
+          batch.delete(d.reference);
+        }
+        await batch.commit();
+        total += snap.docs.length;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('✅ Historial del contador limpiado ($total registros)'), backgroundColor: Colors.deepOrange),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
   Future<void> _migrarPalabrasClave() async {
     final confirmar = await showDialog<bool>(
       context: context,
@@ -1354,6 +1406,15 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                 'Elimina TODAS las direcciones del directorio global permanentemente.',
             color: Colors.red.shade900,
             onPressed: _borrarTodasDirecciones,
+          ),
+          const SizedBox(height: 12),
+          _buildBotonMantenimiento(
+            icono: Icons.delete_sweep,
+            titulo: 'Limpiar historial del contador',
+            descripcion:
+                'Borra TODOS los registros históricos de asistencia del contador.',
+            color: Colors.orange.shade900,
+            onPressed: _limpiarHistorialContador,
           ),
         ],
       ),
