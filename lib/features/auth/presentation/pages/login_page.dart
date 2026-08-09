@@ -219,7 +219,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       }
     } catch (e) {
       debugPrint('LOGIN ERROR: $e');
-      _snack('Error al iniciar sesión.', Colors.red);
+      _snack('Error: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
