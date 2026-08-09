@@ -3,21 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'app/app.dart';
+import 'core/constants/firebase_config.dart';
 import 'core/services/notification_service.dart';
-
-const FirebaseOptions _firebaseOptions = FirebaseOptions(
-  apiKey: "AIzaSyAJr2vepvlf0JSwJz-v_6edHWk7uurT_6c",
-  authDomain: "territorio-sur-8b72c.firebaseapp.com",
-  projectId: "territorio-sur-8b72c",
-  storageBucket: "territorio-sur-8b72c.firebasestorage.app",
-  messagingSenderId: "288799954885",
-  appId: "1:288799954885:web:32ae6dfbc7d871b30bddac",
-);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await Firebase.initializeApp(options: _firebaseOptions);
+    await Firebase.initializeApp(options: FirebaseConfig.opciones);
   } catch (e) {
     debugPrint('Firebase ya estaba inicializado: $e');
   }

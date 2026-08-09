@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../constants/firebase_config.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -191,16 +192,7 @@ class NotificationService {
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: "AIzaSyAJr2vepvlf0JSwJz-v_6edHWk7uurT_6c",
-        authDomain: "territorio-sur-8b72c.firebaseapp.com",
-        projectId: "territorio-sur-8b72c",
-        storageBucket: "territorio-sur-8b72c.firebasestorage.app",
-        messagingSenderId: "288799954885",
-        appId: "1:288799954885:web:32ae6dfbc7d871b30bddac",
-      ),
-    );
+    await Firebase.initializeApp(options: FirebaseConfig.opciones);
   } catch (_) {}
   debugPrint('🔔 Background message: ${message.notification?.title}');
 }
