@@ -38,3 +38,9 @@ Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigo
 - Servidor opencode mobile: `opencode serve --hostname 0.0.0.0 --port 4096` (password vía `OPENCODE_SERVER_PASSWORD`).
 - Servidor APK local (si está corriendo): `http://192.168.100.122:8000`.
 - Terminal de despliegue: puertos 4096 (opencode) y 8000 (APK) abiertos por `abrir_puertos.bat`.
+
+## Acceso remoto (Tailscale)
+- VPN Tailscale, plan free (mejor opción para un teléfono; reemplazó a Quick Tunnel/ngrok).
+- PC = IP Tailscale `100.114.25.100` (fija). Teléfono entra a OpenCode Mobile con `http://100.114.25.100:4096` (misma cuenta Tailscale en ambos).
+- Verificado: el servidor responde por Tailscale en `100.114.25.100:4096`.
+- No requiere cambios de DNS ni apertura de puertos. Solo instalar/abrir Tailscale en el teléfono.
