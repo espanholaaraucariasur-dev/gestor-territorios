@@ -145,22 +145,45 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
             password: password,
           );
         } on FirebaseAuthException catch (e) {
-          if (e.code == 'user-not-found') {
-            _snack('Usuario no encontrado.', Colors.red);
-            return;
-          } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
-            _snack('Contraseña incorrecta.', Colors.red);
-            return;
-          } else if (e.code == 'invalid-email') {
+          final code = e.code;
+          if (code == 'invalid-email') {
             _snack('Email inválido.', Colors.red);
             return;
-          } else if (e.code == 'user-disabled') {
+          } else if (code == 'user-disabled') {
             _snack('Cuenta deshabilitada.', Colors.red);
             return;
-          } else {
-            // Usuario existe en Firestore pero no en Firebase Auth — migrarlo
-            debugPrint('Firebase Auth error: ${e.code} — intentando migración');
+          } else if (code == 'network-request-failed' ||
+              code == 'too-many-requests') {
+            _snack('Problema de conexión. Intenta de nuevo.', Colors.red);
+            return;
+          }
+
+          // `user-not-found`, `wrong-password` e `invalid-credential` pueden
+          // significar que la cuenta aún no existe en Firebase Auth (el
+          // directorio vive en Firestore). Verificamos y migramos.
+          debugPrint('Firebase Auth error: $code — verificando directorio');
+          final snap = await _db
+              .collection('usuarios')
+              .where('email', isEqualTo: email)
+              .limit(1)
+              .get();
+
+          if (snap.docs.isEmpty) {
+            _snack('Usuario no encontrado en el directorio.', Colors.red);
+            return;
+          }
+
+          // La cuenta existe en Firestore: crearla/autenticarla en Auth.
+          try {
             await _migrarUsuarioAFirebaseAuth(email, password);
+          } on FirebaseAuthException catch (mig) {
+            if (mig.code == 'wrong-password' ||
+                mig.code == 'invalid-credential') {
+              _snack('Contraseña incorrecta.', Colors.red);
+            } else {
+              _snack('Error de sesión: ${mig.code}', Colors.red);
+            }
+            return;
           }
         }
       } else {
