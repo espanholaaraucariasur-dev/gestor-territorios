@@ -14,6 +14,7 @@ import 'admin/restauracion_mensual.dart';
 import 'notificaciones_widget.dart';
 import 'direccion_detalle_dialog.dart';
 import 'asistencia/contador.dart';
+import '../../../ecosistema2/presentation/ecosistema2_home.dart';
 // CSV
 import 'package:file_picker/file_picker.dart';
 // Traducciones
@@ -600,6 +601,25 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                 nombreUsuario:
                                     widget.usuarioData['nombre']?.toString(),
                               ),
+                            ),
+                          );
+                        },
+                      ),
+
+                      _drawerItem(
+                        icon: Icons.dashboard_outlined,
+                        label: context.t('eco2_title'),
+                        color: const Color(0xFF0277BD),
+                        onTap: () {
+                          setState(() {
+                            _modoAdminActivo = false;
+                            _modoAdminTerritoriosActivo = false;
+                            _modoConductorActivo = false;
+                          });
+                          Navigator.of(context).pop();
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const Ecosistema2HomeScreen(),
                             ),
                           );
                         },

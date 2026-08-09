@@ -106,6 +106,44 @@ class AppTranslations {
       'attendance_registered_by': 'Registrado por: %s',
       'attendance_resend': 'Reenviar',
 
+      // === ECOSISTEMA 2 ===
+      'eco2_title': 'Ecosistema 2',
+      'eco2_sections': 'Secciones',
+      'eco2_salon_titulo': 'Salón del Reino',
+      'eco2_salon_subtitulo': 'Congregación · Ecosistema secundario',
+      'eco2_section_publishers': 'Publicadores',
+      'eco2_section_publishers_desc': 'Grupos, asistencia y contacto',
+      'eco2_section_assignments': 'Designaciones',
+      'eco2_section_assignments_desc': 'Partes, limpieza y salón',
+      'eco2_section_reports': 'Informes',
+      'eco2_section_reports_desc': 'Totales mensuales y anuales',
+      'eco2_section_territories': 'Territorios',
+      'eco2_section_territories_desc': 'Mapas y asignaciones',
+      'eco2_section_maintenance': 'Mantenimiento',
+      'eco2_section_maintenance_desc': 'Acceso y configuración',
+      'eco2_disclaimer':
+          'Ecosistema 2 · En desarrollo. No interfiere con las funciones principales.',
+      'eco2_en_desarrollo': 'Sección en desarrollo',
+      'eco2_en_desarrollo_desc':
+          'Esta sección se completará en una próxima etapa del desarrollo.',
+      'eco2_maintenance_desc':
+          'Configura el acceso y control del Ecosistema 2 desde aquí.',
+      'eco2_maintenance_nota':
+          'Modo de desarrollo: los cambios de acceso se aplicarán al activar el backend.',
+      'eco2_visibilidad_boton': '¿Quién puede ver el Ecosistema 2?',
+      'eco2_visibilidad_boton_desc':
+          'Elige qué usuarios o roles tendrán acceso a este submódulo.',
+      'eco2_visibilidad_titulo': 'Visibilidad del Ecosistema 2',
+      'eco2_visibilidad_desc':
+          'Selecciona el nivel de acceso. Los cambios se aplican al activar el backend.',
+      'eco2_visibilidad_solo_admin': 'Solo administradores',
+      'eco2_visibilidad_solo_admin_desc':
+          'Únicamente el equipo administrador podrá entrar.',
+      'eco2_visibilidad_admin_colab': 'Admins y colaboradores',
+      'eco2_visibilidad_admin_colab_desc':
+          'Administradores y colaboradores autorizados podrán entrar.',
+      'eco2_visibilidad_guardado': 'Preferencia guardada',
+
       // === LOGIN PAGE ===
       'sign_in': 'Iniciar sesión',
       'enter_credentials': 'Ingresa tus credenciales para continuar',
@@ -424,6 +462,44 @@ class AppTranslations {
       'attendance_history_empty': 'Ainda não há registros no histórico.',
       'attendance_registered_by': 'Registrado por: %s',
       'attendance_resend': 'Reenviar',
+
+      // === ECOSISTEMA 2 ===
+      'eco2_title': 'Ecosistema 2',
+      'eco2_sections': 'Seções',
+      'eco2_salon_titulo': 'Salão do Reino',
+      'eco2_salon_subtitulo': 'Congregação · Ecosistema secundário',
+      'eco2_section_publishers': 'Publicadores',
+      'eco2_section_publishers_desc': 'Grupos, assistência e contato',
+      'eco2_section_assignments': 'Designações',
+      'eco2_section_assignments_desc': 'Partes, limpeza e salão',
+      'eco2_section_reports': 'Relatórios',
+      'eco2_section_reports_desc': 'Totais mensais e anuais',
+      'eco2_section_territories': 'Territórios',
+      'eco2_section_territories_desc': 'Mapas e atribuições',
+      'eco2_section_maintenance': 'Manutenção',
+      'eco2_section_maintenance_desc': 'Acesso e configuração',
+      'eco2_disclaimer':
+          'Ecosistema 2 · Em desenvolvimento. Não interfere nas funções principais.',
+      'eco2_en_desarrollo': 'Seção em desenvolvimento',
+      'eco2_en_desarrollo_desc':
+          'Esta seção será concluída em uma próxima etapa do desenvolvimento.',
+      'eco2_maintenance_desc':
+          'Configure o acesso e o controle do Ecosistema 2 aqui.',
+      'eco2_maintenance_nota':
+          'Modo de desenvolvimento: as mudanças de acesso serão aplicadas ao ativar o backend.',
+      'eco2_visibilidad_boton': 'Quem pode ver o Ecosistema 2?',
+      'eco2_visibilidad_boton_desc':
+          'Escolha quais usuários ou funções terão acesso a este submódulo.',
+      'eco2_visibilidad_titulo': 'Visibilidade do Ecosistema 2',
+      'eco2_visibilidad_desc':
+          'Selecione o nível de acesso. As mudanças são aplicadas ao ativar o backend.',
+      'eco2_visibilidad_solo_admin': 'Somente administradores',
+      'eco2_visibilidad_solo_admin_desc':
+          'Apenas a equipe de administração poderá entrar.',
+      'eco2_visibilidad_admin_colab': 'Admins e colaboradores',
+      'eco2_visibilidad_admin_colab_desc':
+          'Administradores e colaboradores autorizados poderão entrar.',
+      'eco2_visibilidad_guardado': 'Preferência salva',
 
       // === LOGIN PAGE ===
       'sign_in': 'Entrar',
