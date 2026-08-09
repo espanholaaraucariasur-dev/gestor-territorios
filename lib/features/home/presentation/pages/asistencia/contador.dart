@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
+import 'contador_historial.dart';
 
 // ─────────────────────────────────────────────────────────────
 // CONTADOR DE ASISTENCIA
@@ -28,22 +30,48 @@ class _AsistenciaCounterScreenState extends State<AsistenciaCounterScreen> {
       ? widget.nombreUsuario!
       : '';
 
-  String _formatearFechaHora(DateTime dt) {
+  String _diaSemana(DateTime dt) {
+    const es = [
+      'lunes',
+      'martes',
+      'miércoles',
+      'jueves',
+      'viernes',
+      'sábado',
+      'domingo'
+    ];
+    const pt = [
+      'segunda-feira',
+      'terça-feira',
+      'quarta-feira',
+      'quinta-feira',
+      'sexta-feira',
+      'sábado',
+      'domingo'
+    ];
+    if (context.currentLanguage == 'PT') return pt[dt.weekday - 1];
+    return es[dt.weekday - 1];
+  }
+
+  String _formatearFecha(DateTime dt) {
     final d = dt.day.toString().padLeft(2, '0');
     final m = dt.month.toString().padLeft(2, '0');
     final y = dt.year.toString();
+    return '${_diaSemana(dt)} $d/$m/$y';
+  }
+
+  String _formatearHora(DateTime dt) {
     final hh = dt.hour.toString().padLeft(2, '0');
     final mm = dt.minute.toString().padLeft(2, '0');
-    return '$d/$m/$y $hh:$mm';
+    return '$hh:$mm';
   }
 
   String get _textoResultado {
-    final ahora = _formatearFechaHora(DateTime.now());
-    final pie = _nombre.isNotEmpty ? '\n$_nombre' : '';
-    return 'Hispanos: $_hispanos\n'
+    final ahora = DateTime.now();
+    return '${_formatearFecha(ahora)}\n'
+        'Hispanos: $_hispanos\n'
         'Locales: $_locales\n\n'
-        'Total: $_total\n'
-        '$ahora$pie';
+        'Total: $_total';
   }
 
   Future<void> _reiniciar() async {
@@ -95,7 +123,24 @@ class _AsistenciaCounterScreenState extends State<AsistenciaCounterScreen> {
     });
   }
 
+  Future<void> _guardarHistorial() async {
+    if (_hispanos == 0 && _locales == 0) return;
+    try {
+      await FirebaseFirestore.instance.collection('asistencia_historial').add({
+        'hispanos': _hispanos,
+        'locales': _locales,
+        'total': _total,
+        'dia': _formatearFecha(DateTime.now()),
+        'hora': _formatearHora(DateTime.now()),
+        'texto': _textoResultado,
+        'nombre': _nombre,
+        'creadoEn': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+  }
+
   Future<void> _copiarTexto() async {
+    await _guardarHistorial();
     await Clipboard.setData(ClipboardData(text: _textoResultado));
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -111,6 +156,7 @@ class _AsistenciaCounterScreenState extends State<AsistenciaCounterScreen> {
   }
 
   Future<void> _compartirWhatsApp() async {
+    await _guardarHistorial();
     final uri = Uri.parse(
       'https://wa.me/?text=${Uri.encodeComponent(_textoResultado)}',
     );
@@ -170,6 +216,18 @@ class _AsistenciaCounterScreenState extends State<AsistenciaCounterScreen> {
         centerTitle: true,
         actions: [
           IconButton(
+            icon: const Icon(Icons.history, color: Colors.white, size: 20),
+            tooltip: context.t('attendance_history'),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const AsistenciaHistorialScreen(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 4),
+          IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white, size: 20),
             tooltip: context.t('attendance_reset'),
             onPressed: _reiniciar,
@@ -182,43 +240,7 @@ class _AsistenciaCounterScreenState extends State<AsistenciaCounterScreen> {
           padding: const EdgeInsets.all(20),
           child: Column(
             children: [
-              if (_nombre.isNotEmpty)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.person_outline,
-                          color: Color(0xFF1B5E20), size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _nombre,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            color: Color(0xFF263238),
-                          ),
-                        ),
-                      ),
-                      const Icon(Icons.schedule,
-                          color: Color(0xFF1B5E20), size: 16),
-                      const SizedBox(width: 4),
-                      Text(
-                        _formatearFechaHora(DateTime.now()),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              _buildCabeceraFecha(),
               _buildContadorCarta(
                 titulo: context.t('attendance_hispanos'),
                 valor: _hispanos,
@@ -243,6 +265,42 @@ class _AsistenciaCounterScreenState extends State<AsistenciaCounterScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCabeceraFecha() {
+    final ahora = DateTime.now();
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.calendar_today_outlined,
+              color: Color(0xFF1B5E20), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _formatearFecha(ahora),
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: Color(0xFF263238),
+              ),
+            ),
+          ),
+          const Icon(Icons.schedule, color: Color(0xFF1B5E20), size: 16),
+          const SizedBox(width: 4),
+          Text(
+            _formatearHora(ahora),
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ],
       ),
     );
   }

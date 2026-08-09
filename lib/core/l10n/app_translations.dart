@@ -101,6 +101,10 @@ class AppTranslations {
       'attendance_copied': '¡Resultado copiado al portapapeles!',
       'attendance_share_error': 'No se pudo abrir WhatsApp. Intenta de nuevo.',
       'attendance_no_negative': 'El valor no puede ser menor a 0',
+      'attendance_history': 'Historial',
+      'attendance_history_empty': 'Aún no hay registros en el historial.',
+      'attendance_registered_by': 'Registrado por: %s',
+      'attendance_resend': 'Reenviar',
 
       // === LOGIN PAGE ===
       'sign_in': 'Iniciar sesión',
@@ -416,6 +420,10 @@ class AppTranslations {
       'attendance_copied': 'Resultado copiado para a área de transferência!',
       'attendance_share_error': 'Não foi possível abrir o WhatsApp. Tente novamente.',
       'attendance_no_negative': 'O valor não pode ser menor que 0',
+      'attendance_history': 'Histórico',
+      'attendance_history_empty': 'Ainda não há registros no histórico.',
+      'attendance_registered_by': 'Registrado por: %s',
+      'attendance_resend': 'Reenviar',
 
       // === LOGIN PAGE ===
       'sign_in': 'Entrar',
