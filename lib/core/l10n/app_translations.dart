@@ -107,7 +107,7 @@ class AppTranslations {
       'attendance_resend': 'Reenviar',
 
       // === ECOSISTEMA 2 ===
-      'eco2_title': 'Ecosistema 2',
+      'eco2_title': 'Congregación',
       'eco2_sections': 'Secciones',
       'eco2_salon_titulo': 'Salón del Reino',
       'eco2_salon_subtitulo': 'Congregación · Ecosistema secundario',
@@ -464,7 +464,7 @@ class AppTranslations {
       'attendance_resend': 'Reenviar',
 
       // === ECOSISTEMA 2 ===
-      'eco2_title': 'Ecosistema 2',
+      'eco2_title': 'Congregação',
       'eco2_sections': 'Seções',
       'eco2_salon_titulo': 'Salão do Reino',
       'eco2_salon_subtitulo': 'Congregação · Ecosistema secundário',
