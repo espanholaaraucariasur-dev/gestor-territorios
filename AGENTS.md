@@ -36,8 +36,15 @@ Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigo
 - Windows, Flutter en `C:\src\flutter\bin\flutter.bat`, proyecto en `D:\araucaria_sur`.
 - APKs de prueba en `C:\Users\angel\Documents\Default Project\TEST-vN.apk`.
 - Servidor opencode mobile: `opencode serve --hostname 0.0.0.0 --port 4096` (password vía `OPENCODE_SERVER_PASSWORD`).
+- **Puente Telegram** (enviar instrucciones al opencode desde el bot): script `C:\Users\angel\AppData\Local\Temp\opencode\telegram_bridge.ps1` — long polling, usa `opencode run --dir D:\araucaria_sur` con sesión propia (NO chocar con el TUI); offset en `tg_offset.txt`, log en `bridge_log.txt`. Reiniciar tras reinicio de PC: `Start-Process powershell -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","C:\Users\angel\AppData\Local\Temp\opencode\telegram_bridge.ps1" -WindowStyle Hidden`.
 - Servidor APK local (si está corriendo): `http://192.168.100.122:8000`.
 - Terminal de despliegue: puertos 4096 (opencode) y 8000 (APK) abiertos por `abrir_puertos.bat`.
+
+## Entrega de APKs al celular (OneDrive + Telegram)
+- **Mecanismo estándar**: copiar el APK a la carpeta `C:\Users\angel\OneDrive` (OneDrive corriendo la sube solo a la nube; mismo plan gratis de 5 GB).
+- Script automatizado: `C:\Users\angel\AppData\Local\Temp\opencode\subir_apk_onedrive.ps1 -ApkPath C:\...\TEST-vN.apk` → borra TEST-*.apk anteriores de OneDrive (evita llenar cupo), copia el nuevo y avisa por Telegram al bot `@Araucaria_sur_bot` (chat 6281442034, token en el script).
+- El celular descarga desde la app **OneDrive** (misma cuenta), no por link público (no generamos enlaces públicos por OAuth).
+- Fallback local: servidor APK `http://100.114.25.100:8000/TEST-vN.apk` vía Tailscale. El enlace `https://onedrive.live.com/?v=1&view=managestorage` sirve para liberar cupo (vaciar papelera).
 
 ## Acceso remoto (Tailscale)
 - VPN Tailscale, plan free (mejor opción para un teléfono; reemplazó a Quick Tunnel/ngrok).
