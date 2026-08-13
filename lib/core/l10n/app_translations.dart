@@ -129,20 +129,25 @@ class AppTranslations {
       'eco2_maintenance_desc':
           'Configura el acceso y control del Ecosistema 2 desde aquí.',
       'eco2_maintenance_nota':
-          'Modo de desarrollo: los cambios de acceso se aplicarán al activar el backend.',
-      'eco2_visibilidad_boton': '¿Quién puede ver el Ecosistema 2?',
+          'Los cambios de acceso se guardan en la nube y se aplican de inmediato.',
+      'eco2_visibilidad_boton': 'Hacer visible',
       'eco2_visibilidad_boton_desc':
-          'Elige qué usuarios o roles tendrán acceso a este submódulo.',
-      'eco2_visibilidad_titulo': 'Visibilidad del Ecosistema 2',
+          'Elige qué usuarios pueden ver y acceder a la congregación.',
+      'eco2_visibilidad_titulo': 'Usuarios con acceso',
       'eco2_visibilidad_desc':
-          'Selecciona el nivel de acceso. Los cambios se aplican al activar el backend.',
-      'eco2_visibilidad_solo_admin': 'Solo administradores',
-      'eco2_visibilidad_solo_admin_desc':
-          'Únicamente el equipo administrador podrá entrar.',
-      'eco2_visibilidad_admin_colab': 'Admins y colaboradores',
-      'eco2_visibilidad_admin_colab_desc':
-          'Administradores y colaboradores autorizados podrán entrar.',
-      'eco2_visibilidad_guardado': 'Preferencia guardada',
+          'Marca a los usuarios que podrán ver y acceder a la congregación.',
+      'eco2_visibilidad_buscar': 'Buscar usuario...',
+      'eco2_visibilidad_sin_usuarios': 'No hay usuarios aprobados.',
+      'eco2_visibilidad_seleccionados': 'usuarios seleccionados',
+      'eco2_visibilidad_vacio_desc':
+          'Nadie seleccionado. Solo el administrador podrá entrar.',
+      'eco2_visibilidad_guardado': 'Acceso actualizado',
+      'eco2_pin_titulo': 'Área restringida',
+      'eco2_pin_desc': 'Ingresa el PIN de mantenimiento para continuar.',
+      'eco2_pin_incorrecto': 'PIN incorrecto',
+      'eco2_pin_ingresar': 'Entrar',
+      'eco2_pin_cancelar': 'Cancelar',
+      'eco2_pin_ingresar_pin': 'Ingresar PIN',
 
       // === LOGIN PAGE ===
       'sign_in': 'Iniciar sesión',
@@ -486,20 +491,25 @@ class AppTranslations {
       'eco2_maintenance_desc':
           'Configure o acesso e o controle do Ecosistema 2 aqui.',
       'eco2_maintenance_nota':
-          'Modo de desenvolvimento: as mudanças de acesso serão aplicadas ao ativar o backend.',
-      'eco2_visibilidad_boton': 'Quem pode ver o Ecosistema 2?',
+          'As mudanças de acesso são salvas na nuvem e aplicadas imediatamente.',
+      'eco2_visibilidad_boton': 'Tornar visível',
       'eco2_visibilidad_boton_desc':
-          'Escolha quais usuários ou funções terão acesso a este submódulo.',
-      'eco2_visibilidad_titulo': 'Visibilidade do Ecosistema 2',
+          'Escolha quais usuários podem ver e acessar a congregação.',
+      'eco2_visibilidad_titulo': 'Usuários com acesso',
       'eco2_visibilidad_desc':
-          'Selecione o nível de acesso. As mudanças são aplicadas ao ativar o backend.',
-      'eco2_visibilidad_solo_admin': 'Somente administradores',
-      'eco2_visibilidad_solo_admin_desc':
-          'Apenas a equipe de administração poderá entrar.',
-      'eco2_visibilidad_admin_colab': 'Admins e colaboradores',
-      'eco2_visibilidad_admin_colab_desc':
-          'Administradores e colaboradores autorizados poderão entrar.',
-      'eco2_visibilidad_guardado': 'Preferência salva',
+          'Marque os usuários que poderão ver e acessar a congregação.',
+      'eco2_visibilidad_buscar': 'Buscar usuário...',
+      'eco2_visibilidad_sin_usuarios': 'Não há usuários aprovados.',
+      'eco2_visibilidad_seleccionados': 'usuários selecionados',
+      'eco2_visibilidad_vacio_desc':
+          'Ninguém selecionado. Somente o administrador poderá entrar.',
+      'eco2_visibilidad_guardado': 'Acesso atualizado',
+      'eco2_pin_titulo': 'Área restrita',
+      'eco2_pin_desc': 'Digite o PIN de manutenção para continuar.',
+      'eco2_pin_incorrecto': 'PIN incorreto',
+      'eco2_pin_ingresar': 'Entrar',
+      'eco2_pin_cancelar': 'Cancelar',
+      'eco2_pin_ingresar_pin': 'Inserir PIN',
 
       // === LOGIN PAGE ===
       'sign_in': 'Entrar',
