@@ -24,7 +24,7 @@ class FirebaseConfig {
 
   /// Cliente web del mismo proyecto.
   static const FirebaseOptions _web = FirebaseOptions(
-    apiKey: "AIzaSyAJr2vepvlf0JSwJz-v_6edHWk7uurT_6c",
+    apiKey: "BAP00uhT3oq7hoQFHh6zU5y6Dwt780Db2ovggL3Z3hPm6Ax845AatKZFWW47TtFukDUe_iO6Wx0MO8d4gifk_rA",
     appId: "1:288799954885:web:32ae6dfbc7d871b30bddac",
     messagingSenderId: "288799954885",
     projectId: "territorio-sur-8b72c",
