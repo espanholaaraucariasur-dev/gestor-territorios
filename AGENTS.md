@@ -8,6 +8,14 @@ Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigo
 - Todo el código con texto en ES y PT a través de `lib/core/l10n/app_translations.dart` (usar `context.t('clave')`).
 - Mantener las convenciones de estilo existentes. No agregar comentarios salvo cuando aporten.
 
+## Trabajo en equipo (Git por ramas + PR)
+- El equipo trabaja en **ramas** (p.ej. `feat/...`, `fix/...`), NUNCA directo en `main`.
+- Flujo: `git checkout -b feat/x` → cambios → `git push origin feat/x` → Pull Request en GitHub.
+- El líder revisa y mergea. La rama `main` es del líder.
+- `git pull origin main` al empezar cada sesión para estar al día.
+- Comandos de proyecto disponibles en opencode: `/build-apk`, `/deploy-web`, `/commit`.
+- Agente revisor disponible: `revisor` (verifica las reglas de oro antes de mergear).
+
 ## Versiones y flujo de trabajo
 - Play Console publica la app como build **27** (ya subidо). El `.aab` para subir se genera con ese número y solo se debe renumerar al pedirlo PCD.
 - Desarrollo local: pubspec.yaml en **1.0.2+33** o más, generando `TEST-vN.apk` (N = build actual).
@@ -27,6 +35,7 @@ Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigo
 - `lib/features/home/presentation/pages/admin/mantenimiento_tab.dart` — mantenimiento (incluye "Limpiar historial del contador").
 - `lib/features/ecosistema2/presentation/` — panel principal, mantenimiento y placeholders del Ecosistema 2.
 - `lib/core/l10n/app_translations.dart` — traducciones ES/PT (claves `eco2_*` del Ecosistema 2).
+- `.opencode/` — configuración de opencode del proyecto (MCP, comandos `/build-apk`, `/deploy-web`, `/commit`, agente `revisor`).
 
 ## Base de datos (Firestore)
 - Colecciones usadas: `usuarios`, `territorios` (+`tarjetas`), `direcciones_globales`, `direcciones_removidas`, `configuracion`, `configuraciones`, `notificaciones`, `estadisticas`, `estadisticas_mensuales`, `sistema`, `solicitudes_localizador`, `tareas_motivacionales`, `asistencia_historial`.
