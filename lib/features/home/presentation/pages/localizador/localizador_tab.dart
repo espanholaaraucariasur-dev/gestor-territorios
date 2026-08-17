@@ -1043,7 +1043,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                                 dense: true,
                                 leading: const Icon(Icons.location_on_outlined, color: _verde, size: 18),
                                 title: Text(
-                                  comp.isNotEmpty ? '$calle · $comp' : calle,
+                                  calle,
                                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
                                 ),
                                 subtitle: Row(
@@ -1064,17 +1064,17 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                                   ],
                                 ),
                                 onTap: () {
-                                  final direccionCompleta = comp.isNotEmpty ? '$calle · $comp' : calle;
-                                  _calleCtrl.text = direccionCompleta;
+                                  // Autocompletar SOLO el nombre de la rua
+                                  _calleCtrl.text = calle;
                                   setState(() {
                                     _sugerencias = [];
-                                    // Mostrar EXACTAMENTE la dirección tocada
-                                    // (conserva calle + complemento / número)
                                     _buscando = false;
                                     _buscado = true;
                                     _encontrada = true;
                                     _direccionEncontrada = sug;
-                                    _mensaje = direccionCompleta;
+                                    // El resultado muestra la dirección completa
+                                    _mensaje =
+                                        comp.isNotEmpty ? '$calle · $comp' : calle;
                                     _mostrarFormulario = false;
                                   });
                                 },
