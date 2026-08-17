@@ -190,6 +190,7 @@ class _UsuariosTabState extends State<UsuariosTab> {
     final esAdminTer = (data['es_admin_territorios'] as bool?) ?? false;
     final esConductor = (data['es_conductor'] as bool?) ?? false;
     final esPublicador = (data['es_publicador'] as bool?) ?? false;
+    final esAcomodador = (data['es_acomodador'] as bool?) ?? false;
     final aprobado = estado == 'aprobado';
 
     // Iniciales
@@ -329,6 +330,14 @@ class _UsuariosTabState extends State<UsuariosTab> {
               value: esPublicador,
               onChanged: (v) =>
                   _toggleRol(usuario.id, 'es_publicador', esPublicador),
+            ),
+            _rolSwitch(
+              label: 'Acomodador',
+              icon: Icons.handshake_outlined,
+              color: Colors.teal,
+              value: esAcomodador,
+              onChanged: (v) =>
+                  _toggleRol(usuario.id, 'es_acomodador', esAcomodador),
             ),
 
             const SizedBox(height: 12),

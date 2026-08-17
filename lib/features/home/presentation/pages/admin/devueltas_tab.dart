@@ -364,14 +364,19 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         'enviado_por': widget.usuarioData['nombre'] ?? '',
       }, SetOptions(merge: true));
 
-      await FirebaseFirestore.instance.collection('notificaciones').add({
-        'titulo': '📢 Anuncio de la congregación',
-        'cuerpo': texto,
-        'tipo': 'anuncio_general',
-        'leida': false,
-        'created_at': FieldValue.serverTimestamp(),
-        'para_todos': true,
-      });
+      // Anuncio a cada usuario aprobado (por destinatario)
+      final todosSnap = await FirebaseFirestore.instance
+          .collection('usuarios').where('estado', isEqualTo: 'aprobado').get();
+      for (final doc in todosSnap.docs) {
+        final email = (doc.data()['email'] as String? ?? '').trim().toLowerCase();
+        if (email.isEmpty) continue;
+        await NotificacionService.enviar(
+          destinatario: email,
+          titulo: '📢 Anuncio de la congregación',
+          cuerpo: texto,
+          tipo: TipoNotificacion.motivacional,
+        );
+      }
 
       _anuncioCtrl.clear();
       if (mounted) {

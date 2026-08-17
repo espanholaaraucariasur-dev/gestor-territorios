@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/services/gemini_service.dart';
+import '../../../../../core/l10n/translation_service.dart';
 
 class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -1155,8 +1156,143 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           const SizedBox(height: 10),
           _buildMensajesMotivacionales(),
           const SizedBox(height: 20),
+
+          // ── Sugerencias recibidas ────────────────────────
+          _seccionTitulo(context.t('sugerencias_recibidas')),
+          const SizedBox(height: 10),
+          _buildSugerencias(),
+          const SizedBox(height: 20),
         ],
       ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // SUGERENCIAS RECIBIDAS
+  // ─────────────────────────────────────────────────────────
+
+  Widget _buildSugerencias() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('sugerencias')
+          .orderBy('created_at', descending: true)
+          .limit(30)
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final docs = snap.data!.docs;
+        if (docs.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2)),
+              ],
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.lightbulb_outline,
+                    color: Colors.grey.shade400, size: 20),
+                const SizedBox(width: 10),
+                Text(
+                  context.t('sugerencias_sin_datos'),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          );
+        }
+        return Column(
+          children: docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final texto = (data['texto'] as String?) ?? '';
+            final usuario = (data['usuario_nombre'] as String?) ?? '';
+            final email = (data['usuario_email'] as String?) ?? '';
+            final leida = (data['leida'] as bool?) ?? false;
+            final ts = data['created_at'] as Timestamp?;
+            final fecha = ts != null
+                ? '${ts.toDate().day}/${ts.toDate().month} ${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')}'
+                : '';
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border(
+                  left: BorderSide(
+                    color: leida
+                        ? Colors.grey.shade300
+                        : const Color(0xFFF9A825),
+                    width: 3,
+                  ),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.03),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2)),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    leida ? Icons.lightbulb_outline : Icons.lightbulb,
+                    color: leida
+                        ? Colors.grey.shade400
+                        : const Color(0xFFF9A825),
+                    size: 18,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          texto,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight:
+                                leida ? FontWeight.normal : FontWeight.w600,
+                            color: const Color(0xFF263238),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${usuario.isNotEmpty ? usuario : email}'
+                          '${fecha.isNotEmpty ? ' · $fecha' : ''}',
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      leida ? Icons.mark_email_read_outlined : Icons.drafts_outlined,
+                      size: 18,
+                      color: leida
+                          ? Colors.grey.shade400
+                          : const Color(0xFF1B5E20),
+                    ),
+                    onPressed: () =>
+                        doc.reference.update({'leida': !leida}),
+                    tooltip: leida ? 'Marcar no leída' : 'Marcar leída',
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      },
     );
   }
 

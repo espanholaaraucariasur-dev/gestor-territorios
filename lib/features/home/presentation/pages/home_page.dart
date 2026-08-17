@@ -15,6 +15,7 @@ import 'notificaciones_widget.dart';
 import 'direccion_detalle_dialog.dart';
 import 'asistencia/contador.dart';
 import '../../../ecosistema2/presentation/ecosistema2_home.dart';
+import '../../../ecosistema2/presentation/sugerencias_screen.dart';
 // CSV
 import 'package:file_picker/file_picker.dart';
 // Traducciones
@@ -34,6 +35,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   bool _modoAdminActivo = false;
   bool _modoAdminTerritoriosActivo = false;
   bool _modoConductorActivo = false;
+  bool _eco2Visible = false;
   String _idiomaActual = 'ES';
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   late TabController _tabControllerAdmin;
@@ -72,8 +74,27 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
       _modoAdminTerritoriosActivo = true;
     }
     _verificarReinicioMensual();
+    _cargarVisibilidadEcosistema2();
     // Verificar si hay acción pendiente de notificación
     WidgetsBinding.instance.addPostFrameCallback((_) => _procesarPendingAction());
+  }
+
+  Future<void> _cargarVisibilidadEcosistema2() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('configuracion')
+          .doc('ecosistema2_visibilidad')
+          .get();
+      if (!mounted) return;
+      final ids = (doc.data()?['usuario_ids'] as List?)
+              ?.whereType<String>()
+              .toList() ??
+          const <String>[];
+      final uid = widget.usuarioData['uid'] as String?;
+      if (uid == null) return;
+      final visible = ids.contains(uid);
+      if (visible != _eco2Visible) setState(() => _eco2Visible = visible);
+    } catch (_) {}
   }
 
   void _procesarPendingAction() {
@@ -331,6 +352,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   Widget build(BuildContext context) {
     final esConductor = widget.usuarioData['es_conductor'] ?? false;
     final esAdmin = widget.usuarioData['es_admin'] ?? false;
+    final esAcomodador = widget.usuarioData['es_acomodador'] ?? false;
     final esAdminTerritorios =
         widget.usuarioData['es_admin_territorios'] ?? false;
     final nombre = widget.usuarioData['nombre'] ?? 'Hermano';
@@ -584,7 +606,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         },
                       ),
 
-                      _drawerItem(
+                      if (esAcomodador || esAdmin)
+                        _drawerItem(
                         icon: Icons.calculate_outlined,
                         label: context.t('attendance_counter'),
                         color: const Color(0xFF0277BD),
@@ -606,7 +629,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         },
                       ),
 
-                      _drawerItem(
+                      if (_eco2Visible || esAdmin)
+                        _drawerItem(
                         icon: Icons.dashboard_outlined,
                         label: context.t('eco2_title'),
                         color: const Color(0xFF0277BD),
@@ -620,6 +644,30 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                           Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => const Ecosistema2HomeScreen(),
+                            ),
+                          );
+                        },
+                      ),
+
+                      _drawerItem(
+                        icon: Icons.lightbulb_outline,
+                        label: context.t('sugerencias_title'),
+                        color: const Color(0xFFF9A825),
+                        onTap: () {
+                          setState(() {
+                            _modoAdminActivo = false;
+                            _modoAdminTerritoriosActivo = false;
+                            _modoConductorActivo = false;
+                          });
+                          Navigator.of(context).pop();
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => SugerenciasScreen(
+                                usuarioEmail: _usuarioEmail,
+                                usuarioNombre:
+                                    widget.usuarioData['nombre']?.toString() ??
+                                        '',
+                              ),
                             ),
                           );
                         },

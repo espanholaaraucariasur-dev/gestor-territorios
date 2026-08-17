@@ -672,8 +672,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
         'created_at': FieldValue.serverTimestamp(),
       });
 
-      // Notificar SOLO a admin principal
-      await NotificacionService.enviarAAdmins(
+      // Notificar SOLO a admin principal y admin territorios
+      await NotificacionService.enviarAAdminTerritorios(
         titulo: '📍 Nueva dirección reportada',
         cuerpo: '${widget.usuarioNombre} envió una dirección nueva: "$calle"'
             '${_complementoCtrl.text.isNotEmpty ? ' · ${_complementoCtrl.text}' : ''}',
@@ -1042,13 +1042,14 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                               return ListTile(
                                 dense: true,
                                 leading: const Icon(Icons.location_on_outlined, color: _verde, size: 18),
-                                title: Text(calle, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                title: Text(
+                                  comp.isNotEmpty ? '$calle · $comp' : calle,
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                                ),
                                 subtitle: Row(
                                   children: [
-                                    if (comp.isNotEmpty)
-                                      Expanded(child: Text(comp, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis)),
                                     if (territorio.isNotEmpty)
-                                      Text(territorio, style: const TextStyle(fontSize: 10, color: _verde)),
+                                      Expanded(child: Text(territorio, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis)),
                                     if (distStr.isNotEmpty) ...[ 
                                       const SizedBox(width: 4),
                                       Container(
@@ -1063,7 +1064,8 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                                   ],
                                 ),
                                 onTap: () {
-                                  _calleCtrl.text = calle;
+                                  final direccionCompleta = comp.isNotEmpty ? '$calle · $comp' : calle;
+                                  _calleCtrl.text = direccionCompleta;
                                   setState(() {
                                     _sugerencias = [];
                                     // Mostrar EXACTAMENTE la dirección tocada
@@ -1072,8 +1074,7 @@ class _LocalizadorTabState extends State<LocalizadorTab>
                                     _buscado = true;
                                     _encontrada = true;
                                     _direccionEncontrada = sug;
-                                    _mensaje =
-                                        comp.isNotEmpty ? '$calle · $comp' : calle;
+                                    _mensaje = direccionCompleta;
                                     _mostrarFormulario = false;
                                   });
                                 },

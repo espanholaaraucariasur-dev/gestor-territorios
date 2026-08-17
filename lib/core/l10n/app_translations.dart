@@ -149,6 +149,20 @@ class AppTranslations {
       'eco2_pin_cancelar': 'Cancelar',
       'eco2_pin_ingresar_pin': 'Ingresar PIN',
 
+      // === SUGERENCIAS ===
+      'sugerencias_title': 'Sugerencias',
+      'sugerencias_desc':
+          'Comparte una idea o mejora para la congregación. La recibirá el administrador.',
+      'sugerencias_hint': 'Escribe tu sugerencia...',
+      'sugerencias_enviar': 'Enviar sugerencia',
+      'sugerencias_enviando': 'Enviando...',
+      'sugerencias_vacio': 'Escribe tu sugerencia antes de enviar.',
+      'sugerencias_enviada': '¡Sugerencia enviada!',
+      'sugerencias_error': 'No se pudo enviar la sugerencia. Intenta de nuevo.',
+      'sugerencias_recibidas': 'Sugerencias recibidas',
+      'sugerencias_sin_datos': 'Aún no hay sugerencias.',
+      'sugerencias_de': 'de',
+
       // === LOGIN PAGE ===
       'sign_in': 'Iniciar sesión',
       'enter_credentials': 'Ingresa tus credenciales para continuar',
@@ -510,6 +524,20 @@ class AppTranslations {
       'eco2_pin_ingresar': 'Entrar',
       'eco2_pin_cancelar': 'Cancelar',
       'eco2_pin_ingresar_pin': 'Inserir PIN',
+
+      // === SUGERENCIAS ===
+      'sugerencias_title': 'Sugestões',
+      'sugerencias_desc':
+          'Compartilhe uma ideia ou melhoria para a congregação. O administrador receberá.',
+      'sugerencias_hint': 'Escreva sua sugestão...',
+      'sugerencias_enviar': 'Enviar sugestão',
+      'sugerencias_enviando': 'Enviando...',
+      'sugerencias_vacio': 'Escreva sua sugestão antes de enviar.',
+      'sugerencias_enviada': 'Sugestão enviada!',
+      'sugerencias_error': 'Não foi possível enviar a sugestão. Tente novamente.',
+      'sugerencias_recibidas': 'Sugestões recebidas',
+      'sugerencias_sin_datos': 'Ainda não há sugestões.',
+      'sugerencias_de': 'de',
 
       // === LOGIN PAGE ===
       'sign_in': 'Entrar',
