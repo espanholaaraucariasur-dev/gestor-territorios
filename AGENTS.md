@@ -19,9 +19,11 @@ Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigo
 - Agente revisor disponible: `revisor` (verifica las reglas de oro antes de mergear).
 
 ## Versiones y flujo de trabajo
-- Play Console publica la app como build **27** (ya subidо). El `.aab` para subir se genera con ese número y solo se debe renumerar al pedirlo PCD.
-- Desarrollo local: pubspec.yaml en **1.0.2+33** o más, generando `TEST-vN.apk` (N = build actual).
-- Flujo habitual: modificar código → `flutter analyze` de los archivos tocados → bump de versión → `flutter build apk --release` → copiar APK a `C:\Users\angel\Documents\Default Project\TEST-vN.apk` → `git add` + `git commit` + `git push origin main`.
+- **Numeración doble**: los números de los APK de prueba (`TEST-vN.apk`) NO coinciden con los de Play Console. Los APK de prueba van saltando (v35, v36, v37...) según se testean. Recién después de probar varios APK se sube una versión nueva a Play Console, con su propio número consecutivo.
+- **Play Console va en build 27** (ya subido). El `.aab` para subir se genera renumerando el pubspec al siguiente número de Play (p.ej. 28) y NO al número del APK de prueba. El código no cambia, solo el número de versión.
+- Desarrollo local: pubspec.yaml en **1.0.2+39** (o el número actual de prueba), generando `TEST-vN.apk` (N = build de prueba actual).
+- Flujo habitual: modificar código → `flutter analyze` de los archivos tocados → bump de versión de prueba → `flutter build apk --release` → copiar APK a `C:\Users\angel\Documents\Default Project\TEST-vN.apk` → `git add` + `git commit` + `git push origin main`.
+- **Flujo Play Console**: renumerar pubspec al próximo número de Play (28) → `flutter build appbundle --release` → subir `build\app\outputs\bundle\release\app-release.aab` a Play Console → restaurar pubspec al número de prueba (39).
 - Regla de oro: probar con APK local antes de subir `.aab` a Play Console. No subir sin confirmación del usuario.
 
 ## Arquitectura / aislamiento
