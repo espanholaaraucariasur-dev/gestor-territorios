@@ -2,6 +2,8 @@
 
 Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigos de Jehová). Repositorio: https://github.com/espanholaaraucariasur-dev/gestor-territorios
 
+> **Dueño del proyecto**: el usuario de este proyecto es **`https://github.com/espanholaaraucariasur-dev`** (cuenta `espanholaaraucariasur-dev`). La cuenta local `angelrivas2025` NO es el usuario de este proyecto (es solo acceso de lectura/token). No confundir con otros proyectos/repos de la carpeta `C:\Users\angel\Documents\Default Project` (ufbra, industria, asistente_tecnico, cam_ivai, etc.). Este repo es el de gestor-territorios.
+
 ## Reglas generales
 - NO usar cruces ni iconos religiosos (Icons.church, etc.). El salón se llama "Salón del Reino" y su logo es "JW".
 - Iconos siempre en estilo lineal (outlined), manteniendo armonía con el resto de la app.
@@ -50,7 +52,11 @@ Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigo
 - Terminal de despliegue: puertos 4096 (opencode) y 8000 (APK) abiertos por `abrir_puertos.bat`.
 
 ## Entrega de APKs al celular (OneDrive + Telegram)
-- **Mecanismo estándar (confirmado por el usuario)**: la carpeta `C:\Users\angel\Documents\Default Project` ya está compartida con OneDrive. Solo hay que guardar el APK ahí (`TEST-vN.apk`) y OneDrive lo sube solo a la nube. NO copiar a `C:\Users\angel\OneDrive` manualmente.
+- **IMPORTANTE**: `C:\Users\angel\Documents\Default Project` NO es carpeta de OneDrive (la raíz de OneDrive es `C:\Users\angel\OneDrive`). El celular ve `C:\Users\angel\OneDrive\Documents\Default Project\`.
+- **Mecanismo estándar**: al generar un APK nuevo hay que copiarlo a AMBOS lados:
+  1. `C:\Users\angel\Documents\Default Project\TEST-vN.apk` (proyecto)
+  2. `C:\Users\angel\OneDrive\Documents\Default Project\TEST-vN.apk` (para que OneDrive lo suba al celular)
+- OneDrive sube solo los archivos que están DENTRO de `C:\Users\angel\OneDrive\...`.
 - Aviso por Telegram al bot `@Araucaria_sur_bot` (chat 6281442034) cuando haya APK nuevo.
 - El celular descarga desde la app **OneDrive** (misma cuenta), no por link público (no generamos enlaces públicos por OAuth).
 - Fallback local: servidor APK `http://100.114.25.100:8000/TEST-vN.apk` vía Tailscale. El enlace `https://onedrive.live.com/?v=1&view=managestorage` sirve para liberar cupo (vaciar papelera).

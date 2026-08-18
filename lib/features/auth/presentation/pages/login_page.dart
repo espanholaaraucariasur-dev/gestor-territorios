@@ -552,6 +552,25 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     if (e.code != 'email-already-in-use') rethrow;
                   }
 
+                  // Verificar si ya existe una solicitud/usuario con ese email
+                  final existentes = await _db
+                      .collection('usuarios')
+                      .where('email', isEqualTo: emailNorm)
+                      .limit(1)
+                      .get();
+                  if (existentes.docs.isNotEmpty) {
+                    final estadoExistente =
+                        (existentes.docs.first.data()['estado'] as String?) ??
+                            'pendiente';
+                    if (c.mounted) Navigator.pop(c);
+                    if (estadoExistente == 'aprobado') {
+                      _snack('Este correo ya tiene una cuenta aprobada. Inicia sesión.', Colors.orange);
+                    } else {
+                      _snack('Ya enviaste una solicitud con este correo. Espera la aprobación.', Colors.orange);
+                    }
+                    return;
+                  }
+
                   // Guardar en Firestore (sin password en texto plano)
                   await _db.collection('usuarios').add({
                     'nombre': nomCtrl.text.trim(),
@@ -561,6 +580,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     'es_admin_territorios': false,
                     'es_conductor': false,
                     'es_publicador': false,
+                    'es_acomodador': false,
                     'idioma': 'es',
                     'created_at': FieldValue.serverTimestamp(),
                   });
