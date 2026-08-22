@@ -1136,14 +1136,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final comp = (data['complemento'] as String? ?? '').trim();
         final texto = comp.isNotEmpty ? '$calle, $comp' : calle;
 
-        final coords = await MapboxService.geocodificar(texto);
+        final coords = await MapboxService.obtenerCoordenadas(texto);
         if (coords != null) {
           // Guardar en Firestore para la próxima vez
           FirebaseFirestore.instance
               .collection('direcciones_globales')
               .doc(doc.id)
-              .update({'lat': coords[0], 'lng': coords[1]});
-          coordsDirecciones.add('${coords[0]},${coords[1]}');
+              .update({'lat': coords['lat'], 'lng': coords['lng']});
+          coordsDirecciones.add('${coords['lat']},${coords['lng']}');
         } else {
           // Fallback: usar texto si no se pudo geocodificar
           final full = comp.isNotEmpty

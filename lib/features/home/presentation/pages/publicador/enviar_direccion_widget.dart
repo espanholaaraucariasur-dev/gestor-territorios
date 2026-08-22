@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../../../core/services/notificacion_service.dart';
-import '../../../../../core/services/algolia_service.dart';
+import '../../../../../core/services/mapbox_service.dart';
 import '../../../../../core/l10n/translation_service.dart';
 import '../../../../../core/themes/theme_extensions.dart';
 
@@ -135,24 +135,31 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
     }
     setState(() => _buscando = true);
     try {
-      // ─── 1. Buscar en Algolia (principal: typo tolerance, prefix, fuzzy) ───
-      final hit = await AlgoliaService.buscar(calle);
+      // ─── 1. Validar dirección con Mapbox (geocodificación real) ───
+      final mapboxResultado = await MapboxService.validarDireccion(calle);
 
       DocumentSnapshot? match;
 
-      if (hit != null && hit['objectID'] != null) {
-        // Algolia encontró coincidencia → obtener doc completo en Firestore
-        final doc = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .doc(hit['objectID'] as String)
-            .get();
-        if (doc.exists) match = doc;
+      if (mapboxResultado != null) {
+        // Mapbox encontró la dirección → buscar en Firestore por similitud
+        final placeName = mapboxResultado['place_name'] as String? ?? '';
+        match = await _buscarFirestorePorMapbox(placeName, calle);
       }
 
       // ─── 2. Fallback: búsqueda local robusta en Firestore ───
       if (match == null) {
         match = await _buscarFirestoreFallback(calle);
       }
+
+      // ─── 3. Si Mapbox dio coordenadas, guardarlas para envío ───
+      Map<String, double>? coords;
+      if (mapboxResultado != null) {
+        final center = mapboxResultado['center'] as List?;
+        if (center != null && center.length == 2) {
+          coords = {'lat': center[1] as double, 'lng': center[0] as double};
+        }
+      }
+      _coordsMapbox = coords;
 
       setState(() {
         _buscando = false;
@@ -175,6 +182,8 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
       _snack('Error: $e', Colors.red);
     }
   }
+
+  Map<String, double>? _coordsMapbox;
 
   // Fallback robusto usando Firestore (normalización + token matching)
   Future<DocumentSnapshot?> _buscarFirestoreFallback(String calle) async {
@@ -209,6 +218,47 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
     final snap2 = await FirebaseFirestore.instance
         .collection('direcciones_globales')
         .where('calle', isEqualTo: calle)
+        .limit(1)
+        .get();
+    if (snap2.docs.isNotEmpty) return snap2.docs.first;
+
+    return null;
+  }
+
+  // Búsqueda en Firestore usando el place_name de Mapbox
+  Future<DocumentSnapshot?> _buscarFirestorePorMapbox(String placeName, String calleOriginal) async {
+    // Normalizar el place_name de Mapbox para buscar
+    final busqueda = _normalizarDireccion(placeName);
+    if (busqueda.isEmpty) return null;
+
+    // Prefijo: primera palabra no numérica
+    final tokens = busqueda.split(' ').where((w) => w.isNotEmpty).toList();
+    String prefijo = '';
+    for (final tk in tokens) {
+      if (!RegExp(r'^\d+$').hasMatch(tk)) {
+        prefijo = tk;
+        break;
+      }
+    }
+    if (prefijo.isEmpty) prefijo = busqueda;
+
+    // Rango por prefijo en direccion_normalizada
+    final snap = await FirebaseFirestore.instance
+        .collection('direcciones_globales')
+        .where('direccion_normalizada', isGreaterThanOrEqualTo: prefijo)
+        .where('direccion_normalizada', isLessThanOrEqualTo: '$prefijo\uf8ff')
+        .limit(200)
+        .get();
+
+    for (final doc in snap.docs) {
+      final almacenada = (doc.data()?['direccion_normalizada'] as String?) ?? '';
+      if (_coincide(busqueda, almacenada)) return doc;
+    }
+
+    // Fallback: búsqueda exacta en calle original
+    final snap2 = await FirebaseFirestore.instance
+        .collection('direcciones_globales')
+        .where('calle', isEqualTo: calleOriginal)
         .limit(1)
         .get();
     if (snap2.docs.isNotEmpty) return snap2.docs.first;
@@ -251,13 +301,20 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
 
     double? latSol;
     double? lngSol;
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
-      );
-      latSol = pos.latitude;
-      lngSol = pos.longitude;
-    } catch (_) {}
+
+    // Usar coordenadas de Mapbox si están disponibles, si no GPS del dispositivo
+    if (_coordsMapbox != null) {
+      latSol = _coordsMapbox!['lat'];
+      lngSol = _coordsMapbox!['lng'];
+    } else {
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+        );
+        latSol = pos.latitude;
+        lngSol = pos.longitude;
+      } catch (_) {}
+    }
 
     try {
       // Si es condominio y usuario quiere añadir unidad → solicitud especial
