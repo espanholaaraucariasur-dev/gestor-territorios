@@ -14,12 +14,51 @@ class AlgoliaService {
   static const String _baseUrl = 'https://$_appId-dsn.algolia.net';
   static const String _adminUrl = 'https://$_appId.algolia.net';
 
+  // Timeout para requests (10 segundos)
+  static const Duration _timeout = Duration(seconds: 10);
+
+  // ─────────────────────────────────────────────────────────
+  // VERIFICACIÓN DE CONECTIVIDAD
+  // ─────────────────────────────────────────────────────────
+
+  /// Verifica si se puede resolver el host de Algolia y hacer una petición simple.
+  static Future<Map<String, dynamic>> verificarConexion() async {
+    try {
+      // Test simple al endpoint de settings (GET ligero)
+      final url = Uri.parse('$_adminUrl/1/indexes/$_indexName/settings');
+      final response = await http.get(
+        url,
+        headers: {
+          'X-Algolia-Application-Id': _appId,
+          'X-Algolia-API-Key': _adminKey,
+        },
+      ).timeout(_timeout);
+
+      if (response.statusCode == 200) {
+        return {'ok': true, 'mensaje': 'Conexión a Algolia exitosa'};
+      } else if (response.statusCode == 401) {
+        return {'ok': false, 'mensaje': 'Credenciales Algolia inválidas (401). Verifica App ID y Admin Key.'};
+      } else if (response.statusCode == 404) {
+        return {'ok': false, 'mensaje': 'Índice "direcciones" no existe en Algolia (404). Se creará al sincronizar.'};
+      } else {
+        return {'ok': false, 'mensaje': 'Algolia respondió HTTP ${response.statusCode}: ${response.body}'};
+      }
+    } on http.ClientException catch (e) {
+      if (e.message.contains('Failed host lookup') || e.message.contains('Name resolution')) {
+        return {'ok': false, 'mensaje': 'No se puede resolver el host Algolia ($_appId.algolia.net). Verifica: (1) conexión a internet, (2) DNS del dispositivo, (3) que el App ID sea correcto.'};
+      }
+      return {'ok': false, 'mensaje': 'Error de red: ${e.message}'};
+    } catch (e) {
+      return {'ok': false, 'mensaje': 'Error inesperado: $e'};
+    }
+  }
+
   // ─────────────────────────────────────────────────────────
   // BUSCAR
   // ─────────────────────────────────────────────────────────
 
   /// Busca una dirección en Algolia.
-  /// Retorna el primer resultado o null si no hay coincidencias.
+  /// Retorna el primer resultado o null si no hay coincidencias o error.
   static Future<Map<String, dynamic>?> buscar(String consulta) async {
     try {
       final url = Uri.parse('$_baseUrl/1/indexes/$_indexName/query');
@@ -47,7 +86,7 @@ class AlgoliaService {
             'objectID',
           ],
         }),
-      );
+      ).timeout(_timeout);
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -58,6 +97,7 @@ class AlgoliaService {
       }
       return null;
     } catch (e) {
+      // Silencioso en búsqueda (widget tiene fallback a Firestore)
       return null;
     }
   }
@@ -69,6 +109,12 @@ class AlgoliaService {
   /// Sincroniza todas las direcciones de Firestore a Algolia.
   /// Llamar desde el panel admin cuando se agreguen nuevas direcciones.
   static Future<Map<String, dynamic>> sincronizarTodas() async {
+    // 1. Verificar conectividad primero
+    final check = await verificarConexion();
+    if (!check['ok'] as bool) {
+      return {'exito': false, 'mensaje': 'Pre-check falló: ${check['mensaje']}'};
+    }
+
     try {
       final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
@@ -117,10 +163,16 @@ class AlgoliaService {
                 .map((obj) => {'action': 'addObject', 'body': obj})
                 .toList(),
           }),
-        );
+        ).timeout(_timeout);
 
         if (response.statusCode == 200) {
           enviados += lote.length;
+        } else {
+          final errorBody = response.body;
+          return {
+            'exito': false,
+            'mensaje': 'Error en lote $i: HTTP ${response.statusCode} - $errorBody'
+          };
         }
       }
 
@@ -132,6 +184,14 @@ class AlgoliaService {
         'mensaje': '$enviados direcciones sincronizadas',
         'total': snap.docs.length,
       };
+    } on http.ClientException catch (e) {
+      if (e.message.contains('Failed host lookup') || e.message.contains('Name resolution')) {
+        return {
+          'exito': false,
+          'mensaje': 'No se puede resolver $_appId.algolia.net. Verifica internet/DNS y que el App ID sea correcto.'
+        };
+      }
+      return {'exito': false, 'mensaje': 'Error de red: ${e.message}'};
     } catch (e) {
       return {'exito': false, 'mensaje': 'Error: $e'};
     }
@@ -160,8 +220,10 @@ class AlgoliaService {
           'direccion_completa':
               '${data['calle'] ?? ''} ${data['complemento'] ?? ''} ${data['barrio'] ?? ''}',
         }),
-      );
-    } catch (_) {}
+      ).timeout(_timeout);
+    } catch (e) {
+      // Silencioso para no bloquear flujo principal
+    }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -192,7 +254,7 @@ class AlgoliaService {
           'removeStopWords': false,
           'queryLanguages': ['pt', 'es'],
         }),
-      );
+      ).timeout(_timeout);
     } catch (_) {}
   }
 }
