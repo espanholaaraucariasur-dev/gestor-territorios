@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'conductor/conductor_tab.dart';
 import 'publicador/publicador_tab.dart';
 import 'admin/admin_territorios_tab.dart';
-import 'localizador/localizador_tab.dart';
 import 'admin/admin_tab.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
@@ -49,11 +48,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   final TextEditingController _campanaEspecialController =
       TextEditingController();
   final TextEditingController _anuncioGeneralController =
-      TextEditingController();
-  final TextEditingController _localizadorController = TextEditingController();
-  final TextEditingController _complementoLocalizadorController =
-      TextEditingController();
-  final TextEditingController _detallesLocalizadorController =
       TextEditingController();
 
   @override
@@ -137,9 +131,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     _tabControllerAdmin.dispose();
     _campanaEspecialController.dispose();
     _anuncioGeneralController.dispose();
-    _localizadorController.dispose();
-    _complementoLocalizadorController.dispose();
-    _detallesLocalizadorController.dispose();
     super.dispose();
   }
 
@@ -587,25 +578,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         },
                       ),
 
-                      _drawerItem(
-                        icon: Icons.location_searching,
-                        label: context.t('locator'),
-                        color: Colors.blue,
-                        activo: _indiceActual == 2 &&
-                            !_modoAdminActivo &&
-                            !_modoAdminTerritoriosActivo &&
-                            !_modoConductorActivo,
-                        onTap: () {
-                          setState(() {
-                            _modoAdminActivo = false;
-                            _modoAdminTerritoriosActivo = false;
-                            _modoConductorActivo = false;
-                            _indiceActual = 2;
-                          });
-                          Navigator.of(context).pop();
-                        },
-                      ),
-
                       if (esAcomodador || esAdmin)
                         _drawerItem(
                         icon: Icons.calculate_outlined,
@@ -750,7 +722,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         children: [
           _buildVistaHome(nombre, esConductor, esAdmin, esAdminTerritorios),
           _buildVistaTarjetas(),
-          _buildVistaLocalizador(),
         ],
       ),
       floatingActionButton: !_modoAdminActivo &&
@@ -2439,13 +2410,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
 
   Widget _buildVistaTarjetas() {
     return _buildContenidoPublicador();
-  }
-
-  Widget _buildVistaLocalizador() {
-    return LocalizadorTab(
-      usuarioEmail: _usuarioEmail,
-      usuarioNombre: widget.usuarioData['nombre'] as String? ?? _usuarioEmail,
-    );
   }
 
   Widget _buildContenidoAdminTerritorios() {

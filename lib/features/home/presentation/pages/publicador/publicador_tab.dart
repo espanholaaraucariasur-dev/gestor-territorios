@@ -9,6 +9,7 @@ import '../../../../../core/services/mapbox_service.dart';
 import '../../../../../core/services/auto_return_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
+import 'enviar_direccion_widget.dart';
 
 class PublicadorTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -1955,6 +1956,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   );
                 },
               ),
+            ),
+          ),
+
+          // ── ENVIAR DIRECCIÓN NUEVA ──
+          SliverToBoxAdapter(
+            child: EnviarDireccionWidget(
+              usuarioEmail: widget.usuarioEmail,
+              usuarioNombre:
+                  widget.usuarioData['nombre']?.toString() ?? widget.usuarioEmail,
             ),
           ),
 
