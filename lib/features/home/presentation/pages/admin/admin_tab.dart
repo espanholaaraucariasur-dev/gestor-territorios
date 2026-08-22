@@ -37,6 +37,29 @@ class _AdminTabState extends State<AdminTab> {
     return texto;
   }
 
+  List<String> _expandirRango(String texto) {
+    final resultado = <String>[];
+    for (final parte in texto.split(',')) {
+      final p = parte.trim();
+      if (p.isEmpty) continue;
+      if (p.contains('-')) {
+        final bounds = p.split('-');
+        if (bounds.length == 2) {
+          final ini = int.tryParse(bounds[0].trim());
+          final fin = int.tryParse(bounds[1].trim());
+          if (ini != null && fin != null && ini <= fin) {
+            for (int i = ini; i <= fin; i++) {
+              resultado.add(i.toString().padLeft(2, '0'));
+            }
+            continue;
+          }
+        }
+      }
+      resultado.add(p.padLeft(2, '0'));
+    }
+    return resultado;
+  }
+
   List<String> _parsearLineaCSV(String linea) {
     List<String> resultado = [];
     bool dentroComillas = false;
@@ -162,13 +185,26 @@ class _AdminTabState extends State<AdminTab> {
               final tarjeta = columnas[0].trim();
               final calle = columnas.length > 2 ? columnas[2].trim() : '';
               final complemento = columnas.length > 3 ? columnas[3].trim() : '';
+              // Columnas opcionales de condominio
+              final esCondominioStr = columnas.length > 4 ? columnas[4].trim().toLowerCase() : '';
+              final esCondominio = ['true', '1', 'si', 'sí', 'yes', 'y'].contains(esCondominioStr);
+              final bloques = columnas.length > 5 ? columnas[5].trim() : '';
+              final pisos = columnas.length > 6 ? columnas[6].trim() : '';
+              final aptos = columnas.length > 7 ? columnas[7].trim() : '';
 
               if (tarjeta.isNotEmpty && calle.isNotEmpty) {
                 tarjetasMap.putIfAbsent(tarjeta, () => []);
-                tarjetasMap[tarjeta]!.add({
+                final dirData = <String, String>{
                   'calle': calle,
                   'complemento': complemento,
-                });
+                };
+                if (esCondominio) {
+                  dirData['es_condominio'] = 'true';
+                  dirData['bloques'] = bloques;
+                  dirData['pisos'] = pisos;
+                  dirData['aptos'] = aptos;
+                }
+                tarjetasMap[tarjeta]!.add(dirData);
               }
             }
           }
@@ -275,38 +311,80 @@ class _AdminTabState extends State<AdminTab> {
         for (final dir in direcciones) {
           final calle = dir['calle'] ?? '';
           final complemento = dir['complemento'] ?? '';
+          final esCondominio = dir['es_condominio'] == 'true';
+          final bloques = esCondominio ? (dir['bloques'] ?? '') : '';
+          final pisos = esCondominio ? (dir['pisos'] ?? '') : '';
+          final aptos = esCondominio ? (dir['aptos'] ?? '') : '';
           final timestamp = DateTime.now().millisecondsSinceEpoch;
           final complementoSlug = complemento.isNotEmpty
               ? '_${complemento.replaceAll(' ', '_')}'
               : '';
           final docId =
               '${territorioId}_${nombreTarjeta}_${calle.replaceAll(' ', '_')}${complementoSlug}_$timestamp';
+
+          List<Map<String, dynamic>> unidadesBase = [];
+          if (esCondominio) {
+            final bloquesList = bloques
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+            final pisosList = _expandirRango(pisos);
+            final aptosList = _expandirRango(aptos);
+            for (final bl in bloquesList) {
+              for (final pi in pisosList) {
+                for (final ap in aptosList) {
+                  unidadesBase.add({
+                    'bloque': bl,
+                    'piso': pi,
+                    'apto': ap,
+                    'ocupado': false,
+                    'created_at': FieldValue.serverTimestamp(),
+                  });
+                }
+              }
+            }
+          }
+
+          final Map<String, dynamic> data = {
+            'calle': calle,
+            'complemento': complemento,
+            'direccion_normalizada':
+                _normalizarDireccion('$calle $complemento'),
+            'informacion': '',
+            'barrio': territorioId,
+            'lat': '0',
+            'lon': '0',
+            'estado': 'activa',
+            'territorio_id': territorioId,
+            'tarjeta_id': nombreTarjeta,
+            'created_at': FieldValue.serverTimestamp(),
+            'tipo': 'csv',
+            'estado_predicacion': 'pendiente',
+            'predicado': false,
+            'no_predicado': false,
+            'es_hispano': true,
+            'entrego_invitacion': false,
+            'campana_especial': false,
+            'asignado_a': null,
+          };
+          if (esCondominio) {
+            data['es_condominio'] = true;
+            data['condominio_unidades'] = unidadesBase;
+            data['condominio_bloques'] = bloques
+                .split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+            data['condominio_pisos_range'] = pisos;
+            data['condominio_aptos_range'] = aptos;
+          }
+
           batch.set(
             FirebaseFirestore.instance
                 .collection('direcciones_globales')
                 .doc(docId),
-            {
-              'calle': calle,
-              'complemento': complemento,
-              'direccion_normalizada':
-                  _normalizarDireccion('$calle $complemento'),
-              'informacion': '',
-              'barrio': territorioId,
-              'lat': '0',
-              'lon': '0',
-              'estado': 'activa',
-              'territorio_id': territorioId,
-              'tarjeta_id': nombreTarjeta,
-              'created_at': FieldValue.serverTimestamp(),
-              'tipo': 'csv',
-              'estado_predicacion': 'pendiente',
-              'predicado': false,
-              'no_predicado': false,
-              'es_hispano': true,
-              'entrego_invitacion': false,
-              'campana_especial': false,
-              'asignado_a': null,
-            },
+            data,
           );
           totalDirecciones++;
         }

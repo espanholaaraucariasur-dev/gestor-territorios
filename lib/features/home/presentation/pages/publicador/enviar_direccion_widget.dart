@@ -5,9 +5,10 @@ import '../../../../../core/services/notificacion_service.dart';
 import '../../../../../core/l10n/translation_service.dart';
 import '../../../../../core/themes/theme_extensions.dart';
 
-/// Widget simple para que un publicador envíe una dirección nueva.
-/// Comprueba si ya existe en `direcciones_globales`; si existe muestra
-/// un mensaje, si no muestra el formulario para enviarla a revisión.
+/// Widget para que un publicador envíe una dirección nueva.
+/// Busca en `direcciones_globales` con coincidencia robusta (abreviaturas, normalización).
+/// Si existe y es condominio, muestra unidades existentes y permite añadir nueva.
+/// Si no existe, permite enviar solicitud estándar.
 class EnviarDireccionWidget extends StatefulWidget {
   final String usuarioEmail;
   final String usuarioNombre;
@@ -26,63 +27,176 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
   final TextEditingController _calleCtrl = TextEditingController();
   final TextEditingController _complementoCtrl = TextEditingController();
   final TextEditingController _detallesCtrl = TextEditingController();
+  // Controllers para condominio
+  final TextEditingController _bloqueCtrl = TextEditingController();
+  final TextEditingController _pisoCtrl = TextEditingController();
+  final TextEditingController _aptoCtrl = TextEditingController();
 
-  bool _verificando = false;
-  bool _existe = false;
+  bool _buscando = false;
   bool _verificado = false;
+  bool _existe = false;
+  bool _esCondominio = false;
+  bool _mostrarFormularioCondominio = false;
   bool _enviando = false;
 
-  // Normaliza igual que el resto de la app: minúsculas, sin tildes ni símbolos.
-  String _normalizar(String s) {
+  DocumentSnapshot? _direccionEncontrada;
+  List<Map<String, dynamic>> _unidadesExistentes = [];
+
+  // ─── Normalización robusta (igual que backend) ───
+  String _normalizarDireccion(String s) {
     if (s.isEmpty) return '';
-    const accentMap = {
-      'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
-      'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
-      'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
-      'ó': 'o', 'ò': 'o', 'õ': 'o', 'ô': 'o', 'ö': 'o',
-      'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
-      'ç': 'c', 'ñ': 'n',
-    };
     var t = s.toLowerCase();
-    t = t.splitMapJoin('', onNonMatch: (ch) => accentMap[ch] ?? ch);
-    t = t.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    t = t.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
+    t = t.replaceAll(RegExp(r'\b\d{5}-?\d{3}\b'), ' ');
+    t = t.replaceAll(RegExp(r'\b(n\.?|no\.?|nº|n°)\b'), ' ');
+    // Expandir abreviaturas comunes ANTES de limpiar
+    t = _expandirAbreviaturas(t);
+    t = t.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
+    t = t.replaceAll('apto', 'apartamento');
+    t = t.replaceAll('apt', 'apartamento');
+    t = t.replaceAll('ap.', 'apartamento');
+    t = t.replaceAll('dpto', 'departamento');
+    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
     return t;
   }
 
-  Future<void> _verificar() async {
+  String _expandirAbreviaturas(String t) {
+    final Map<String, String> abrev = {
+      // Rua
+      r'^\br\.?\b': 'rua',
+      r'^\bru\b': 'rua',
+      // Avenida
+      r'^\bav\.?\b': 'avenida',
+      r'^\gave\b': 'avenida',
+      // Travessa
+      r'^\btrv?\.?\b': 'travessa',
+      r'^\btrav\b': 'travessa',
+      // Praça
+      r'^\bpc\.?\b': 'praca',
+      r'^\bpca\b': 'praca',
+      // Alameda
+      r'^\bal\.?\b': 'alameda',
+      // Rodovia
+      r'^\brod\.?\b': 'rodovia',
+      r'^\bbr\b': 'rodovia',
+      // Vila
+      r'^\bvq\b': 'vila',
+      // Condomínio
+      r'^\bcond\.?\b': 'condominio',
+      r'^\bres\b': 'residencial',
+      // Prolongamento
+      r'^\bpd\b': 'prolongamento',
+      r'^\bprol\b': 'prolongamento',
+      // Loteamento
+      r'^\blm\b': 'loteamento',
+      r'^\blot\b': 'loteamento',
+      // Quadra
+      r'^\bqd\b': 'quadra',
+      r'^\bq\b': 'quadra',
+      // Chácara
+      r'^\bch\b': 'chacara',
+      // Estrada
+      r'^\best\b': 'estrada',
+      r'^\brdo\b': 'rodovia',
+    };
+    for (final entry in abrev.entries) {
+      t = t.replaceAll(RegExp(entry.key), entry.value);
+    }
+    return t;
+  }
+
+  // Coincidencia robusta token-set
+  bool _coincide(String entrada, String almacenada) {
+    if (entrada.isEmpty || almacenada.isEmpty) return false;
+    final eTok = entrada.split(' ').where((w) => w.isNotEmpty).toSet();
+    final aTok = almacenada.split(' ').where((w) => w.isNotEmpty).toSet();
+    // Números
+    final eNums = eTok.where((w) => RegExp(r'^\d+$').hasMatch(w)).toSet();
+    final aNums = aTok.where((w) => RegExp(r'^\d+$').hasMatch(w)).toSet();
+    if (eNums.isNotEmpty && aNums.isNotEmpty) {
+      if (!eNums.any((n) => aNums.contains(n))) return false;
+    }
+    // Palabras (sin números)
+    final eWords = eTok.where((w) => !RegExp(r'^\d+$').hasMatch(w)).toSet();
+    final aWords = aTok.where((w) => !RegExp(r'^\d+$').hasMatch(w)).toSet();
+    if (eWords.isEmpty) return false;
+    final comunes = eWords.intersection(aWords).length;
+    final ratioE = comunes / eWords.length;
+    final ratioA = aWords.isEmpty ? 0 : comunes / aWords.length;
+    return ratioE >= 0.75 && ratioA >= 0.5; // umbrales robustos
+  }
+
+  Future<void> _buscar() async {
     final calle = _calleCtrl.text.trim();
     if (calle.isEmpty) {
       _snack(context.t('enviar_dir_vacio'), Colors.orange);
       return;
     }
-    setState(() => _verificando = true);
+    setState(() => _buscando = true);
     try {
-      final norm = _normalizar(calle);
-      bool existe = false;
+      final busqueda = _normalizarDireccion(calle);
+      if (busqueda.isEmpty) {
+        setState(() => _buscando = false);
+        _snack(context.t('enviar_dir_vacio'), Colors.orange);
+        return;
+      }
 
+      // Prefijo: primera palabra no numérica (para rango Firestore)
+      final tokens = busqueda.split(' ').where((w) => w.isNotEmpty).toList();
+      String prefijo = '';
+      for (final tk in tokens) {
+        if (!RegExp(r'^\d+$').hasMatch(tk)) {
+          prefijo = tk;
+          break;
+        }
+      }
+      if (prefijo.isEmpty) prefijo = busqueda;
+
+      // Rango Firestore: docs que empiezan por prefijo
       final snap = await FirebaseFirestore.instance
           .collection('direcciones_globales')
-          .where('calle_normalizada', isEqualTo: norm)
-          .limit(1)
+          .where('direccion_normalizada', isGreaterThanOrEqualTo: prefijo)
+          .where('direccion_normalizada', isLessThanOrEqualTo: '$prefijo\uf8ff')
+          .limit(200)
           .get();
-      if (snap.docs.isNotEmpty) {
-        existe = true;
-      } else {
+
+      DocumentSnapshot? match;
+      for (final doc in snap.docs) {
+        final almacenada = (doc.data()?['direccion_normalizada'] as String?) ?? '';
+        if (_coincide(busqueda, almacenada)) {
+          match = doc;
+          break;
+        }
+      }
+
+      if (match == null) {
+        // Fallback: búsqueda exacta en calle (por si no tiene direccion_normalizada)
         final snap2 = await FirebaseFirestore.instance
             .collection('direcciones_globales')
             .where('calle', isEqualTo: calle)
             .limit(1)
             .get();
-        if (snap2.docs.isNotEmpty) existe = true;
+        if (snap2.docs.isNotEmpty) match = snap2.docs.first;
       }
 
       setState(() {
-        _verificando = false;
+        _buscando = false;
         _verificado = true;
-        _existe = existe;
+        _existe = match != null;
+        if (match != null) {
+          _direccionEncontrada = match;
+          final data = match!.data() as Map<String, dynamic>;
+          _esCondominio = data['es_condominio'] == true;
+          if (_esCondominio) {
+            _unidadesExistentes = List<Map<String, dynamic>>.from(
+                data['condominio_unidades'] ?? []);
+            _unidadesExistentes.sort((a, b) =>
+                (a['bloque'] ?? '').toString().compareTo((b['bloque'] ?? '').toString()));
+          }
+        }
       });
     } catch (e) {
-      setState(() => _verificando = false);
+      setState(() => _buscando = false);
       _snack('Error: $e', Colors.red);
     }
   }
@@ -92,6 +206,30 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
     if (calle.isEmpty) {
       _snack(context.t('enviar_dir_vacio'), Colors.orange);
       return;
+    }
+
+    // Si es condominio, validar campos de unidad
+    if (_esCondominio && _mostrarFormularioCondominio) {
+      if (_bloqueCtrl.text.trim().isEmpty ||
+          _pisoCtrl.text.trim().isEmpty ||
+          _aptoCtrl.text.trim().isEmpty) {
+        _snack('Completa bloque, piso y apartamento', Colors.orange);
+        return;
+      }
+      // Verificar que la unidad no exista ya
+      final nuevaUnidad = {
+        'bloque': _bloqueCtrl.text.trim(),
+        'piso': _pisoCtrl.text.trim(),
+        'apto': _aptoCtrl.text.trim(),
+      };
+      final yaExiste = _unidadesExistentes.any((u) =>
+          u['bloque'] == nuevaUnidad['bloque'] &&
+          u['piso'] == nuevaUnidad['piso'] &&
+          u['apto'] == nuevaUnidad['apto']);
+      if (yaExiste) {
+        _snack('Esa unidad ya existe en el condominio', Colors.orange);
+        return;
+      }
     }
 
     setState(() => _enviando = true);
@@ -107,36 +245,74 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
     } catch (_) {}
 
     try {
-      await FirebaseFirestore.instance
-          .collection('solicitudes_localizador')
-          .add({
-        'direccion_original': calle,
-        'direccion_normalizada': _normalizar(calle),
-        'complemento': _complementoCtrl.text.trim(),
-        'detalles': _detallesCtrl.text.trim(),
-        'solicitante_email': widget.usuarioEmail,
-        'estado': 'pendiente',
-        if (latSol != null) 'lat': latSol,
-        if (lngSol != null) 'lng': lngSol,
-        'created_at': FieldValue.serverTimestamp(),
-      });
+      // Si es condominio y usuario quiere añadir unidad → solicitud especial
+      if (_esCondominio && _mostrarFormularioCondominio) {
+        await FirebaseFirestore.instance.collection('solicitudes_localizador').add({
+          'direccion_original': calle,
+          'direccion_normalizada': _normalizarDireccion(calle),
+          'complemento': _complementoCtrl.text.trim(),
+          'detalles': _detallesCtrl.text.trim(),
+          'solicitante_email': widget.usuarioEmail,
+          'estado': 'pendiente',
+          'tipo_solicitud': 'condominio_nueva_unidad',
+          'condominio_direccion_id': _direccionEncontrada!.id,
+          'condominio_unidad': {
+            'bloque': _bloqueCtrl.text.trim(),
+            'piso': _pisoCtrl.text.trim(),
+            'apto': _aptoCtrl.text.trim(),
+          },
+          if (latSol != null) 'lat': latSol,
+          if (lngSol != null) 'lng': lngSol,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Solicitud estándar
+        await FirebaseFirestore.instance.collection('solicitudes_localizador').add({
+          'direccion_original': calle,
+          'direccion_normalizada': _normalizarDireccion(calle),
+          'complemento': _complementoCtrl.text.trim(),
+          'detalles': _detallesCtrl.text.trim(),
+          'solicitante_email': widget.usuarioEmail,
+          'estado': 'pendiente',
+          if (latSol != null) 'lat': latSol,
+          if (lngSol != null) 'lng': lngSol,
+          'created_at': FieldValue.serverTimestamp(),
+        });
+      }
 
       await NotificacionService.enviarAAdminTerritorios(
-        titulo: '📍 Nueva dirección reportada',
-        cuerpo: '${widget.usuarioNombre} envió una dirección nueva: "$calle"'
-            '${_complementoCtrl.text.isNotEmpty ? ' · ${_complementoCtrl.text}' : ''}',
+        titulo: _esCondominio && _mostrarFormularioCondominio
+            ? '🏢 Nueva unidad en condominio'
+            : '📍 Nueva dirección reportada',
+        cuerpo: _esCondominio && _mostrarFormularioCondominio
+            ? '${widget.usuarioNombre} solicita añadir unidad en condominio: "$calle" '
+                'Bloque ${_bloqueCtrl.text} Piso ${_pisoCtrl.text} Apto ${_aptoCtrl.text}'
+            : '${widget.usuarioNombre} envió una dirección nueva: "$calle"'
+                '${_complementoCtrl.text.isNotEmpty ? ' · ${_complementoCtrl.text}' : ''}',
         tipo: TipoNotificacion.solicitudDireccion,
-        extra: {'solicitante': widget.usuarioEmail, 'direccion': calle},
+        extra: {
+          'solicitante': widget.usuarioEmail,
+          'direccion': calle,
+          if (_esCondominio && _mostrarFormularioCondominio)
+            'condominio_id': _direccionEncontrada!.id,
+        },
       );
 
       setState(() {
         _enviando = false;
         _verificado = false;
         _existe = false;
+        _esCondominio = false;
+        _mostrarFormularioCondominio = false;
+        _direccionEncontrada = null;
+        _unidadesExistentes = [];
       });
       _calleCtrl.clear();
       _complementoCtrl.clear();
       _detallesCtrl.clear();
+      _bloqueCtrl.clear();
+      _pisoCtrl.clear();
+      _aptoCtrl.clear();
 
       if (mounted) _snack(context.t('enviar_dir_enviado'), Colors.green.shade700);
     } catch (e) {
@@ -157,6 +333,9 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
     _calleCtrl.dispose();
     _complementoCtrl.dispose();
     _detallesCtrl.dispose();
+    _bloqueCtrl.dispose();
+    _pisoCtrl.dispose();
+    _aptoCtrl.dispose();
     super.dispose();
   }
 
@@ -195,11 +374,6 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            context.t('enviar_dir_desc'),
-            style: const TextStyle(fontSize: 11, color: Colors.grey),
-          ),
           const SizedBox(height: 14),
           TextField(
             controller: _calleCtrl,
@@ -218,15 +392,15 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: _verificando ? null : _verificar,
-              icon: _verificando
+              onPressed: _buscando ? null : _buscar,
+              icon: _buscando
                   ? const SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     )
-                  : const Icon(Icons.search, size: 18),
-              label: Text(_verificando ? context.t('enviar_dir_enviando') : context.t('enviar_dir_verificar')),
+                  : const Icon(Icons.send, size: 18),
+              label: Text(_buscando ? context.t('enviar_dir_enviando') : context.t('enviar_dir_enviar')),
               style: ElevatedButton.styleFrom(
                 backgroundColor: verde,
                 foregroundColor: Colors.white,
@@ -235,29 +409,183 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
             ),
           ),
 
-          // ── Resultado de la verificación ──
+          // ── Resultado de la búsqueda ──
           if (_verificado && _existe) ...[
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.shade200),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, color: Colors.orange, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      context.t('enviar_dir_existe'),
-                      style: const TextStyle(color: Colors.orange, fontSize: 13),
+            if (_esCondominio) ...[
+              // ── CONDOMINIO ENCONTRADO ──
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.apartment, color: Colors.blue.shade700, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Dirección encontrada: Condominio / Conjunto residencial',
+                            style: TextStyle(color: Colors.blue.shade700, fontSize: 13, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    if (_unidadesExistentes.isNotEmpty) ...[
+                      const Text('Unidades registradas:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: _unidadesExistentes.map((u) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Bl. ${u['bloque']} • Piso ${u['piso']} • Apto ${u['apto']}',
+                              style: TextStyle(fontSize: 11, color: Colors.blue.shade800),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    // Botón para añadir nueva unidad
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => setState(() => _mostrarFormularioCondominio = true),
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Añadir nueva unidad (bloque/piso/apto)'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.blue.shade700,
+                          side: BorderSide(color: Colors.blue.shade300),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              if (_mostrarFormularioCondominio) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Nueva unidad', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _bloqueCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'Bloque',
+                                hintText: 'A, B, 1...',
+                                isDense: true,
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _pisoCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'Piso',
+                                hintText: '1, 2...',
+                                isDense: true,
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _aptoCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Apartamento',
+                          hintText: '01, 02, 101...',
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => setState(() => _mostrarFormularioCondominio = false),
+                              child: const Text('Cancelar'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _enviando ? null : _enviar,
+                              icon: _enviando
+                                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : const Icon(Icons.send, size: 16),
+                              label: Text(_enviando ? context.t('enviar_dir_enviando') : 'Enviar solicitud'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: verde,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ] else ...[
+              // ── DIRECCIÓN EXISTENTE (NO CONDOMINIO) ──
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.orange, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        context.t('enviar_dir_existe'),
+                        style: const TextStyle(color: Colors.orange, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
 
           if (_verificado && !_existe) ...[
@@ -322,19 +650,14 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
                           ? const SizedBox(
                               width: 16,
                               height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                             )
                           : const Icon(Icons.send, size: 18),
                       label: Text(_enviando ? context.t('enviar_dir_enviando') : context.t('enviar_dir_enviar')),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: verde,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                     ),
                   ),

@@ -1057,6 +1057,10 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
       String tarjetaId, String tarjetaNombre) async {
     final calleCtrl = TextEditingController();
     final complementoCtrl = TextEditingController();
+    bool esCondominio = false;
+    final bloquesCtrl = TextEditingController();
+    final pisosCtrl = TextEditingController();
+    final aptosCtrl = TextEditingController();
 
     await showDialog(
       context: context,
@@ -1064,27 +1068,72 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         builder: (context, setDlgState) => AlertDialog(
           title: Text('Agregar dirección\n$tarjetaNombre',
               style: const TextStyle(fontSize: 15)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: calleCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Calle / Dirección',
-                  border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: calleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Calle / Dirección',
+                    border: OutlineInputBorder(),
+                  ),
+                  textCapitalization: TextCapitalization.words,
                 ),
-                textCapitalization: TextCapitalization.words,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: complementoCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Complemento (apto, casa, etc.)',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: complementoCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Complemento (apto, casa, etc.)',
+                    border: OutlineInputBorder(),
+                  ),
+                  textCapitalization: TextCapitalization.words,
                 ),
-                textCapitalization: TextCapitalization.words,
-              ),
-            ],
+                const SizedBox(height: 16),
+                CheckboxListTile(
+                  value: esCondominio,
+                  onChanged: (v) => setDlgState(() => esCondominio = v ?? false),
+                  title: const Text('Es condominio / Conjunto residencial'),
+                  subtitle: const Text('Permite gestionar bloques, pisos y apartamentos'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                if (esCondominio) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: bloquesCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Bloques (ej: A,B,C o 1,2,3)',
+                      border: OutlineInputBorder(),
+                      hintText: 'Separados por coma',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: pisosCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Pisos por bloque (ej: 1-10)',
+                      border: OutlineInputBorder(),
+                      hintText: 'Rango o lista separada por coma',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: aptosCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Apartamentos por piso (ej: 1-4 o 01,02,03,04)',
+                      border: OutlineInputBorder(),
+                      hintText: 'Rango o lista separada por coma',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Ejemplo: Bloques A,B | Pisos 1-5 | Aptos 01-04 → genera 40 unidades',
+                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1120,7 +1169,6 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                     .where((w) => w.length >= 2)
                     .toSet()
                     .toList();
-                // Agregar complemento a las palabras clave
                 if (complemento.isNotEmpty) {
                   final compNorm = complemento.toLowerCase()
                       .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ')
@@ -1129,9 +1177,32 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                   palabrasClave.addAll(compNorm.split(' ').where((w) => w.length >= 2));
                 }
 
-                await FirebaseFirestore.instance
-                    .collection('direcciones_globales')
-                    .add({
+                // ── Preparar datos de condominio ──
+                List<Map<String, dynamic>> unidadesBase = [];
+                if (esCondominio) {
+                  final bloques = bloquesCtrl.text
+                      .split(',')
+                      .map((e) => e.trim())
+                      .where((e) => e.isNotEmpty)
+                      .toList();
+                  final pisos = _expandirRango(pisosCtrl.text);
+                  final aptos = _expandirRango(aptosCtrl.text);
+                  for (final bl in bloques) {
+                    for (final pi in pisos) {
+                      for (final ap in aptos) {
+                        unidadesBase.add({
+                          'bloque': bl,
+                          'piso': pi,
+                          'apto': ap,
+                          'ocupado': false,
+                          'created_at': FieldValue.serverTimestamp(),
+                        });
+                      }
+                    }
+                  }
+                }
+
+                final Map<String, dynamic> data = {
                   'calle': calle,
                   'calle_normalizada': calleNorm,
                   'palabras_clave': palabrasClave,
@@ -1146,7 +1217,22 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                   'predicado': false,
                   'visitado': false,
                   'created_at': FieldValue.serverTimestamp(),
-                });
+                };
+                if (esCondominio) {
+                  data['es_condominio'] = true;
+                  data['condominio_unidades'] = unidadesBase;
+                  data['condominio_bloques'] = bloquesCtrl.text
+                      .split(',')
+                      .map((e) => e.trim())
+                      .where((e) => e.isNotEmpty)
+                      .toList();
+                  data['condominio_pisos_range'] = pisosCtrl.text.trim();
+                  data['condominio_aptos_range'] = aptosCtrl.text.trim();
+                }
+
+                await FirebaseFirestore.instance
+                    .collection('direcciones_globales')
+                    .add(data);
 
                 // Actualizar contador en la tarjeta
                 final count = await FirebaseFirestore.instance
@@ -1163,6 +1249,9 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
 
                 calleCtrl.clear();
                 complementoCtrl.clear();
+                bloquesCtrl.clear();
+                pisosCtrl.clear();
+                aptosCtrl.clear();
                 if (context.mounted) Navigator.pop(c);
               },
               style: ElevatedButton.styleFrom(
@@ -1173,6 +1262,29 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         ),
       ),
     );
+  }
+
+  List<String> _expandirRango(String texto) {
+    final resultado = <String>[];
+    for (final parte in texto.split(',')) {
+      final p = parte.trim();
+      if (p.isEmpty) continue;
+      if (p.contains('-')) {
+        final bounds = p.split('-');
+        if (bounds.length == 2) {
+          final ini = int.tryParse(bounds[0].trim());
+          final fin = int.tryParse(bounds[1].trim());
+          if (ini != null && fin != null && ini <= fin) {
+            for (int i = ini; i <= fin; i++) {
+              resultado.add(i.toString().padLeft(2, '0'));
+            }
+            continue;
+          }
+        }
+      }
+      resultado.add(p.padLeft(2, '0'));
+    }
+    return resultado;
   }
 
   Future<void> _editarNombreTarjeta(

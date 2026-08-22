@@ -564,10 +564,17 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     final calle = (data['direccion_original'] as String?) ?? '';
     final complemento = (data['complemento'] as String?) ?? '';
     final detalles = (data['detalles'] as String?) ?? '';
-    final esCondominio = (data['es_condominio'] as bool?) ?? false;
-    final unidades = (data['unidades_condominio'] as List?) ?? [];
     final latSol = (data['lat'] as num?)?.toDouble();
     final lngSol = (data['lng'] as num?)?.toDouble();
+
+    // Nuevo tipo: añadir unidad a condominio existente
+    final tipoSolicitud = (data['tipo_solicitud'] as String?) ?? '';
+    final condominioDireccionId = (data['condominio_direccion_id'] as String?) ?? '';
+    final nuevaUnidad = (data['condominio_unidad'] as Map<String, dynamic>?) ?? {};
+
+    // Para compatibilidad con solicitudes antiguas
+    final esCondominioLegacy = (data['es_condominio'] as bool?) ?? false;
+    final unidadesLegacy = (data['unidades_condominio'] as List?) ?? [];
 
     final territoriosSnap =
         await FirebaseFirestore.instance.collection('territorios').get();
@@ -804,8 +811,54 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         return t;
       }
 
-      if (esCondominio && unidades.isNotEmpty) {
-        for (final u in unidades) {
+      // ── 1. NUEVA UNIDAD EN CONDOMINIO EXISTENTE ──
+      if (tipoSolicitud == 'condominio_nueva_unidad' && condominioDireccionId.isNotEmpty) {
+        final condominioRef = db.collection('direcciones_globales').doc(condominioDireccionId);
+        final condominioSnap = await condominioRef.get();
+
+        if (condominioSnap.exists) {
+          final condData = condominioSnap.data() as Map<String, dynamic>;
+          final List<dynamic> unidadesActuales = List.from(condData['condominio_unidades'] ?? []);
+
+          // Añadir nueva unidad
+          final unidadNueva = {
+            'bloque': nuevaUnidad['bloque'] ?? '',
+            'piso': nuevaUnidad['piso'] ?? '',
+            'apto': nuevaUnidad['apto'] ?? '',
+            'ocupado': false,
+            'agregada_en': FieldValue.serverTimestamp(),
+            'agregada_por': widget.usuarioData['nombre'] ?? '',
+            'solicitada_por': data['solicitante_email'] ?? '',
+          };
+          unidadesActuales.add(unidadNueva);
+
+          batch.update(condominioRef, {
+            'condominio_unidades': unidadesActuales,
+            'updated_at': FieldValue.serverTimestamp(),
+          });
+        } else {
+          // El condominio no existe, crear dirección normal con la unidad
+          batch.set(db.collection('direcciones_globales').doc(), {
+            'calle': calle,
+            'complemento': 'Bl. ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}',
+            'direccion_normalizada': _norm('${calle} Bl ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}'),
+            'territorio_id': territorioIdSel,
+            'territorio_nombre': territorioNombreSel ?? '',
+            'tarjeta_id': tarjetaIdSel,
+            'barrio': territorioNombreSel ?? '',
+            'estado': 'activa',
+            'estado_predicacion': 'pendiente',
+            'predicado': false,
+            'es_hispano': true,
+            'es_condominio': true,
+            'condominio_unidades': [nuevaUnidad],
+            'created_at': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      // ── 2. CONDOMINIO NUEVO (legacy) ──
+      else if (esCondominioLegacy && unidadesLegacy.isNotEmpty) {
+        for (final u in unidadesLegacy) {
           batch.set(db.collection('direcciones_globales').doc(), {
             'calle': calle,
             'complemento': u.toString(),
@@ -822,7 +875,9 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             'created_at': FieldValue.serverTimestamp(),
           });
         }
-      } else {
+      }
+      // ── 3. DIRECCIÓN NORMAL ──
+      else {
         batch.set(db.collection('direcciones_globales').doc(), {
           'calle': calle,
           'complemento': complemento,
@@ -853,9 +908,11 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(esCondominio
-                ? '✅ ${unidades.length} unidades agregadas a $tarjetaIdSel'
-                : '✅ Dirección agregada a $tarjetaIdSel'),
+            content: Text(tipoSolicitud == 'condominio_nueva_unidad'
+                ? '✅ Nueva unidad añadida al condominio en $tarjetaIdSel'
+                : (esCondominioLegacy
+                    ? '✅ ${unidadesLegacy.length} unidades agregadas a $tarjetaIdSel'
+                    : '✅ Dirección agregada a $tarjetaIdSel')),
             backgroundColor: _verde,
           ),
         );
@@ -1866,9 +1923,20 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             final complemento = (data['complemento'] as String?) ?? '';
             final detalles = (data['detalles'] as String?) ?? '';
             final solicitante = (data['solicitante_email'] as String?) ?? '';
-            final esCondominio = (data['es_condominio'] as bool?) ?? false;
-            final unidades = (data['unidades_condominio'] as List?) ?? [];
             final createdAt = data['created_at'] as Timestamp?;
+
+            // Nuevo tipo: añadir unidad a condominio existente
+            final tipoSolicitud = (data['tipo_solicitud'] as String?) ?? '';
+            final esNuevaUnidadCondominio = tipoSolicitud == 'condominio_nueva_unidad';
+            final nuevaUnidad = (data['condominio_unidad'] as Map<String, dynamic>?) ?? {};
+            final condominioDireccionId = (data['condominio_direccion_id'] as String?) ?? '';
+
+            // Legacy
+            final esCondominioLegacy = (data['es_condominio'] as bool?) ?? false;
+            final unidadesLegacy = (data['unidades_condominio'] as List?) ?? [];
+
+            final esCondominio = esNuevaUnidadCondominio || esCondominioLegacy;
+
             String fecha = '';
             if (createdAt != null) {
               final dt = createdAt.toDate();
@@ -1900,37 +1968,39 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          esCondominio ? Icons.apartment : Icons.location_on,
-                          color: esCondominio ? Colors.blue : _verde,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 13),
+Row(
+                        children: [
+                          Icon(
+                            esCondominio ? Icons.apartment : Icons.location_on,
+                            color: esCondominio ? Colors.blue : _verde,
+                            size: 16,
                           ),
-                        ),
-                        if (esCondominio)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
+                          const SizedBox(width: 6),
+                          Expanded(
                             child: Text(
-                              '🏢 ${unidades.length} unid.',
+                              '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
                               style: const TextStyle(
-                                  fontSize: 10, color: Colors.blue),
+                                  fontWeight: FontWeight.bold, fontSize: 13),
                             ),
                           ),
-                      ],
-                    ),
+                          if (esCondominio)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                esNuevaUnidadCondominio
+                                    ? '🏢 +1 unidad (Bl. ${nuevaUnidad['bloque']} P${nuevaUnidad['piso']} A${nuevaUnidad['apto']})'
+                                    : '🏢 ${unidadesLegacy.length} unid.',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.blue),
+                              ),
+                            ),
+                        ],
+                      ),
                     if (detalles.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Text(detalles,
