@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../../../core/services/algolia_service.dart';
 
 class TerritoriosTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -1230,9 +1231,12 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                   data['condominio_aptos_range'] = aptosCtrl.text.trim();
                 }
 
-                await FirebaseFirestore.instance
+                final docRef = await FirebaseFirestore.instance
                     .collection('direcciones_globales')
                     .add(data);
+
+                // Sincronizar con Algolia
+                await AlgoliaService.sincronizarUna(docRef.id, data);
 
                 // Actualizar contador en la tarjeta
                 final count = await FirebaseFirestore.instance

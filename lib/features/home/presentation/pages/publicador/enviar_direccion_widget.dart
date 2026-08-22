@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../../../core/services/notificacion_service.dart';
+import '../../../../../core/services/algolia_service.dart';
 import '../../../../../core/l10n/translation_service.dart';
 import '../../../../../core/themes/theme_extensions.dart';
 
@@ -134,49 +135,23 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
     }
     setState(() => _buscando = true);
     try {
-      final busqueda = _normalizarDireccion(calle);
-      if (busqueda.isEmpty) {
-        setState(() => _buscando = false);
-        _snack(context.t('enviar_dir_vacio'), Colors.orange);
-        return;
-      }
-
-      // Prefijo: primera palabra no numérica (para rango Firestore)
-      final tokens = busqueda.split(' ').where((w) => w.isNotEmpty).toList();
-      String prefijo = '';
-      for (final tk in tokens) {
-        if (!RegExp(r'^\d+$').hasMatch(tk)) {
-          prefijo = tk;
-          break;
-        }
-      }
-      if (prefijo.isEmpty) prefijo = busqueda;
-
-      // Rango Firestore: docs que empiezan por prefijo
-      final snap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .where('direccion_normalizada', isGreaterThanOrEqualTo: prefijo)
-          .where('direccion_normalizada', isLessThanOrEqualTo: '$prefijo\uf8ff')
-          .limit(200)
-          .get();
+      // ─── 1. Buscar en Algolia (principal: typo tolerance, prefix, fuzzy) ───
+      final hit = await AlgoliaService.buscar(calle);
 
       DocumentSnapshot? match;
-      for (final doc in snap.docs) {
-        final almacenada = (doc.data()?['direccion_normalizada'] as String?) ?? '';
-        if (_coincide(busqueda, almacenada)) {
-          match = doc;
-          break;
-        }
+
+      if (hit != null && hit['objectID'] != null) {
+        // Algolia encontró coincidencia → obtener doc completo en Firestore
+        final doc = await FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .doc(hit['objectID'] as String)
+            .get();
+        if (doc.exists) match = doc;
       }
 
+      // ─── 2. Fallback: búsqueda local robusta en Firestore ───
       if (match == null) {
-        // Fallback: búsqueda exacta en calle (por si no tiene direccion_normalizada)
-        final snap2 = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .where('calle', isEqualTo: calle)
-            .limit(1)
-            .get();
-        if (snap2.docs.isNotEmpty) match = snap2.docs.first;
+        match = await _buscarFirestoreFallback(calle);
       }
 
       setState(() {
@@ -199,6 +174,46 @@ class _EnviarDireccionWidgetState extends State<EnviarDireccionWidget> {
       setState(() => _buscando = false);
       _snack('Error: $e', Colors.red);
     }
+  }
+
+  // Fallback robusto usando Firestore (normalización + token matching)
+  Future<DocumentSnapshot?> _buscarFirestoreFallback(String calle) async {
+    final busqueda = _normalizarDireccion(calle);
+    if (busqueda.isEmpty) return null;
+
+    // Prefijo: primera palabra no numérica
+    final tokens = busqueda.split(' ').where((w) => w.isNotEmpty).toList();
+    String prefijo = '';
+    for (final tk in tokens) {
+      if (!RegExp(r'^\d+$').hasMatch(tk)) {
+        prefijo = tk;
+        break;
+      }
+    }
+    if (prefijo.isEmpty) prefijo = busqueda;
+
+    // Rango por prefijo en direccion_normalizada
+    final snap = await FirebaseFirestore.instance
+        .collection('direcciones_globales')
+        .where('direccion_normalizada', isGreaterThanOrEqualTo: prefijo)
+        .where('direccion_normalizada', isLessThanOrEqualTo: '$prefijo\uf8ff')
+        .limit(200)
+        .get();
+
+    for (final doc in snap.docs) {
+      final almacenada = (doc.data()?['direccion_normalizada'] as String?) ?? '';
+      if (_coincide(busqueda, almacenada)) return doc;
+    }
+
+    // Fallback exacto en calle
+    final snap2 = await FirebaseFirestore.instance
+        .collection('direcciones_globales')
+        .where('calle', isEqualTo: calle)
+        .limit(1)
+        .get();
+    if (snap2.docs.isNotEmpty) return snap2.docs.first;
+
+    return null;
   }
 
   Future<void> _enviar() async {

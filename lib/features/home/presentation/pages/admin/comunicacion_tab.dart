@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/services/gemini_service.dart';
+import '../../../../../core/services/algolia_service.dart';
 import '../../../../../core/l10n/translation_service.dart';
 
 class ComunicacionTab extends StatefulWidget {
@@ -836,9 +837,15 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             'condominio_unidades': unidadesActuales,
             'updated_at': FieldValue.serverTimestamp(),
           });
+
+          // Sincronizar condominio actualizado a Algolia
+          final condDataActualizada = Map<String, dynamic>.from(condData);
+          condDataActualizada['condominio_unidades'] = unidadesActuales;
+          await AlgoliaService.sincronizarUna(condominioDireccionId, condDataActualizada);
         } else {
           // El condominio no existe, crear dirección normal con la unidad
-          batch.set(db.collection('direcciones_globales').doc(), {
+          final docRef = db.collection('direcciones_globales').doc();
+          final dataNueva = {
             'calle': calle,
             'complemento': 'Bl. ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}',
             'direccion_normalizada': _norm('${calle} Bl ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}'),
@@ -853,13 +860,16 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             'es_condominio': true,
             'condominio_unidades': [nuevaUnidad],
             'created_at': FieldValue.serverTimestamp(),
-          });
+          };
+          batch.set(docRef, dataNueva);
+          await AlgoliaService.sincronizarUna(docRef.id, dataNueva);
         }
       }
       // ── 2. CONDOMINIO NUEVO (legacy) ──
       else if (esCondominioLegacy && unidadesLegacy.isNotEmpty) {
         for (final u in unidadesLegacy) {
-          batch.set(db.collection('direcciones_globales').doc(), {
+          final docRef = db.collection('direcciones_globales').doc();
+          final dataUnidad = {
             'calle': calle,
             'complemento': u.toString(),
             'direccion_normalizada': _norm('$calle $u'),
@@ -873,12 +883,15 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             'es_hispano': true,
             'es_condominio': true,
             'created_at': FieldValue.serverTimestamp(),
-          });
+          };
+          batch.set(docRef, dataUnidad);
+          await AlgoliaService.sincronizarUna(docRef.id, dataUnidad);
         }
       }
       // ── 3. DIRECCIÓN NORMAL ──
       else {
-        batch.set(db.collection('direcciones_globales').doc(), {
+        final docRef = db.collection('direcciones_globales').doc();
+        final dataNormal = {
           'calle': calle,
           'complemento': complemento,
           'direccion_normalizada': _norm('$calle $complemento'),
@@ -892,7 +905,9 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           'es_hispano': true,
           'informacion': detalles,
           'created_at': FieldValue.serverTimestamp(),
-        });
+        };
+        batch.set(docRef, dataNormal);
+        await AlgoliaService.sincronizarUna(docRef.id, dataNormal);
       }
 
       batch.update(solicitudDoc.reference, {

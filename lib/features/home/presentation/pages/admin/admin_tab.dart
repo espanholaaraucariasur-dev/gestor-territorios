@@ -4,6 +4,7 @@ import 'comunicacion_tab.dart';
 import 'usuarios_tab.dart';
 import 'mantenimiento_tab.dart';
 import '../../../../../core/services/csv_upload.dart';
+import '../../../../../core/services/algolia_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 
@@ -287,6 +288,7 @@ class _AdminTabState extends State<AdminTab> {
     try {
       int totalTarjetas = 0;
       int totalDirecciones = 0;
+      final Map<String, Map<String, dynamic>> direccionesParaAlgolia = {};
       for (final entry in tarjetasMap.entries) {
         final nombreTarjeta = entry.key;
         final direcciones = entry.value;
@@ -386,9 +388,17 @@ class _AdminTabState extends State<AdminTab> {
                 .doc(docId),
             data,
           );
+          // Guardar para sincronizar Algolia después del commit
+          direccionesParaAlgolia[docId] = data;
           totalDirecciones++;
         }
         await batch.commit();
+
+        // Sincronizar con Algolia
+        for (final entry in direccionesParaAlgolia.entries) {
+          await AlgoliaService.sincronizarUna(entry.key, entry.value);
+        }
+
         totalTarjetas++;
       }
       if (mounted) {
@@ -1607,6 +1617,7 @@ class _AdminTabState extends State<AdminTab> {
           );
         try {
           final batch = FirebaseFirestore.instance.batch();
+          final Map<String, Map<String, dynamic>> direccionesParaAlgolia = {};
           for (final dir in direcciones) {
             final calle = dir['calle'] ?? '';
             final complemento = dir['complemento'] ?? '';
@@ -1616,30 +1627,38 @@ class _AdminTabState extends State<AdminTab> {
                 : '';
             final docId =
                 '${terId}_${tarjetaId}_${calle.replaceAll(' ', '_').replaceAll(',', '')}${slug}_$ts';
+            final data = {
+              'calle': calle,
+              'complemento': complemento,
+              'informacion': dir['informacion'] ?? '',
+              'direccion_normalizada':
+                  _normalizarDireccion('$calle $complemento'),
+              'barrio': terId,
+              'territorio_id': terId,
+              'tarjeta_id': tarjetaId,
+              'estado': 'activa',
+              'estado_predicacion': 'pendiente',
+              'predicado': false,
+              'visitado': false,
+              'asignado_a': null,
+              'tipo': 'csv',
+              'created_at': FieldValue.serverTimestamp(),
+            };
             batch.set(
               FirebaseFirestore.instance
                   .collection('direcciones_globales')
                   .doc(docId),
-              {
-                'calle': calle,
-                'complemento': complemento,
-                'informacion': dir['informacion'] ?? '',
-                'direccion_normalizada':
-                    _normalizarDireccion('$calle $complemento'),
-                'barrio': terId,
-                'territorio_id': terId,
-                'tarjeta_id': tarjetaId,
-                'estado': 'activa',
-                'estado_predicacion': 'pendiente',
-                'predicado': false,
-                'visitado': false,
-                'asignado_a': null,
-                'tipo': 'csv',
-                'created_at': FieldValue.serverTimestamp(),
-              },
+              data,
             );
+            direccionesParaAlgolia[docId] = data;
           }
           await batch.commit();
+
+          // Sincronizar con Algolia
+          for (final entry in direccionesParaAlgolia.entries) {
+            await AlgoliaService.sincronizarUna(entry.key, entry.value);
+          }
+
           if (context.mounted) {
             Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
