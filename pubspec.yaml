@@ -2,7 +2,7 @@ name: araucaria_sur
 description: Gestión Territorial Congregación Araucaria Sur
 
 publish_to: 'none'
-version: 1.0.2+44
+version: 1.0.2+45
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -45,6 +45,7 @@ dependencies:
 
   # Actualizaciones forzadas
   in_app_update: ^4.2.3
+  algolia_client_search: ^1.49.2
 
 dev_dependencies:
   flutter_test:

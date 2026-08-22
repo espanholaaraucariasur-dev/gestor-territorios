@@ -1,9 +1,8 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:algolia_client_search/algolia_client_search.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../config/app_secrets.dart';
 
-/// Servicio de Algolia para búsqueda robusta de direcciones.
+/// Servicio de Algolia usando la librería oficial `algolia_client_search`.
 /// Plan Free: 10,000 búsquedas/mes — suficiente para uso congregacional.
 class AlgoliaService {
   static const String _appId = AppSecrets.algoliaAppId;
@@ -11,43 +10,43 @@ class AlgoliaService {
   static const String _adminKey = AppSecrets.algoliaAdminKey;
   static const String _indexName = 'direcciones';
 
-  static const String _baseUrl = 'https://$_appId-dsn.algolia.net';
-  static const String _adminUrl = 'https://$_appId.algolia.net';
+  // Cliente singleton (read + write usan mismo client con keys diferentes)
+  static SearchClient? _searchClient;
+  static SearchClient? _adminClient;
 
-  // Timeout para requests (10 segundos)
-  static const Duration _timeout = Duration(seconds: 10);
+  static SearchClient get _readClient => _searchClient ??= SearchClient(
+        appId: _appId,
+        apiKey: _searchKey,
+      );
+
+  static SearchClient get _writeClient => _adminClient ??= SearchClient(
+        appId: _appId,
+        apiKey: _adminKey,
+      );
 
   // ─────────────────────────────────────────────────────────
   // VERIFICACIÓN DE CONECTIVIDAD
   // ─────────────────────────────────────────────────────────
 
-  /// Verifica si se puede resolver el host de Algolia y hacer una petición simple.
+  /// Verifica conectividad intentando obtener settings del índice.
   static Future<Map<String, dynamic>> verificarConexion() async {
     try {
-      // Test simple al endpoint de settings (GET ligero)
-      final url = Uri.parse('$_adminUrl/1/indexes/$_indexName/settings');
-      final response = await http.get(
-        url,
-        headers: {
-          'X-Algolia-Application-Id': _appId,
-          'X-Algolia-API-Key': _adminKey,
-        },
-      ).timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        return {'ok': true, 'mensaje': 'Conexión a Algolia exitosa'};
-      } else if (response.statusCode == 401) {
+      await _writeClient.getSettings(indexName: _indexName);
+      return {'ok': true, 'mensaje': 'Conexión a Algolia exitosa'};
+    } on AlgoliaApiException catch (e) {
+      if (e.statusCode == 401) {
         return {'ok': false, 'mensaje': 'Credenciales Algolia inválidas (401). Verifica App ID y Admin Key.'};
-      } else if (response.statusCode == 404) {
+      } else if (e.statusCode == 404) {
         return {'ok': false, 'mensaje': 'Índice "direcciones" no existe en Algolia (404). Se creará al sincronizar.'};
-      } else {
-        return {'ok': false, 'mensaje': 'Algolia respondió HTTP ${response.statusCode}: ${response.body}'};
       }
-    } on http.ClientException catch (e) {
-      if (e.message.contains('Failed host lookup') || e.message.contains('Name resolution')) {
-        return {'ok': false, 'mensaje': 'No se puede resolver el host Algolia ($_appId.algolia.net). Verifica: (1) conexión a internet, (2) DNS del dispositivo, (3) que el App ID sea correcto.'};
+      return {'ok': false, 'mensaje': 'Algolia error: ${e.error} (code: ${e.statusCode})'};
+    } on AlgoliaTimeoutException catch (e) {
+      return {'ok': false, 'mensaje': 'Timeout conectando a Algolia: ${e.error}'};
+    } on AlgoliaIOException catch (e) {
+      if (e.toString().contains('SocketException') || e.toString().contains('Failed host lookup')) {
+        return {'ok': false, 'mensaje': 'No se puede resolver el host Algolia. Verifica: (1) conexión a internet, (2) DNS del dispositivo, (3) que el App ID sea correcto.'};
       }
-      return {'ok': false, 'mensaje': 'Error de red: ${e.message}'};
+      return {'ok': false, 'mensaje': 'Error de red: ${e.error}'};
     } catch (e) {
       return {'ok': false, 'mensaje': 'Error inesperado: $e'};
     }
@@ -61,21 +60,14 @@ class AlgoliaService {
   /// Retorna el primer resultado o null si no hay coincidencias o error.
   static Future<Map<String, dynamic>?> buscar(String consulta) async {
     try {
-      final url = Uri.parse('$_baseUrl/1/indexes/$_indexName/query');
-      final response = await http.post(
-        url,
-        headers: {
-          'X-Algolia-Application-Id': _appId,
-          'X-Algolia-API-Key': _searchKey,
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'query': consulta,
-          'hitsPerPage': 1,
-          'typoTolerance': true,
-          'ignorePlurals': true,
-          'removeStopWords': false,
-          'attributesToRetrieve': [
+      final response = await _readClient.searchSingleIndex(
+        indexName: _indexName,
+        searchParams: SearchParamsObject(
+          query: consulta,
+          hitsPerPage: 1,
+          typoTolerance: true,
+          ignorePlurals: true,
+          attributesToRetrieve: [
             'calle',
             'complemento',
             'barrio',
@@ -83,20 +75,19 @@ class AlgoliaService {
             'tarjeta_id',
             'estado_predicacion',
             'estado',
-            'objectID',
           ],
-        }),
-      ).timeout(_timeout);
+        ),
+      );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final hits = data['hits'] as List?;
-        if (hits != null && hits.isNotEmpty) {
-          return hits.first as Map<String, dynamic>;
+      if (response.hits.isNotEmpty) {
+        // El hit viene como Object (JSON deserializado)
+        final hit = response.hits.first;
+        if (hit is Map<String, dynamic>) {
+          return hit;
         }
       }
       return null;
-    } catch (e) {
+    } catch (_) {
       // Silencioso en búsqueda (widget tiene fallback a Firestore)
       return null;
     }
@@ -107,7 +98,6 @@ class AlgoliaService {
   // ─────────────────────────────────────────────────────────
 
   /// Sincroniza todas las direcciones de Firestore a Algolia.
-  /// Llamar desde el panel admin cuando se agreguen nuevas direcciones.
   static Future<Map<String, dynamic>> sincronizarTodas() async {
     // 1. Verificar conectividad primero
     final check = await verificarConexion();
@@ -125,9 +115,10 @@ class AlgoliaService {
       }
 
       // Construir objetos para Algolia
-      final objetos = snap.docs.map((doc) {
+      final objetos = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
         final data = doc.data();
-        return {
+        objetos.add({
           'objectID': doc.id,
           'calle': data['calle']?.toString() ?? '',
           'complemento': data['complemento']?.toString() ?? '',
@@ -136,11 +127,10 @@ class AlgoliaService {
           'tarjeta_id': data['tarjeta_id']?.toString() ?? '',
           'estado_predicacion': data['estado_predicacion']?.toString() ?? '',
           'estado': data['estado']?.toString() ?? '',
-          // Campo de búsqueda completo
           'direccion_completa':
               '${data['calle'] ?? ''} ${data['complemento'] ?? ''} ${data['barrio'] ?? ''}',
-        };
-      }).toList();
+        });
+      }
 
       // Enviar en lotes de 1000 (límite de Algolia)
       int enviados = 0;
@@ -150,28 +140,20 @@ class AlgoliaService {
           i + 1000 > objetos.length ? objetos.length : i + 1000,
         );
 
-        final url = Uri.parse('$_adminUrl/1/indexes/$_indexName/batch');
-        final response = await http.post(
-          url,
-          headers: {
-            'X-Algolia-Application-Id': _appId,
-            'X-Algolia-API-Key': _adminKey,
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({
-            'requests': lote
-                .map((obj) => {'action': 'addObject', 'body': obj})
-                .toList(),
-          }),
-        ).timeout(_timeout);
+        final requests = lote
+            .map((obj) => BatchRequest(action: Action.addObject, body: obj))
+            .toList();
 
-        if (response.statusCode == 200) {
+        try {
+          await _writeClient.batch(
+            indexName: _indexName,
+            batchWriteParams: BatchWriteParams(requests: requests),
+          );
           enviados += lote.length;
-        } else {
-          final errorBody = response.body;
+        } on AlgoliaApiException catch (e) {
           return {
             'exito': false,
-            'mensaje': 'Error en lote $i: HTTP ${response.statusCode} - $errorBody'
+            'mensaje': 'Error en lote $i: ${e.error} (code: ${e.statusCode})'
           };
         }
       }
@@ -184,14 +166,12 @@ class AlgoliaService {
         'mensaje': '$enviados direcciones sincronizadas',
         'total': snap.docs.length,
       };
-    } on http.ClientException catch (e) {
-      if (e.message.contains('Failed host lookup') || e.message.contains('Name resolution')) {
-        return {
-          'exito': false,
-          'mensaje': 'No se puede resolver $_appId.algolia.net. Verifica internet/DNS y que el App ID sea correcto.'
-        };
-      }
-      return {'exito': false, 'mensaje': 'Error de red: ${e.message}'};
+    } on AlgoliaApiException catch (e) {
+      return {'exito': false, 'mensaje': 'Algolia: ${e.error} (code: ${e.statusCode})'};
+    } on AlgoliaTimeoutException catch (e) {
+      return {'exito': false, 'mensaje': 'Timeout: ${e.error}'};
+    } on AlgoliaIOException catch (e) {
+      return {'exito': false, 'mensaje': 'Error de red: ${e.error}'};
     } catch (e) {
       return {'exito': false, 'mensaje': 'Error: $e'};
     }
@@ -200,28 +180,25 @@ class AlgoliaService {
   /// Agrega o actualiza una sola dirección en Algolia.
   static Future<void> sincronizarUna(String docId, Map<String, dynamic> data) async {
     try {
-      final url = Uri.parse('$_adminUrl/1/indexes/$_indexName/$docId');
-      await http.put(
-        url,
-        headers: {
-          'X-Algolia-Application-Id': _appId,
-          'X-Algolia-API-Key': _adminKey,
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'objectID': docId,
-          'calle': data['calle']?.toString() ?? '',
-          'complemento': data['complemento']?.toString() ?? '',
-          'barrio': data['barrio']?.toString() ?? '',
-          'territorio_id': data['territorio_id']?.toString() ?? '',
-          'tarjeta_id': data['tarjeta_id']?.toString() ?? '',
-          'estado_predicacion': data['estado_predicacion']?.toString() ?? '',
-          'estado': data['estado']?.toString() ?? '',
-          'direccion_completa':
-              '${data['calle'] ?? ''} ${data['complemento'] ?? ''} ${data['barrio'] ?? ''}',
-        }),
-      ).timeout(_timeout);
-    } catch (e) {
+      final obj = {
+        'objectID': docId,
+        'calle': data['calle']?.toString() ?? '',
+        'complemento': data['complemento']?.toString() ?? '',
+        'barrio': data['barrio']?.toString() ?? '',
+        'territorio_id': data['territorio_id']?.toString() ?? '',
+        'tarjeta_id': data['tarjeta_id']?.toString() ?? '',
+        'estado_predicacion': data['estado_predicacion']?.toString() ?? '',
+        'estado': data['estado']?.toString() ?? '',
+        'direccion_completa':
+            '${data['calle'] ?? ''} ${data['complemento'] ?? ''} ${data['barrio'] ?? ''}',
+      };
+
+      await _writeClient.addOrUpdateObject(
+        indexName: _indexName,
+        objectID: docId,
+        body: obj,
+      );
+    } catch (_) {
       // Silencioso para no bloquear flujo principal
     }
   }
@@ -232,29 +209,23 @@ class AlgoliaService {
 
   static Future<void> _configurarIndice() async {
     try {
-      final url = Uri.parse('$_adminUrl/1/indexes/$_indexName/settings');
-      await http.put(
-        url,
-        headers: {
-          'X-Algolia-Application-Id': _appId,
-          'X-Algolia-API-Key': _adminKey,
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'searchableAttributes': [
+      await _writeClient.setSettings(
+        indexName: _indexName,
+        indexSettings: IndexSettings(
+          searchableAttributes: [
             'calle',
             'direccion_completa',
             'complemento',
             'barrio',
           ],
-          'typoTolerance': true,
-          'minWordSizefor1Typo': 4,
-          'minWordSizefor2Typos': 8,
-          'ignorePlurals': true,
-          'removeStopWords': false,
-          'queryLanguages': ['pt', 'es'],
-        }),
-      ).timeout(_timeout);
+          typoTolerance: true,
+          minWordSizefor1Typo: 4,
+          minWordSizefor2Typos: 8,
+          ignorePlurals: true,
+          removeStopWords: false,
+          queryLanguages: [SupportedLanguage.pt, SupportedLanguage.es],
+        ),
+      );
     } catch (_) {}
   }
 }
