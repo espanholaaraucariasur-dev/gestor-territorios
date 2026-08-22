@@ -29,15 +29,17 @@ class AlgoliaService {
   // ─────────────────────────────────────────────────────────
 
   /// Verifica conectividad intentando obtener settings del índice.
+  /// 404 (índice no existe) se trata como OK porque se creará al hacer el primer batch write.
   static Future<Map<String, dynamic>> verificarConexion() async {
     try {
       await _writeClient.getSettings(indexName: _indexName);
-      return {'ok': true, 'mensaje': 'Conexión a Algolia exitosa'};
+      return {'ok': true, 'mensaje': 'Conexión a Algolia exitosa (índice existe)'};
     } on AlgoliaApiException catch (e) {
       if (e.statusCode == 401) {
         return {'ok': false, 'mensaje': 'Credenciales Algolia inválidas (401). Verifica App ID y Admin Key.'};
       } else if (e.statusCode == 404) {
-        return {'ok': false, 'mensaje': 'Índice "direcciones" no existe en Algolia (404). Se creará al sincronizar.'};
+        // Índice no existe → OK, se creará al sincronizar
+        return {'ok': true, 'mensaje': 'Conexión a Algolia exitosa (índice se creará al sincronizar)'};
       }
       return {'ok': false, 'mensaje': 'Algolia error: ${e.error} (code: ${e.statusCode})'};
     } on AlgoliaTimeoutException catch (e) {
