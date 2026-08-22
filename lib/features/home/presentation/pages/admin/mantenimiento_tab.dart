@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../../../../core/services/algolia_service.dart';
 
 class MantenimientoTab extends StatefulWidget {
   const MantenimientoTab({super.key});
@@ -325,133 +324,6 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red));
-      }
-    }
-  }
-
-  Future<void> _migrarPalabrasClave() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('🔍 Migrar índice de búsqueda'),
-        content: const Text(
-          'Esto agrega el campo palabras_clave a todas las direcciones existentes.\n\n'
-          'Necesario para que el Localizador funcione con búsqueda inteligente.\n\n'
-          'Solo se ejecuta una vez.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
-            child: const Text('Migrar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmar != true) return;
-
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('🔍 Migrando índice de búsqueda...'), duration: Duration(seconds: 60)),
-    );
-
-    try {
-      final snap = await FirebaseFirestore.instance.collection('direcciones_globales').get();
-      int actualizadas = 0;
-
-      for (int i = 0; i < snap.docs.length; i += 100) {
-        final chunk = snap.docs.skip(i).take(100).toList();
-        final batch = FirebaseFirestore.instance.batch();
-        for (final doc in chunk) {
-          final data = doc.data();
-          final calle = (data['calle'] as String?) ?? '';
-          final comp = (data['complemento'] as String?) ?? '';
-          if (calle.isEmpty) continue;
-
-          final tokens = _normalizarTokens(calle);
-          if (comp.isNotEmpty) tokens.addAll(_normalizarTokens(comp));
-
-          batch.update(doc.reference, {
-            'palabras_clave': tokens,
-            'calle_normalizada': _normalizarTokens(calle).join(' '),
-          });
-          actualizadas++;
-        }
-        await batch.commit();
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ $actualizadas direcciones indexadas'),
-            backgroundColor: Colors.purple,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  Future<void> _sincronizarAlgolia() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Row(children: [
-          Icon(Icons.cloud_sync, color: Colors.indigo),
-          SizedBox(width: 8),
-          Text('☁️ Sincronizar Algolia'),
-        ]),
-        content: const Text(
-          'Envía TODAS las direcciones de Firestore a Algolia.\n\n'
-          'Esto habilita búsqueda robusta: typo tolerance, prefix matching, fuzzy search, multilenguaje (pt/es).\n\n'
-          '⚠️ Plan Free: 10.000 búsquedas/mes. La sincronización no consume cuota de búsqueda.\n\n'
-          'Ejecutar tras importaciones masivas o creación inicial de datos.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
-            child: const Text('Sincronizar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmar != true) return;
-
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('☁️ Sincronizando con Algolia...'), duration: Duration(minutes: 2)),
-    );
-
-    try {
-      final resultado = await AlgoliaService.sincronizarTodas();
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(resultado['exito'] == true
-                ? '✅ ${resultado['mensaje']} (${resultado['total']} docs)'
-                : '❌ ${resultado['mensaje']}'),
-            backgroundColor: resultado['exito'] == true ? Colors.indigo : Colors.red,
-            duration: const Duration(seconds: 8),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-        );
       }
     }
   }
@@ -1417,24 +1289,6 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
             descripcion: 'Elimina todos los datos estadísticos. Usar antes de iniciar el uso real (salir del modo de prueba).',
             color: Colors.deepOrange,
             onPressed: _limpiarEstadisticas,
-          ),
-          const SizedBox(height: 12),
-          _buildBotonMantenimiento(
-            icono: Icons.search,
-            titulo: 'Migrar índice de búsqueda',
-            descripcion:
-                'Agrega palabras_clave a todas las direcciones existentes para que el Localizador funcione correctamente.',
-            color: Colors.purple,
-            onPressed: _migrarPalabrasClave,
-          ),
-          const SizedBox(height: 12),
-          _buildBotonMantenimiento(
-            icono: Icons.cloud_sync,
-            titulo: '☁️ Sincronizar Algolia (búsqueda global)',
-            descripcion:
-                'Indexa TODAS las direcciones de Firestore en Algolia para búsqueda robusta (typo tolerance, prefix, fuzzy). Ejecutar tras importaciones masivas.',
-            color: Colors.indigo,
-            onPressed: _sincronizarAlgolia,
           ),
           const SizedBox(height: 12),
           _buildBotonMantenimiento(
