@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class DevueltasTab extends StatefulWidget {
+class RemovidasTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
 
-  const DevueltasTab({
+  const RemovidasTab({
     super.key,
     required this.usuarioData,
   });
 
   @override
-  State<DevueltasTab> createState() => _DevueltasTabState();
+  State<RemovidasTab> createState() => _RemovidasTabState();
 }
 
-class _DevueltasTabState extends State<DevueltasTab> {
+class _RemovidasTabState extends State<RemovidasTab> {
   // ─────────────────────────────────────────────────────────
   // HELPERS
   // ─────────────────────────────────────────────────────────

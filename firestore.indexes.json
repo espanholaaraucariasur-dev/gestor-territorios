@@ -1,6 +1,30 @@
 {
   "indexes": [
     {
+      "collectionGroup": "direcciones_globales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tarjeta_id", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "direcciones_globales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tarjeta_id", "order": "ASCENDING" },
+        { "fieldPath": "prioridad_mes_anterior", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notificaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "destinatario", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "notificaciones",
       "queryScope": "COLLECTION",
       "fields": [
@@ -9,10 +33,11 @@
       ]
     },
     {
-      "collectionGroup": "tarjetas",
-      "queryScope": "COLLECTION_GROUP",
+      "collectionGroup": "solicitudes_localizador",
+      "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "conductor_email", "order": "ASCENDING" }
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
       ]
     },
     {
@@ -32,13 +57,134 @@
       ]
     },
     {
-      "collectionGroup": "solicitudes_localizador",
+      "collectionGroup": "tarjetas",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "estatus_envio", "order": "ASCENDING" },
+        { "fieldPath": "programado_para", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "territorios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estatus_envio", "order": "ASCENDING" },
+        { "fieldPath": "programado_para", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "usuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "es_conductor", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "usuarios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "es_publicador", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "usuarios",
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "estado", "order": "ASCENDING" },
-        { "fieldPath": "created_at", "order": "DESCENDING" }
+        { "fieldPath": "roles", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_funciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "activa", "order": "ASCENDING" },
+        { "fieldPath": "gestor_uid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_arreglos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "funcion_id", "order": "ASCENDING" },
+        { "fieldPath": "activo", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_arreglos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "publicado", "order": "ASCENDING" },
+        { "fieldPath": "activo", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_arreglos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "gestionado_por", "order": "ASCENDING" },
+        { "fieldPath": "activo", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_arreglos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "publicado", "order": "ASCENDING" },
+        { "fieldPath": "activo", "order": "ASCENDING" },
+        { "fieldPath": "fecha_inicio", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_arreglos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "publicado", "order": "ASCENDING" },
+        { "fieldPath": "activo", "order": "ASCENDING" },
+        { "fieldPath": "fecha_fin", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_notificaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "para_uid", "order": "ASCENDING" },
+        { "fieldPath": "leida", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eco2_notificaciones",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "arreglo_id", "order": "ASCENDING" },
+        { "fieldPath": "tipo", "order": "ASCENDING" }
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "tarjetas",
+      "fieldPath": "asignado_a",
+      "ttl": false,
+      "indexes": [
+        { "queryScope": "COLLECTION", "order": "ASCENDING" },
+        { "queryScope": "COLLECTION", "order": "DESCENDING" },
+        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
+        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tarjetas",
+      "fieldPath": "es_temporal",
+      "ttl": false,
+      "indexes": [
+        { "queryScope": "COLLECTION", "order": "ASCENDING" },
+        { "queryScope": "COLLECTION", "order": "DESCENDING" },
+        { "queryScope": "COLLECTION", "arrayConfig": "CONTAINS" },
+        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+      ]
+    }
+  ]
 }

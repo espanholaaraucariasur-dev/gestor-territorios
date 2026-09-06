@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../../../../core/services/notificacion_service.dart';
+import '../../../../../core/services/mapbox_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/services/gemini_service.dart';
 import '../../../../../core/services/algolia_service.dart';
 import '../../../../../core/l10n/translation_service.dart';
+import '../../../../../core/utils/direccion_utils.dart';
 
 class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -386,10 +388,10 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       final todosSnap = await FirebaseFirestore.instance
           .collection('usuarios').where('estado', isEqualTo: 'aprobado').get();
       for (final doc in todosSnap.docs) {
-        final email = (doc.data()['email'] as String? ?? '').trim().toLowerCase();
-        if (email.isEmpty) continue;
-        await NotificacionService.enviar(
-          destinatario: email,
+        final nombre = (doc.data()['nombre'] as String? ?? '').trim();
+        if (nombre.isEmpty) continue;
+        await NotificacionService.enviarAUser(
+          destinatarioNombre: nombre,
           titulo: '📢 Anuncio de la congregación',
           cuerpo: texto,
           tipo: TipoNotificacion.motivacional,
@@ -587,8 +589,36 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     String? tarjetaIdSel;
     double? distSugerida;
 
+    // ── Sugerencia automática: condominio/multi-casas usan la dirección gemela ──
+    // La solicitud trae condominio_direccion_id → la unidad SIEMPRE va a esa misma
+    // dirección/tarjeta, sin depender de la sugerencia por proximidad.
+    Map<String, dynamic>? direccionGemela;
+    final esSolicitudUnidad = tipoSolicitud == 'condominio_nueva_unidad' ||
+        tipoSolicitud == 'casas_nueva_unidad';
+    // Dirección NUEVA que desde el inicio es condominio / multi-casas
+    final esNuevaDirCasas = tipoSolicitud == 'casas_nueva_direccion';
+    final esNuevaDirCondominio = tipoSolicitud == 'condominio_nueva_direccion';
+    final esNuevaDireccionMulti = esNuevaDirCasas || esNuevaDirCondominio;
+    if (esSolicitudUnidad && condominioDireccionId.isNotEmpty) {
+      final gemSnap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .doc(condominioDireccionId)
+          .get();
+      if (gemSnap.exists) {
+        direccionGemela = gemSnap.data() as Map<String, dynamic>;
+      }
+    }
+
     // Buscar sugerencia ANTES de abrir el diálogo
-    if (latSol != null && lngSol != null || calle.isNotEmpty) {
+    if (direccionGemela != null) {
+      territorioIdSel =
+          (direccionGemela['territorio_id'] as String?) ?? '';
+      territorioNombreSel =
+          (direccionGemela['territorio_nombre'] as String?) ??
+              (direccionGemela['barrio'] as String?) ??
+              '';
+      tarjetaIdSel = (direccionGemela['tarjeta_id'] as String?) ?? '';
+    } else if (latSol != null && lngSol != null || calle.isNotEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('📍 Buscando tarjeta más cercana...'), duration: Duration(seconds: 4)),
       );
@@ -611,7 +641,11 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           return AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Agregar dirección a tarjeta'),
+          title: Text(direccionGemela != null
+              ? 'Añadir unidad a dirección existente'
+              : esNuevaDireccionMulti
+                  ? 'Agregar dirección con unidades'
+                  : 'Agregar dirección a tarjeta'),
           content: SizedBox(
             width: double.maxFinite,
             child: SingleChildScrollView(
@@ -631,6 +665,100 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                           fontWeight: FontWeight.bold, fontSize: 13),
                     ),
                   ),
+                  // ── Dirección NUEVA condominio / multi-casas (primera vez) ──
+                  if (esNuevaDireccionMulti) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.blue.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Icon(
+                                esNuevaDirCasas
+                                    ? Icons.holiday_village
+                                    : Icons.apartment,
+                                color: Colors.blue.shade700,
+                                size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                esNuevaDirCasas
+                                    ? 'Terreno con varias casas (nuevo)'
+                                    : 'Condominio nuevo',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade800),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 6),
+                          Text(
+                            esNuevaDirCasas
+                                ? 'El publicador indica que aquí hay varias casas. Se crearán '
+                                    'direcciones SEPARADAS: la base ("$calle") y una por casa '
+                                    '("${nuevaUnidad['descripcion'] ?? ''}"), para que cuenten '
+                                    'individualmente en la tarjeta.'
+                                : 'El publicador indica que es un condominio. Se crearán '
+                                    'direcciones SEPARADAS: la base ("$calle") y la unidad '
+                                    '(Bl. ${nuevaUnidad['bloque'] ?? ''} Piso ${nuevaUnidad['piso'] ?? ''} Apto ${nuevaUnidad['apto'] ?? ''}), '
+                                    'para que cuenten individualmente en la tarjeta.',
+                            style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  // ── Dirección gemela encontrada (condominio / multi-casas) ──
+                  if (direccionGemela != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.blue.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Icon(
+                                tipoSolicitud == 'casas_nueva_unidad'
+                                    ? Icons.holiday_village
+                                    : Icons.apartment,
+                                color: Colors.blue.shade700,
+                                size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                tipoSolicitud == 'casas_nueva_unidad'
+                                    ? 'Terreno con varias casas ya registrado'
+                                    : 'Condominio ya registrado',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade800),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 6),
+                          Text(
+                            '"${direccionGemela!['calle'] ?? calle}" ya existe en la '
+                            'tarjeta $tarjetaIdSel (${direccionGemela['territorio_nombre'] ?? territorioNombreSel}). '
+                            'La nueva casa/unidad se creará como una dirección adicional en esa misma tarjeta.',
+                            style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   // Sugerencia por proximidad
                   if (territorioIdSel != null && distSugerida != null) ...[
                     const SizedBox(height: 10),
@@ -658,7 +786,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                         ])),
                       ]),
                     ),
-                  ] else if (latSol == null) ...[
+                  ] else if (latSol == null && direccionGemela == null) ...[
                     const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.all(8),
@@ -806,73 +934,93 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       final batch = db.batch();
 
       String _norm(String s) {
-        var t = s.toLowerCase();
-        t = t.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
-        t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
-        return t;
+        return normalizarDireccion(s);
       }
 
-      // ── 1. NUEVA UNIDAD EN CONDOMINIO EXISTENTE ──
-      if (tipoSolicitud == 'condominio_nueva_unidad' && condominioDireccionId.isNotEmpty) {
-        final condominioRef = db.collection('direcciones_globales').doc(condominioDireccionId);
-        final condominioSnap = await condominioRef.get();
+      // Formatear la dirección cruda al formato completo vía Mapbox:
+      // "rua onze de fevereiro 163" → "Rua Onze de Fevereiro, 163 - Centro, Araucária - PR, 83702-135"
+      String calleFinal = calle;
+      // Note: Mapbox geocodifica a coordenadas, no a string formateado.
+      // Se usa la dirección original para el guardado.
+      if (calle.isNotEmpty) {
+        // Geocodificación opcional - las coordenadas se almacenan por separado
+      }
 
-        if (condominioSnap.exists) {
-          final condData = condominioSnap.data() as Map<String, dynamic>;
-          final List<dynamic> unidadesActuales = List.from(condData['condominio_unidades'] ?? []);
-
-          // Añadir nueva unidad
-          final unidadNueva = {
-            'bloque': nuevaUnidad['bloque'] ?? '',
-            'piso': nuevaUnidad['piso'] ?? '',
-            'apto': nuevaUnidad['apto'] ?? '',
-            'ocupado': false,
-            'agregada_en': FieldValue.serverTimestamp(),
-            'agregada_por': widget.usuarioData['nombre'] ?? '',
-            'solicitada_por': data['solicitante_email'] ?? '',
-          };
-          unidadesActuales.add(unidadNueva);
-
-          batch.update(condominioRef, {
-            'condominio_unidades': unidadesActuales,
-            'updated_at': FieldValue.serverTimestamp(),
-          });
-
-          // Sincronizar condominio actualizado a Algolia
-          final condDataActualizada = Map<String, dynamic>.from(condData);
-          condDataActualizada['condominio_unidades'] = unidadesActuales;
-          await AlgoliaService.sincronizarUna(condominioDireccionId, condDataActualizada);
+      // ── 0. DIRECCIÓN NUEVA CONDOMINIO / MULTI-CASAS ──
+      // Lógica establecida: CADA dirección/casa es un documento separado
+      // (necesario para el contador de direcciones y el envío de tarjetas).
+      // NO se crea doc base genérico — solo las unidades específicas.
+      final esCasasNuevaDir = tipoSolicitud == 'casas_nueva_direccion';
+      final esSolicitudCasas = tipoSolicitud == 'casas_nueva_unidad';
+      if (esNuevaDireccionMulti) {
+        // Doc de la primera casa/unidad como dirección propia
+        final String compUnidad;
+        if (esCasasNuevaDir) {
+          compUnidad = '${nuevaUnidad['descripcion'] ?? ''}';
         } else {
-          // El condominio no existe, crear dirección normal con la unidad
-          final docRef = db.collection('direcciones_globales').doc();
-          final dataNueva = {
-            'calle': calle,
-            'complemento': 'Bl. ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}',
-            'direccion_normalizada': _norm('${calle} Bl ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}'),
-            'territorio_id': territorioIdSel,
-            'territorio_nombre': territorioNombreSel ?? '',
-            'tarjeta_id': tarjetaIdSel,
-            'barrio': territorioNombreSel ?? '',
-            'estado': 'activa',
-            'estado_predicacion': 'pendiente',
-            'predicado': false,
-            'es_hispano': true,
-            'es_condominio': true,
-            'condominio_unidades': [nuevaUnidad],
-            'created_at': FieldValue.serverTimestamp(),
-          };
-          batch.set(docRef, dataNueva);
-          await AlgoliaService.sincronizarUna(docRef.id, dataNueva);
+          compUnidad =
+              'Bl. ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}';
         }
+        final unitRef = db.collection('direcciones_globales').doc();
+        final dataUnit = {
+          'calle': calleFinal,
+          'complemento': compUnidad,
+          'direccion_normalizada': _norm('$calleFinal $compUnidad'),
+          'territorio_id': territorioIdSel,
+          'territorio_nombre': territorioNombreSel ?? '',
+          'tarjeta_id': tarjetaIdSel,
+          'barrio': territorioNombreSel ?? '',
+          'estado': 'activa',
+          'estado_predicacion': 'pendiente',
+          'predicado': false,
+          'es_hispano': true,
+          'solicitada_por': data['solicitante_email'] ?? '',
+          'created_at': FieldValue.serverTimestamp(),
+        };
+        batch.set(unitRef, dataUnit);
+        await AlgoliaService.sincronizarUna(unitRef.id, dataUnit);
+      }
+      // ── 1. NUEVA UNIDAD EN CONDOMINIO / CASA EN TERRENO MULTI-CASAS ──
+      // También se crea como DOCUMENTO SEPARADO (misma calle + complemento)
+      else if ((tipoSolicitud == 'condominio_nueva_unidad' || esSolicitudCasas) &&
+          condominioDireccionId.isNotEmpty) {
+        final String compNuevo;
+        final String normNuevo;
+        if (esSolicitudCasas) {
+          compNuevo = '${nuevaUnidad['descripcion'] ?? ''}';
+          normNuevo = _norm('$calleFinal $compNuevo');
+        } else {
+          compNuevo =
+              'Bl. ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}';
+          normNuevo = _norm('$calleFinal Bl ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}');
+        }
+        final docRef = db.collection('direcciones_globales').doc();
+        final dataNueva = {
+          'calle': calleFinal,
+          'complemento': compNuevo,
+          'direccion_normalizada': normNuevo,
+          'territorio_id': territorioIdSel,
+          'territorio_nombre': territorioNombreSel ?? '',
+          'tarjeta_id': tarjetaIdSel,
+          'barrio': territorioNombreSel ?? '',
+          'estado': 'activa',
+          'estado_predicacion': 'pendiente',
+          'predicado': false,
+          'es_hispano': true,
+          'solicitada_por': data['solicitante_email'] ?? '',
+          'created_at': FieldValue.serverTimestamp(),
+        };
+        batch.set(docRef, dataNueva);
+        await AlgoliaService.sincronizarUna(docRef.id, dataNueva);
       }
       // ── 2. CONDOMINIO NUEVO (legacy) ──
       else if (esCondominioLegacy && unidadesLegacy.isNotEmpty) {
         for (final u in unidadesLegacy) {
           final docRef = db.collection('direcciones_globales').doc();
           final dataUnidad = {
-            'calle': calle,
+            'calle': calleFinal,
             'complemento': u.toString(),
-            'direccion_normalizada': _norm('$calle $u'),
+            'direccion_normalizada': _norm('$calleFinal $u'),
             'territorio_id': territorioIdSel,
             'territorio_nombre': territorioNombreSel ?? '',
             'tarjeta_id': tarjetaIdSel,
@@ -892,9 +1040,9 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       else {
         final docRef = db.collection('direcciones_globales').doc();
         final dataNormal = {
-          'calle': calle,
+          'calle': calleFinal,
           'complemento': complemento,
-          'direccion_normalizada': _norm('$calle $complemento'),
+          'direccion_normalizada': _norm('$calleFinal $complemento'),
           'territorio_id': territorioIdSel,
           'territorio_nombre': territorioNombreSel ?? '',
           'tarjeta_id': tarjetaIdSel,
@@ -923,11 +1071,13 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(tipoSolicitud == 'condominio_nueva_unidad'
-                ? '✅ Nueva unidad añadida al condominio en $tarjetaIdSel'
-                : (esCondominioLegacy
-                    ? '✅ ${unidadesLegacy.length} unidades agregadas a $tarjetaIdSel'
-                    : '✅ Dirección agregada a $tarjetaIdSel')),
+            content: Text(esNuevaDireccionMulti
+                ? '✅ Direcciones creadas por separado en $tarjetaIdSel'
+                : tipoSolicitud == 'condominio_nueva_unidad'
+                    ? '✅ Nueva dirección añadida a $tarjetaIdSel'
+                    : (esCondominioLegacy
+                        ? '✅ ${unidadesLegacy.length} unidades agregadas a $tarjetaIdSel'
+                        : '✅ Dirección agregada a $tarjetaIdSel')),
             backgroundColor: _verde,
           ),
         );
@@ -1944,7 +2094,6 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             final tipoSolicitud = (data['tipo_solicitud'] as String?) ?? '';
             final esNuevaUnidadCondominio = tipoSolicitud == 'condominio_nueva_unidad';
             final nuevaUnidad = (data['condominio_unidad'] as Map<String, dynamic>?) ?? {};
-            final condominioDireccionId = (data['condominio_direccion_id'] as String?) ?? '';
 
             // Legacy
             final esCondominioLegacy = (data['es_condominio'] as bool?) ?? false;

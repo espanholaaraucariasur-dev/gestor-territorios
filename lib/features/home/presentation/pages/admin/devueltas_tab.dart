@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../../../core/utils/direccion_utils.dart';
 
 class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -368,10 +369,10 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       final todosSnap = await FirebaseFirestore.instance
           .collection('usuarios').where('estado', isEqualTo: 'aprobado').get();
       for (final doc in todosSnap.docs) {
-        final email = (doc.data()['email'] as String? ?? '').trim().toLowerCase();
-        if (email.isEmpty) continue;
-        await NotificacionService.enviar(
-          destinatario: email,
+        final nombre = (doc.data()['nombre'] as String? ?? '').trim();
+        if (nombre.isEmpty) continue;
+        await NotificacionService.enviarAUser(
+          destinatarioNombre: nombre,
           titulo: '📢 Anuncio de la congregación',
           cuerpo: texto,
           tipo: TipoNotificacion.motivacional,
@@ -733,10 +734,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       final batch = db.batch();
 
       String _norm(String s) {
-        var t = s.toLowerCase();
-        t = t.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
-        t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
-        return t;
+        return normalizarDireccion(s);
       }
 
       if (esCondominio && unidades.isNotEmpty) {

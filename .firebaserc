@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "territorio-sur-8b72c"
-  }
+  },
+  "targets": {
+    "territorio-sur-8b72c": {
+      "hosting": {
+        "app-principal": [
+          "territorio-sur-8b72c"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

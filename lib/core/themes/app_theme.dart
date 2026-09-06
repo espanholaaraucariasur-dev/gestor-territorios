@@ -6,17 +6,22 @@ class AppTheme {
         colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primary),
         useMaterial3: true,
         scaffoldBackgroundColor: AppColors.background,
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.onBackground,
+          ),
+        ),
         appBarTheme: const AppBarTheme(
           backgroundColor: AppColors.surface,
           elevation: 1,
           centerTitle: true,
           titleTextStyle: TextStyle(
-            color: AppColors.secondary,
+            color: AppColors.onBackground,
             fontWeight: FontWeight.bold,
             fontSize: 18,
             letterSpacing: 0.3,
           ),
-          iconTheme: IconThemeData(color: AppColors.secondary),
+          iconTheme: IconThemeData(color: AppColors.onBackground),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(

@@ -31,6 +31,25 @@
 
   <title>araucaria_sur</title>
   <link rel="manifest" href="manifest.json">
+  <script>
+    // Limpia service worker y cachés de Flutter de visitas anteriores
+    // para que siempre se cargue la versión más reciente del deploy.
+    (function () {
+      if ('caches' in window) {
+        caches.keys().then(function (keys) {
+          keys.forEach(function (k) {
+            if (k.toLowerCase().indexOf('flutter') === 0) caches.delete(k);
+          });
+        });
+      }
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (rs) {
+          rs.forEach(function (r) { r.unregister(); });
+        });
+      }
+    })();
+  </script>
+
 </head>
 <body>
   <!--
@@ -41,6 +60,11 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Bootstrap sin service worker: evita caché obsoleta entre deploys.
+    {{flutter_js}}
+    {{flutter_build_config}}
+    _flutter.loader.load();
+  </script>
 </body>
 </html>

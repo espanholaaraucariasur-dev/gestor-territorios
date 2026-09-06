@@ -1,15 +1,17 @@
+import 'dart:html' as Html;
+// eslint-disable-next-line prefer-const
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
-import '../../../../../core/themes/theme_extensions.dart';
 // Servicios
 import '../../../../../core/services/mapbox_service.dart';
 import '../../../../../core/services/auto_return_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
-import 'enviar_direccion_widget.dart';
+import 'enviar_direccion_card.dart';
 
 class PublicadorTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -68,11 +70,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
           ),
         );
         // Guardar aviso en Firestore
-        NotificacionService.enviar(
-          destinatario: widget.usuarioEmail,
+        NotificacionService.enviarAUser(
+          destinatarioNombre:
+              widget.usuarioData['nombre']?.toString() ?? widget.usuarioEmail,
           titulo: '⏰ Aviso de devolución',
           cuerpo: mensaje,
-          tipo: TipoNotificacion.avisoDevo,
+          tipo: TipoNotificacion.avisoDevolucion,
         );
       }
     };
@@ -131,40 +134,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
         .where('asignado_a', isEqualTo: nombre)
         .where('completada', isEqualTo: false)
         .snapshots();
-  }
-
-  // Stream alternativo por territorio específico
-  Future<List<Map<String, dynamic>>> _cargarMisTarjetas() async {
-    final List<Map<String, dynamic>> resultado = [];
-    try {
-      // Buscar en todos los territorios
-      final territoriosSnap = await FirebaseFirestore.instance
-          .collection('territorios')
-          .get();
-
-      for (final ter in territoriosSnap.docs) {
-        final tarjetasSnap = await FirebaseFirestore.instance
-            .collection('territorios')
-            .doc(ter.id)
-            .collection('tarjetas')
-            .where('publicador_email', isEqualTo: widget.usuarioEmail)
-            .get();
-
-        for (final t in tarjetasSnap.docs) {
-          final data = t.data() as Map<String, dynamic>;
-          if (data['completada'] == true) continue;
-          resultado.add({
-            ...data,
-            '_id': t.id,
-            '_territorioId': ter.id,
-            '_ref': t.reference,
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Error cargando tarjetas: $e');
-    }
-    return resultado;
   }
 
   String _normalizarDireccion(String direccion) {
@@ -330,10 +299,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
       });
 
       // Notificar a admins de territorios
-      final adminsSnap = await FirebaseFirestore.instance
-          .collection('usuarios')
-          .where('estado', isEqualTo: 'aprobado')
-          .get();
       await NotificacionService.enviarAAdminTerritorios(
         titulo: '↩️ Tarjeta devuelta',
         cuerpo: '$nombre devolvió la tarjeta "$tarjetaId"',
@@ -466,8 +431,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
       if (texto.isEmpty) return;
 
       // Enviar solo el mensaje configurado, sin título redundante
-      await NotificacionService.enviar(
-        destinatario: email,
+      await NotificacionService.enviarAUser(
+        destinatarioNombre: nombre,
         titulo: '🌟 Mensaje para ti',
         cuerpo: texto,
         tipo: TipoNotificacion.motivacional,
@@ -1007,7 +972,16 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
-                              onPressed: () => _abrirRutaGoogleMaps(direcciones),
+                              onPressed: () async {
+                            // PASO 1: Abrir pestaña en blanco IMEDIATAMENTE
+                            // Crítico para iOS - debe ser el primer gesto del usuario
+                            // Usamos Html.window.open (API de dart:html)
+                            final mapsWindow = await Html.window.open('', '_blank');
+
+                            if (!mounted) return;
+                            // PASO 2: Ejecutar la lógica asíncrona y actualizar la pestaña
+                            await _abrirRutaGoogleMapsConPestana(direcciones, mapsWindow!);
+                          },
                               icon: const Icon(Icons.map_outlined, size: 18),
                               label: const Text('Ver ruta en Google Maps',
                                   style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1089,7 +1063,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // RUTA GOOGLE MAPS
   // ───────────────────────────────────────────────────────────
 
-  Future<void> _abrirRutaGoogleMaps(List<QueryDocumentSnapshot> direcciones) async {
+  Future<void> _abrirRutaGoogleMapsConPestana(List<QueryDocumentSnapshot> direcciones, Object mapsWindow) async {
     if (direcciones.isEmpty) return;
 
     if (mounted) {
@@ -1136,14 +1110,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final comp = (data['complemento'] as String? ?? '').trim();
         final texto = comp.isNotEmpty ? '$calle, $comp' : calle;
 
-        final coords = await MapboxService.obtenerCoordenadas(texto);
+        final coords = await MapboxService.geocodificar(texto);
         if (coords != null) {
           // Guardar en Firestore para la próxima vez
           FirebaseFirestore.instance
               .collection('direcciones_globales')
               .doc(doc.id)
-              .update({'lat': coords['lat'], 'lng': coords['lng']});
-          coordsDirecciones.add('${coords['lat']},${coords['lng']}');
+              .update({'lat': coords[0], 'lng': coords[1]});
+          coordsDirecciones.add('${coords[0]},${coords[1]}');
         } else {
           // Fallback: usar texto si no se pudo geocodificar
           final full = comp.isNotEmpty
@@ -1179,14 +1153,55 @@ class _PublicadorTabState extends State<PublicadorTab> {
           '&travelmode=walking';
     }
 
-    final uri = Uri.parse(urlString);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
+    // En iOS, con un solo destino se prefiere Apple Maps; el resto usa Google Maps
+    // y se fuerza una pestaña nueva. Usamos la pestaña ya abierta.
+    if (defaultTargetPlatform == TargetPlatform.iOS &&
+        coordsDirecciones.length == 1) {
+      final latLng = coordsDirecciones.first;
+      final appleUri = Uri.parse('https://maps.apple.com/?q=$latLng');
+      try {
+        final win = mapsWindow is Html.Window ? mapsWindow : null;
+        if (win != null) {
+          // Usar location.href en lugar de href directo en dart:html
+          win.location.href = appleUri.toString();
+        } else {
+          // Fallback: lanzar Apple Maps normalmente
+          final ok = await launchUrl(appleUri,
+              mode: LaunchMode.externalApplication,
+              webOnlyWindowName: '_blank');
+          if (ok) return;
+        }
+      } catch (_) {}
+    }
+
+    // Abrir Google Maps en la pestaña ya existente (solución para iOS)
+    try {
+      // mapsWindow puede ser un Window de dart:html o el resultado de window.open
+      final String urlGoogleMaps = urlString;
+      // Intentar setear la ubicación de la ventana existente
+      if (mapsWindow is Html.Window) {
+        // Usar location.href en lugar de href directo en dart:html
+        (mapsWindow as Html.Window).location.href = urlGoogleMaps;
+      } else {
+        // Si no es Window de dart:html, intentar con launchUrl como fallback
+        final uri = Uri.parse(urlGoogleMaps);
+        final ok = await launchUrl(uri,
+            mode: LaunchMode.externalApplication,
+            webOnlyWindowName: '_blank');
+        if (!ok && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No se pudo abrir el mapa'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No se pudo abrir Google Maps'),
+            content: Text('No se pudo abrir el mapa'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1533,7 +1548,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
         if (dirsTemporales.docs.isNotEmpty) {
           final batchClean = db.batch();
           for (final d in dirsTemporales.docs) {
-            final dData = d.data() as Map<String, dynamic>;
+            final dData = d.data();
             final estadoDir = dData['estado_predicacion'] as String? ?? '';
             final origenId = dData['tarjeta_id_origen'] as String? ?? '';
             final terOrigenId = dData['territorio_origen_id'] as String? ?? '';
@@ -1820,9 +1835,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                 whereIn: tarjetaIds.take(10).toList())
                             .get(),
                     builder: (context, dirsSnap) {
-                      final mesActual =
-                          '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
-
                       final completadas = dirsSnap.data?.docs.where((doc) {
                             final d = _safeData(doc);
                             // Contar como completada si está predicada
@@ -1961,10 +1973,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
           // ── ENVIAR DIRECCIÓN NUEVA ──
           SliverToBoxAdapter(
-            child: EnviarDireccionWidget(
+            child: EnviarDireccionCard(
               usuarioEmail: widget.usuarioEmail,
-              usuarioNombre:
-                  widget.usuarioData['nombre']?.toString() ?? widget.usuarioEmail,
+              usuarioNombre: widget.usuarioData['nombre'] ?? widget.usuarioEmail,
             ),
           ),
 
@@ -2219,76 +2230,5 @@ class _PublicadorTabState extends State<PublicadorTab> {
         ],
       ),
     );
-  }
-
-  Future<void> _abrirMapaRuta(String tarjetaId) async {
-    try {
-      // Obtener direcciones de la tarjeta
-      final dirsSnap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .where('tarjeta_id', isEqualTo: tarjetaId)
-          .where('estado', isNotEqualTo: 'removida')
-          .get();
-
-      if (dirsSnap.docs.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(context.t('no_new_notifications')),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
-
-      // Construir lista de waypoints
-      final direcciones = dirsSnap.docs.map((doc) {
-        final data = (doc.data() as Map<String, dynamic>?) ?? {};
-        final calle = (data['calle'] as String?) ?? '';
-        final complemento = (data['complemento'] as String?) ?? '';
-        return Uri.encodeComponent(
-            '$calle${complemento.isNotEmpty ? ', $complemento' : ''}, Araucária, PR, Brasil');
-      }).toList();
-
-      if (direcciones.isEmpty) return;
-
-      // Primera dirección como destino, resto como waypoints
-      final destino = direcciones.last;
-      final waypoints = direcciones.length > 1
-          ? direcciones.sublist(0, direcciones.length - 1).join('|')
-          : '';
-
-      // URL de Google Maps con origen GPS
-      String url =
-          'https://www.google.com/maps/dir/?api=1&origin=My+Location&destination=$destino&travelmode=driving';
-
-      if (waypoints.isNotEmpty) {
-        url += '&waypoints=$waypoints';
-      }
-
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(context.t('error_server')),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${context.t('error')}: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 }

@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:araucaria_sur/core/l10n/translation_service.dart';
 
 class EstadisticasTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -63,13 +64,13 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
   String _labelPeriodo() {
     switch (_mesesSeleccionados) {
       case 1:
-        return 'Este mes';
+        return context.t('stat_this_month');
       case 3:
-        return 'Últimos 3 meses';
+        return context.t('stat_last_3_months');
       case 6:
-        return 'Últimos 6 meses';
+        return context.t('stat_last_6_months');
       case 12:
-        return 'Último año';
+        return context.t('stat_last_year');
       default:
         return '';
     }
@@ -90,28 +91,28 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Congregación Española Araucaria Sur',
+              Text(
+                context.t('stat_title_org'),
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: _morado,
                 ),
               ),
-              const Text(
-                'Informe de Territorio',
+              Text(
+                context.t('stat_title_report'),
                 style: TextStyle(fontSize: 11, color: Colors.grey),
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  _periodoBtn('Mensual', 1),
+                  _periodoBtn(context.t('stat_period_monthly'), 1),
                   const SizedBox(width: 8),
-                  _periodoBtn('Trimestral', 3),
+                  _periodoBtn(context.t('stat_period_quarterly'), 3),
                   const SizedBox(width: 8),
-                  _periodoBtn('Semestral', 6),
+                  _periodoBtn(context.t('stat_period_semiannual'), 6),
                   const SizedBox(width: 8),
-                  _periodoBtn('Anual', 12),
+                  _periodoBtn(context.t('stat_period_annual'), 12),
                 ],
               ),
             ],
@@ -162,13 +163,13 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       future: _cargarDatos(meses),
       builder: (context, snap) {
         if (!snap.hasData) {
-          return const Center(
+          return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 CircularProgressIndicator(color: _morado),
                 SizedBox(height: 12),
-                Text('Cargando estadísticas...',
+                Text(context.t('stat_loading'),
                     style: TextStyle(color: Colors.grey)),
               ],
             ),
@@ -183,27 +184,27 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Resumen global ───────────────────────────
-              _seccionTitulo('RESUMEN GLOBAL', _labelPeriodo()),
+              _seccionTitulo(context.t('stat_section_global_summary'), _labelPeriodo()),
               const SizedBox(height: 12),
               _buildResumenGlobal(datos),
               const SizedBox(height: 20),
 
               // ── Gráfico de barras mensual ────────────────
               if (_mesesSeleccionados > 1) ...[
-                _seccionTitulo('PROGRESO MENSUAL', ''),
+                _seccionTitulo(context.t('stat_section_monthly_progress'), ''),
                 const SizedBox(height: 12),
                 _buildGraficoBarras(datos),
                 const SizedBox(height: 20),
               ],
 
               // ── Gráfico de torta ────────────────────────
-              _seccionTitulo('DISTRIBUCIÓN DE DIRECCIONES', ''),
+              _seccionTitulo(context.t('stat_section_distribution'), ''),
               const SizedBox(height: 12),
               _buildGraficoTorta(datos),
               const SizedBox(height: 20),
 
               // ── Por territorio ──────────────────────────
-              _seccionTitulo('POR TERRITORIO', ''),
+              _seccionTitulo(context.t('stat_section_by_territory'), ''),
               const SizedBox(height: 12),
               ...datos.porTerritorio.entries
                   .map((e) => _buildTarjetaTerritorio(e.key, e.value, datos)),
@@ -414,8 +415,8 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
-                    'Progreso de predicación',
+                  Text(
+                    context.t('stat_prediction_progress'),
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -447,14 +448,14 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '${datos.predicadasPeriodo} predicadas',
+                    context.t('stat_predicated_count', args: ['${datos.predicadasPeriodo}']),
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.8),
                       fontSize: 12,
                     ),
                   ),
                   Text(
-                    '${datos.totalActivas} totales',
+                    context.t('stat_total_count', args: ['${datos.totalActivas}']),
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.8),
                       fontSize: 12,
@@ -473,7 +474,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             Expanded(
               child: _metricaCard(
                 '${datos.totalTerritorios}',
-                'Territorios',
+                context.t('stat_territories'),
                 Icons.map,
                 _morado,
               ),
@@ -482,7 +483,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             Expanded(
               child: _metricaCard(
                 '${datos.totalActivas}',
-                'Direcciones',
+                context.t('stat_addresses'),
                 Icons.home_work_outlined,
                 Colors.blue,
               ),
@@ -491,7 +492,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             Expanded(
               child: _metricaCard(
                 '${datos.temporales}',
-                'Temporales',
+                context.t('stat_temporary'),
                 Icons.timer_outlined,
                 Colors.orange,
               ),
@@ -500,7 +501,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             Expanded(
               child: _metricaCard(
                 '${datos.totalRemovidas}',
-                'Removidas',
+                context.t('stat_removed'),
                 Icons.person_off_outlined,
                 Colors.red,
               ),
@@ -567,8 +568,8 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Direcciones predicadas por mes',
+          Text(
+            context.t('stat_addresses_by_month'),
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13,
@@ -637,8 +638,8 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: const Center(
-          child: Text('Sin datos', style: TextStyle(color: Colors.grey)),
+        child: Center(
+          child: Text(context.t('stat_no_data'), style: TextStyle(color: Colors.grey)),
         ),
       );
     }
@@ -666,17 +667,17 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       child: Column(
         children: [
           // Barras horizontales como torta simplificada
-          _barraDistribucion('Predicadas', datos.predicadasPeriodo,
+          _barraDistribucion(context.t('stat_dist_predicated'), datos.predicadasPeriodo,
               datos.totalActivas, predicPct, _verde),
           const SizedBox(height: 8),
           _barraDistribucion(
-              'Activas', datos.totalActivas, total, activasPct, _morado),
+              context.t('stat_dist_active'), datos.totalActivas, total, activasPct, _morado),
           const SizedBox(height: 8),
           _barraDistribucion(
-              'Temporales', datos.temporales, total, tempPct, Colors.orange),
+              context.t('stat_dist_temporary'), datos.temporales, total, tempPct, Colors.orange),
           const SizedBox(height: 8),
           _barraDistribucion(
-              'Removidas', datos.totalRemovidas, total, removPct, Colors.red),
+              context.t('stat_dist_removed'), datos.totalRemovidas, total, removPct, Colors.red),
         ],
       ),
     );
@@ -782,7 +783,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                         ),
                       ),
                       Text(
-                        '${datos.totalDirecciones} direcciones · ${datos.totalTarjetas} tarjetas',
+                        context.t('stat_addr_count_cards', args: ['${datos.totalDirecciones}', '${datos.totalTarjetas}']),
                         style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                       ),
                     ],
@@ -842,15 +843,15 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                _miniMetrica('${datos.predicadas}', 'Predicadas', _verde),
+                _miniMetrica('${datos.predicadas}', context.t('stat_dist_predicated'), _verde),
                 _miniMetrica('${datos.totalDirecciones - datos.predicadas}',
-                    'Pendientes', Colors.grey),
+                    context.t('stat_pending'), Colors.grey),
                 _miniMetrica(
-                    '${datos.temporales}', 'Temporales', Colors.orange),
-                _miniMetrica('${datos.removidas}', 'Removidas', Colors.red),
+                    '${datos.temporales}', context.t('stat_temporary'), Colors.orange),
+                _miniMetrica('${datos.removidas}', context.t('stat_removed'), Colors.red),
                 _miniMetrica(
                     '${datos.tarjetasCompletadas}/${datos.totalTarjetas}',
-                    'Tarjetas',
+                    context.t('stat_cards'),
                     _morado),
               ],
             ),
@@ -899,8 +900,8 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Movimientos del período',
+          Text(
+            context.t('stat_movements'),
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13,
@@ -913,30 +914,30 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
               Expanded(
                 child: _movimientoItem(
                   Icons.person_off,
-                  'Removidas',
+                  context.t('stat_removed'),
                   datos.totalRemovidas,
                   Colors.red,
-                  'No hispanohablantes',
+                  context.t('stat_removed_not_hispanic'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: _movimientoItem(
                   Icons.restore,
-                  'Restauradas',
+                  context.t('stat_restored'),
                   datos.totalRestauradas,
                   _verde,
-                  'Volvieron hispanos',
+                  context.t('stat_restored_desc'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: _movimientoItem(
                   Icons.delete_forever,
-                  'Eliminadas',
+                  context.t('stat_permanently_deleted'),
                   datos.totalEliminadasPermanente,
                   Colors.grey,
-                  'Permanente',
+                  context.t('stat_permanently_deleted_desc'),
                 ),
               ),
             ],
@@ -995,12 +996,12 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
               Icon(Icons.picture_as_pdf, color: Colors.white, size: 20),
               SizedBox(width: 8),
               Text(
-                'Exportar informe',
+                context.t('stat_export_report'),
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -1011,7 +1012,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Congregación Española Araucaria Sur · ${_labelPeriodo()}',
+            context.t('stat_congregation_period', args: [_labelPeriodo()]),
             style: TextStyle(
               color: Colors.white.withOpacity(0.8),
               fontSize: 12,
@@ -1024,7 +1025,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                 child: ElevatedButton.icon(
                   onPressed: () => _exportarPDF(datos),
                   icon: const Icon(Icons.share, size: 16),
-                  label: const Text('Compartir resumen',
+                  label: Text(context.t('stat_share_summary'),
                       style: TextStyle(fontSize: 12)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
@@ -1048,18 +1049,18 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
     try {
       // Mostrar loading
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('📊 Generando PDF...'), duration: Duration(seconds: 30)),
+        SnackBar(content: Text('📊 ${context.t('stat_generating_pdf')}'), duration: Duration(seconds: 30)),
       );
 
       final pdf = pw.Document();
       final ahora = DateTime.now();
       final periodoTexto = _mesesSeleccionados == 1
-          ? 'Mensual'
+          ? context.t('stat_period_monthly')
           : _mesesSeleccionados == 3
-              ? 'Trimestral'
+              ? context.t('stat_period_quarterly')
               : _mesesSeleccionados == 6
-                  ? 'Semestral'
-                  : 'Anual';
+                  ? context.t('stat_period_semiannual')
+                  : context.t('stat_period_annual');
       final fechaGenerado =
           '${ahora.day.toString().padLeft(2, '0')}/${ahora.month.toString().padLeft(2, '0')}/${ahora.year}';
 
@@ -1172,7 +1173,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                             pw.SizedBox(width: 12),
                             _pdfKpi('Temporales', '${datos.temporales}', colorNaranja, colorBlanco),
                             pw.SizedBox(width: 12),
-                            _pdfKpi('Territorios', '${datos.totalTerritorios}', PdfColor.fromHex('#0277BD'), colorBlanco),
+                            _pdfKpi(context.t('stat_territories'), '${datos.totalTerritorios}', PdfColor.fromHex('#0277BD'), colorBlanco),
                           ],
                         ),
 
@@ -1223,7 +1224,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                               pw.Row(
                                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                                 children: [
-                                  pw.Text('${datos.predicadasPeriodo} predicadas',
+                                  pw.Text(context.t('stat_predicated_count', args: ['${datos.predicadasPeriodo}']),
                                       style: pw.TextStyle(fontSize: 10, color: colorVerde, fontWeight: pw.FontWeight.bold)),
                                   pw.Text('${datos.totalActivas - datos.predicadasPeriodo} pendientes',
                                       style: pw.TextStyle(fontSize: 10, color: colorTextoSuave)),
@@ -1301,7 +1302,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                         // ── Resumen removidas/restauradas ──────────────
                         pw.Row(
                           children: [
-                            _pdfInfoCard('No hispanohablantes', '${datos.totalRemovidas}', colorNaranja),
+                            _pdfInfoCard(context.t('stat_removed_not_hispanic'), '${datos.totalRemovidas}', colorNaranja),
                             pw.SizedBox(width: 12),
                             _pdfInfoCard('Restauradas', '${datos.totalRestauradas}', colorVerde),
                             pw.SizedBox(width: 12),

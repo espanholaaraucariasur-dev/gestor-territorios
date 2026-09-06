@@ -22,6 +22,8 @@ class _Ecosistema2MantenimientoScreenState
   static const String _pinLocal = '272700';
   bool _desbloqueado = false;
   Set<String> _usuariosVisibles = <String>{};
+  Set<String> _idsAdminEco2 = <String>{};
+  Set<String> _todosAprobados = <String>{};
 
   @override
   void initState() {
@@ -32,6 +34,26 @@ class _Ecosistema2MantenimientoScreenState
   // ── Cargar selección guardada ─────────────────────────────
   Future<void> _cargarVisibilidad() async {
     try {
+      // IDs de los administradores del eco2 (rol 'admin'); siempre deben
+      // quedar visibles y no pueden ser desmarcados.
+      final admins = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('estado', isEqualTo: 'aprobado')
+          .where('roles', arrayContains: 'admin')
+          .get();
+      if (mounted) {
+        _idsAdminEco2 = admins.docs.map((d) => d.id).toSet();
+      }
+
+      final todos = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('estado', isEqualTo: 'aprobado')
+          .get();
+      if (mounted) {
+        _todosAprobados =
+            todos.docs.map((d) => d.id).where((id) => !_idsAdminEco2.contains(id)).toSet();
+      }
+
       final doc = await FirebaseFirestore.instance
           .collection('configuracion')
           .doc('ecosistema2_visibilidad')
@@ -167,12 +189,48 @@ class _Ecosistema2MantenimientoScreenState
       backgroundColor: Colors.transparent,
       builder: (c) => _SelectorUsuariosSheet(
         seleccionInicial: _usuariosVisibles,
+        idsAdminEco2: _idsAdminEco2,
       ),
     );
     if (resultado != null) {
-      await _guardarVisibilidad(resultado.toSet());
+      // Los admins del eco2 siempre quedan visibles (no se pueden quitar)
+      await _guardarVisibilidad(_conAdmins(resultado.toSet()));
     }
   }
+
+  // ── ¿Todos los aprobados están liberados? ────────────────
+  bool get _todosLiberados {
+    if (_todosAprobados.isEmpty) return false;
+    return _usuariosVisibles.containsAll(_todosAprobados);
+  }
+
+  // ── Liberar / des-liberar para todos ─────────────────────
+  Future<void> _toggleLiberarTodos(bool activo) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('estado', isEqualTo: 'aprobado')
+          .get();
+      final ids = snap.docs.map((d) => d.id).toSet();
+      if (activo) {
+        // Liberar a todos (manteniendo siempre a los admins del eco2)
+        await _guardarVisibilidad(_conAdmins(ids));
+      } else {
+        // Quitar del acceso a todos los NO admin (los admins permanecen)
+        final result = _usuariosVisibles.where(_idsAdminEco2.contains).toSet();
+        await _guardarVisibilidad(result);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Set<String> _conAdmins(Set<String> ids) =>
+      {...ids, ..._idsAdminEco2};
 
   // ── Pantalla de bloqueo ───────────────────────────────────
   Widget _buildBloqueo(BuildContext context) {
@@ -320,6 +378,77 @@ class _Ecosistema2MantenimientoScreenState
             ),
           ),
           const SizedBox(height: 12),
+          // ── Toggle: liberar para todos ────────────────────
+          Material(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => _toggleLiberarTodos(!_todosLiberados),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: const Border(
+                    left:
+                        BorderSide(color: Color(0xFF0277BD), width: 4),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF0277BD).withValues(alpha: 0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0277BD)
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.people_alt_outlined,
+                          color: Color(0xFF0277BD), size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            context.t('eco2_visibilidad_todos_boton'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Color(0xFF263238),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            context.t('eco2_visibilidad_todos_desc'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _todosLiberados,
+                      activeColor: const Color(0xFF0277BD),
+                      onChanged: _toggleLiberarTodos,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -389,8 +518,12 @@ class _Ecosistema2MantenimientoScreenState
 // ─────────────────────────────────────────────────────────────
 class _SelectorUsuariosSheet extends StatefulWidget {
   final Set<String> seleccionInicial;
+  final Set<String> idsAdminEco2;
 
-  const _SelectorUsuariosSheet({required this.seleccionInicial});
+  const _SelectorUsuariosSheet({
+    required this.seleccionInicial,
+    required this.idsAdminEco2,
+  });
 
   @override
   State<_SelectorUsuariosSheet> createState() => _SelectorUsuariosSheetState();
@@ -416,6 +549,7 @@ class _SelectorUsuariosSheetState extends State<_SelectorUsuariosSheet> {
     final nombre = (data['nombre'] as String?) ?? 'Usuario';
     final email = (data['email'] as String?) ?? '';
     final seleccionado = _seleccion.contains(doc.id);
+    final esAdmin = widget.idsAdminEco2.contains(doc.id);
     final iniciales = nombre
         .trim()
         .split(' ')
@@ -423,18 +557,23 @@ class _SelectorUsuariosSheetState extends State<_SelectorUsuariosSheet> {
         .map((p) => p.isNotEmpty ? p[0] : '')
         .join();
 
+    void toggle() {
+      if (esAdmin) return; // Los admins del eco2 no se pueden quitar
+      setState(() {
+        if (seleccionado) {
+          _seleccion.remove(doc.id);
+        } else {
+          _seleccion.add(doc.id);
+        }
+      });
+    }
+
     return Material(
       color: seleccionado
           ? const Color(0xFF1B5E20).withValues(alpha: 0.06)
           : Colors.transparent,
       child: InkWell(
-        onTap: () => setState(() {
-          if (seleccionado) {
-            _seleccion.remove(doc.id);
-          } else {
-            _seleccion.add(doc.id);
-          }
-        }),
+        onTap: toggle,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
@@ -466,10 +605,14 @@ class _SelectorUsuariosSheetState extends State<_SelectorUsuariosSheet> {
                       ),
                     ),
                     Text(
-                      email,
+                      esAdmin
+                          ? '${email} · ${context.t('eco2_usuarios_rol_admin')}'
+                          : email,
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.grey.shade600,
+                        color: esAdmin
+                            ? const Color(0xFF1B5E20)
+                            : Colors.grey.shade600,
                       ),
                     ),
                   ],
@@ -478,13 +621,7 @@ class _SelectorUsuariosSheetState extends State<_SelectorUsuariosSheet> {
               Checkbox(
                 value: seleccionado,
                 activeColor: const Color(0xFF1B5E20),
-                onChanged: (v) => setState(() {
-                  if (v == true) {
-                    _seleccion.add(doc.id);
-                  } else {
-                    _seleccion.remove(doc.id);
-                  }
-                }),
+                onChanged: esAdmin ? null : (_) => toggle(),
               ),
             ],
           ),

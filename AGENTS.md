@@ -1,70 +1,94 @@
-# AGENTS.md — gestor-territorios
+# AGENTS.md â€” gestor-territorios
 
-Proyecto Flutter/Firebase para la Congregación Española Araucaria Sur (Testigos de Jehová). Repositorio: https://github.com/espanholaaraucariasur-dev/gestor-territorios
+Proyecto Flutter/Firebase para la CongregaciÃ³n EspaÃ±ola Araucaria Sur (Testigos de JehovÃ¡). Repositorio: https://github.com/espanholaaraucariasur-dev/gestor-territorios
 
-> **Dueño del proyecto**: el usuario de este proyecto es **`https://github.com/espanholaaraucariasur-dev`** (cuenta `espanholaaraucariasur-dev`). La cuenta local `angelrivas2025` NO es el usuario de este proyecto (es solo acceso de lectura/token). No confundir con otros proyectos/repos de la carpeta `C:\Users\angel\Documents\Default Project` (ufbra, industria, asistente_tecnico, cam_ivai, etc.). Este repo es el de gestor-territorios.
+> **DueÃ±o del proyecto**: el usuario de este proyecto es **`https://github.com/espanholaaraucariasur-dev`** (cuenta `espanholaaraucariasur-dev`). La cuenta local `angelrivas2025` NO es el usuario de este proyecto (es solo acceso de lectura/token). No confundir con otros proyectos/repos de la carpeta `C:\Users\angel\Documents\Default Project` (ufbra, industria, asistente_tecnico, cam_ivai, etc.). Este repo es el de gestor-territorios.
 
 ## Reglas generales
-- NO usar cruces ni iconos religiosos (Icons.church, etc.). El salón se llama "Salón del Reino" y su logo es "JW".
-- Iconos siempre en estilo lineal (outlined), manteniendo armonía con el resto de la app.
-- Todo el código con texto en ES y PT a través de `lib/core/l10n/app_translations.dart` (usar `context.t('clave')`).
+- NO usar cruces ni iconos religiosos (Icons.church, etc.). El salÃ³n se llama "SalÃ³n del Reino" y su logo es "JW".
+- Iconos siempre en estilo lineal (outlined), manteniendo armonÃ­a con el resto de la app.
+- Todo el cÃ³digo con texto en ES y PT a travÃ©s de `lib/core/l10n/app_translations.dart` (usar `context.t('clave')`).
 - Mantener las convenciones de estilo existentes. No agregar comentarios salvo cuando aporten.
 
 ## Trabajo en equipo (Git por ramas + PR)
 - El equipo trabaja en **ramas** (p.ej. `feat/...`, `fix/...`), NUNCA directo en `main`.
-- Flujo: `git checkout -b feat/x` → cambios → `git push origin feat/x` → Pull Request en GitHub.
-- El líder revisa y mergea. La rama `main` es del líder.
-- `git pull origin main` al empezar cada sesión para estar al día.
+- Flujo: `git checkout -b feat/x` â†’ cambios â†’ `git push origin feat/x` â†’ Pull Request en GitHub.
+- El lÃ­der revisa y mergea. La rama `main` es del lÃ­der.
+- `git pull origin main` al empezar cada sesiÃ³n para estar al dÃ­a.
 - Comandos de proyecto disponibles en opencode: `/build-apk`, `/deploy-web`, `/commit`.
 - Agente revisor disponible: `revisor` (verifica las reglas de oro antes de mergear).
 
 ## Versiones y flujo de trabajo
-- **Numeración doble**: los números de los APK de prueba (`TEST-vN.apk`) NO coinciden con los de Play Console. Los APK de prueba van saltando (v35, v36, v37...) según se testean. Recién después de probar varios APK se sube una versión nueva a Play Console, con su propio número consecutivo.
-- **Play Console va en build 27** (ya subido). El `.aab` para subir se genera renumerando el pubspec al siguiente número de Play (p.ej. 28) y NO al número del APK de prueba. El código no cambia, solo el número de versión.
-- Desarrollo local: pubspec.yaml en **1.0.2+39** (o el número actual de prueba), generando `TEST-vN.apk` (N = build de prueba actual).
-- Flujo habitual: modificar código → `flutter analyze` de los archivos tocados → bump de versión de prueba → `flutter build apk --release` → copiar APK a `C:\Users\angel\Documents\Default Project\TEST-vN.apk` → `git add` + `git commit` + `git push origin main`.
-- **Flujo Play Console**: renumerar pubspec al próximo número de Play (28) → `flutter build appbundle --release` → subir `build\app\outputs\bundle\release\app-release.aab` a Play Console → restaurar pubspec al número de prueba (39).
-- Regla de oro: probar con APK local antes de subir `.aab` a Play Console. No subir sin confirmación del usuario.
+- **NumeraciÃ³n doble**: los nÃºmeros de los APK de prueba (`TEST-vN.apk`) NO coinciden con los de Play Console. Los APK de prueba van saltando (v35, v36, v37...) segÃºn se testean. ReciÃ©n despuÃ©s de probar varios APK se sube una versiÃ³n nueva a Play Console, con su propio nÃºmero consecutivo.
+- **Play Console: último build subido = 28**. Ya generado `araucaria_sur-v29.aab` (build 29, con fixes de seguridad v55 y login v68); Play acepta saltos de numeración. El `.aab` se genera con `flutter build appbundle --release --build-number=N` donde N = próximo número de Play (NO el del APK de prueba). Después de subir, restaurar pubspec al número de prueba.
+- Desarrollo local: pubspec.yaml en **1.0.2+39** (o el nÃºmero actual de prueba), generando `TEST-vN.apk` (N = build de prueba actual).
+- Flujo habitual: modificar cÃ³digo â†’ `flutter analyze` de los archivos tocados â†’ bump de versiÃ³n de prueba â†’ `flutter build apk --release` â†’ copiar APK a `C:\Users\angel\Documents\Default Project\TEST-vN.apk` â†’ `git add` + `git commit` + `git push origin main`.
+- **Flujo Play Console**: renumerar pubspec al prÃ³ximo nÃºmero de Play (28) â†’ `flutter build appbundle --release` â†’ subir `build\app\outputs\bundle\release\app-release.aab` a Play Console â†’ restaurar pubspec al nÃºmero de prueba (39).
+- Regla de oro: probar con APK local antes de subir `.aab` a Play Console. No subir sin confirmaciÃ³n del usuario.
 
 ## Arquitectura / aislamiento
 - **Ecosistema principal** (funciona y no se debe romper): login, contador de asistencia, historial (`asistencia_historial`), mantenimiento, tarjetas/territorios.
-- **Ecosistema 2** (front en desarrollo, aislado): `lib/features/ecosistema2/`. No debe importar ni modificar los features existentes (excepto `home_page.dart` para el ítem del menú). Sin backend aún.
+- **Ecosistema 2** (front en desarrollo, aislado): `lib/features/ecosistema2/`. No debe importar ni modificar los features existentes (excepto `home_page.dart` para el Ã­tem del menÃº). Sin backend aÃºn.
 - NO tocar los archivos del ecosistema principal sin causa; verificar con `flutter analyze` que nada se rompe.
 
 ## Archivos clave
-- `lib/core/constants/firebase_config.dart` — `FirebaseConfig.opciones` (config por plataforma; Android no usa la web).
-- `lib/features/auth/presentation/pages/login_page.dart` — login + migración automática a Firebase Auth.
-- `lib/features/home/presentation/pages/asistencia/contador.dart` — contador (fecha con día de la semana, sin nombre de usuario).
-- `lib/features/home/presentation/pages/asistencia/contador_historial.dart` — historial (leer/reenviar, sin editar).
-- `lib/features/home/presentation/pages/admin/mantenimiento_tab.dart` — mantenimiento (incluye "Limpiar historial del contador").
-- `lib/features/ecosistema2/presentation/` — panel principal, mantenimiento y placeholders del Ecosistema 2.
-- `lib/core/l10n/app_translations.dart` — traducciones ES/PT (claves `eco2_*` del Ecosistema 2).
-- `.opencode/` — configuración de opencode del proyecto (MCP, comandos `/build-apk`, `/deploy-web`, `/commit`, agente `revisor`).
+- `lib/core/constants/firebase_config.dart` â€” `FirebaseConfig.opciones` (config por plataforma; Android no usa la web).
+- `lib/features/auth/presentation/pages/login_page.dart` â€” login + migraciÃ³n automÃ¡tica a Firebase Auth.
+- `lib/features/home/presentation/pages/asistencia/contador.dart` â€” contador (fecha con dÃ­a de la semana, sin nombre de usuario).
+- `lib/features/home/presentation/pages/asistencia/contador_historial.dart` â€” historial (leer/reenviar, sin editar).
+- `lib/features/home/presentation/pages/admin/mantenimiento_tab.dart` â€” mantenimiento (incluye "Limpiar historial del contador").
+- `lib/features/ecosistema2/presentation/` â€” panel principal, mantenimiento y placeholders del Ecosistema 2.
+- `lib/core/l10n/app_translations.dart` â€” traducciones ES/PT (claves `eco2_*` del Ecosistema 2).
+- `.opencode/` â€” configuraciÃ³n de opencode del proyecto (MCP, comandos `/build-apk`, `/deploy-web`, `/commit`, agente `revisor`).
 
 ## Base de datos (Firestore)
-- Colecciones usadas: `usuarios`, `territorios` (+`tarjetas`), `direcciones_globales`, `direcciones_removidas`, `configuracion`, `configuraciones`, `notificaciones`, `estadisticas`, `estadisticas_mensuales`, `sistema`, `solicitudes_localizador`, `tareas_motivacionales`, `asistencia_historial`.
+- Colecciones usadas: `usuarios`, `territorios` (+`tarjetas`), `direcciones_globales`, `direcciones_removidas`, `configuracion`, `configuraciones`, `notificaciones`, `estadisticas`, `estadisticas_mensuales`, `sistema`, `solicitudes_localizador`, `tareas_motivacionales`, `asistencia_historial`, `eco2_familias`.
 - Regla actual: `match /{document=**} { allow read, write: if request.auth != null; }` (todo autenticado).
 
 ## Entorno
 - Windows, Flutter en `C:\src\flutter\bin\flutter.bat`, proyecto en `D:\araucaria_sur`.
 - APKs de prueba en `C:\Users\angel\Documents\Default Project\TEST-vN.apk`.
-- Servidor opencode mobile: `opencode serve --hostname 0.0.0.0 --port 4096` (password vía `OPENCODE_SERVER_PASSWORD`).
-- **Puente Telegram** (enviar instrucciones al opencode desde el bot): script `C:\Users\angel\AppData\Local\Temp\opencode\telegram_bridge.ps1` — long polling, usa `opencode run --dir D:\araucaria_sur` con sesión propia (NO chocar con el TUI); offset en `tg_offset.txt`, log en `bridge_log.txt`. Reiniciar tras reinicio de PC: `Start-Process powershell -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","C:\Users\angel\AppData\Local\Temp\opencode\telegram_bridge.ps1" -WindowStyle Hidden`.
-- Servidor APK local (si está corriendo): `http://192.168.100.122:8000`.
+- Servidor opencode mobile: `opencode serve --hostname 0.0.0.0 --port 4096` (password vÃ­a `OPENCODE_SERVER_PASSWORD`).
+- **Puente Telegram** (enviar instrucciones al opencode desde el bot): script `C:\Users\angel\AppData\Local\Temp\opencode\telegram_bridge.ps1` â€” long polling, usa `opencode run --dir D:\araucaria_sur` con sesiÃ³n propia (NO chocar con el TUI); offset en `tg_offset.txt`, log en `bridge_log.txt`. Reiniciar tras reinicio de PC: `Start-Process powershell -ArgumentList "-NoProfile","-ExecutionPolicy","Bypass","-File","C:\Users\angel\AppData\Local\Temp\opencode\telegram_bridge.ps1" -WindowStyle Hidden`.
+- Servidor APK local (si estÃ¡ corriendo): `http://192.168.100.122:8000`.
 - Terminal de despliegue: puertos 4096 (opencode) y 8000 (APK) abiertos por `abrir_puertos.bat`.
 
 ## Entrega de APKs al celular (OneDrive + Telegram)
-- **IMPORTANTE**: `C:\Users\angel\Documents\Default Project` NO es carpeta de OneDrive (la raíz de OneDrive es `C:\Users\angel\OneDrive`). El celular ve `C:\Users\angel\OneDrive\Documents\Default Project\`.
-- **Mecanismo estándar**: al generar un APK nuevo hay que copiarlo a AMBOS lados:
-  1. `C:\Users\angel\Documents\Default Project\TEST-vN.apk` (proyecto)
-  2. `C:\Users\angel\OneDrive\Documents\Default Project\TEST-vN.apk` (para que OneDrive lo suba al celular)
-- OneDrive sube solo los archivos que están DENTRO de `C:\Users\angel\OneDrive\...`.
+- **IMPORTANTE**: `C:\Users\angel\Documents\Default Project` NO es carpeta de OneDrive (la raÃ­z de OneDrive es `C:\Users\angel\OneDrive`). El celular ve `C:\Users\angel\OneDrive\Documents\Territorio_Project\`.
+- **Mecanismo estÃ¡ndar (actualizado agosto 2026)**: al generar un APK nuevo hay que copiarlo a AMBOS lados:
+1. `C:\Users\angel\Documents\Default Project\TEST-vN.apk` (proyecto)
+2. `C:\Users\angel\OneDrive\Documents\Territorio_Project\TEST-vN.apk` (carpeta OneDrive NUEVA; la anterior `...\Documents\Default Project` dejÃ³ de existir)
+- OneDrive sube solo los archivos que estÃ¡n DENTRO de `C:\Users\angel\OneDrive\...`.
 - Aviso por Telegram al bot `@Araucaria_sur_bot` (chat 6281442034) cuando haya APK nuevo.
-- El celular descarga desde la app **OneDrive** (misma cuenta), no por link público (no generamos enlaces públicos por OAuth).
-- Fallback local: servidor APK `http://100.114.25.100:8000/TEST-vN.apk` vía Tailscale. El enlace `https://onedrive.live.com/?v=1&view=managestorage` sirve para liberar cupo (vaciar papelera).
+- El celular descarga desde la app **OneDrive** (misma cuenta), no por link pÃºblico (no generamos enlaces pÃºblicos por OAuth).
+- Fallback local: servidor APK `http://100.114.25.100:8000/TEST-vN.apk` vÃ­a Tailscale. El enlace `https://onedrive.live.com/?v=1&view=managestorage` sirve para liberar cupo (vaciar papelera).
 
 ## Acceso remoto (Tailscale)
-- VPN Tailscale, plan free (mejor opción para un teléfono; reemplazó a Quick Tunnel/ngrok).
-- PC = IP Tailscale `100.114.25.100` (fija). Teléfono entra a OpenCode Mobile con `http://100.114.25.100:4096` (misma cuenta Tailscale en ambos).
+- VPN Tailscale, plan free (mejor opciÃ³n para un telÃ©fono; reemplazÃ³ a Quick Tunnel/ngrok).
+- PC = IP Tailscale `100.114.25.100` (fija). TelÃ©fono entra a OpenCode Mobile con `http://100.114.25.100:4096` (misma cuenta Tailscale en ambos).
 - Verificado: el servidor responde por Tailscale en `100.114.25.100:4096`.
-- No requiere cambios de DNS ni apertura de puertos. Solo instalar/abrir Tailscale en el teléfono.
+- No requiere cambios de DNS ni apertura de puertos. Solo instalar/abrir Tailscale en el telÃ©fono.
+
+## Mapa técnico (exploración completa del código)
+- **Arquitectura**: feature-first simple SIN capa data/domain real. Los archivos de `lib/shared/models/` y `features/auth/data/models/user_model.dart` están VACÍOS (0 bytes); todo fluye como `Map<String, dynamic>` directo de Firestore a la UI. Estado con `setState` (~50 usos); `flutter_bloc`+`equatable` están en pubspec pero NO se usan (dependencia muerta). Sin go_router: navegación imperativa `Navigator.push(MaterialPageRoute)` + `TabController`.
+- **Monolitos**: `home_page.dart` (~1300 líneas tras limpieza v67, hub por roles) y `publicador_tab.dart` (~2200). Duplicaciones conocidas: `notification_service.dart` (FCM) vs `notificacion_service.dart` (centro in-app, colección `notificaciones`); DOS `translation_service.dart` distintos (l10n InheritedWidget vs traductor ES→PT por LibreTranslate en core/services).
+- **Roles**: flags booleanos independientes combinables en el doc de usuario: `es_admin`, `es_admin_territorios`, `es_conductor`, `es_publicador`, `es_acomodador`; + `estado` (`pendiente`/`aprobado`). home_page decide vistas por esos flags.
+- **Login** (`login_page.dart`): migración automática a Firebase Auth desde directorio Firestore `usuarios` si Auth falla; login biométrico con local_auth (no web); recuperación de contraseña notifica admins si el usuario no está migrado; "solicitar acceso" valida código de 4 dígitos contra `configuracion/codigo_acceso` con sesión anónima.
+- **Tema**: solo `AppTheme.light` está cableado al MaterialApp. Colores adaptativos vía extension en `core/themes/theme_extensions.dart` (`context.cardBg`, `context.verde`, `context.textPrimary`...). `theme_provider.dart` (dark mode persistido) existe pero NO está conectado aún.
+- **i18n**: sistema custom sin .arb. Diccionario `app_translations.dart` con claves string, idiomas `'ES'`/`'PT'`, placeholders `%s`/`%d`. Uso: `context.t('clave')`. TODO texto nuevo va en ambos idiomas.
+- **Búsqueda de direcciones** (estado actual v54): normalización compartida SIEMPRE en `core/utils/direccion_utils.dart` (minúsculas → quita CEP/nº → quita acentos con mapa manual [NO regex \p{}] → expande abreviaturas r./av./trv./qd./cond. → solo `[a-z0-9 ]`). Estrategia en `enviar_direccion_widget.dart`: A) match exacto por variantes (con/sin "rua") → B/C) escaneo por prefijos progresivos paginado (200/pág) con `_coincide` (números obligatorios, ignora tipos de vía, ph≡f, prefijo ≥4 letras, ratioE≥0.75/ratioA≥0.35 o todas las palabras de la búsqueda presentes) → D) fallback exacto campo `calle` → E) escaneo completo paginado (500/pág) comparando normalizada guardada Y re-normalizada de calle+complemento (docs viejos corruptos). Debug logs 🔍 activos.
+- **Push (v61)**: FCM token-per-user en `usuarios/{email-doc}.fcm_token` (los docs de usuarios tienen ID automático — el token se guarda por QUERY email, NO por uid; bug corregido en v61). Sin topics. Listener `onTokenRefresh` activo. El ENVÍO real de push requiere Cloud Functions: `functions/index.js` preparado (`enviarPushNotificacion`, trigger onCreate de `notificaciones/{id}` → busca token por email → admin.messaging().send, limpia tokens inválidos) pero **BLOQUEADO: el proyecto está en plan Spark y Cloud Functions exige plan Blaze** (upgrade manual del usuario; intento de agosto 2026 falló con error de perfil de pagos `OR_BAOOC_03` — usuario lo resolverá más adelante; fixes: verificar perfil en pay.google.com, tarjeta de crédito en vez de débito, o crear cuenta en console.cloud.google.com/billing). Cuando Blaze esté activo: `firebase deploy --only functions`. Navegación por tap según `data['tipo']` → `getPendingAction()`.
+- **Biometría (v61)**: login_page guarda `biometric_pass` (además de `biometric_email`) en flutter_secure_storage al iniciar sesión con contraseña. La huella re-autentica con esa contraseña guardada → funciona aunque la sesión de Firebase Auth se pierda. Fallback: sesión existente si no hay pass guardada.
+- **Errores de login (v68)**: BUG corregido — al meter contraseña/usuario equivocado en app recién instalada (sin sesión), la consulta al directorio `usuarios` salía permission-denied y mostraba el error crudo de Firestore. Fix: `_loginConEmail` ahora asegura sesión anónima ANTES de consultar el directorio (`signInAnonymously` si no hay currentUser). Catch genérico reemplazado: FirebaseException → mensajes amigables ("No se pudo verificar el usuario" / "Problema de conexión" / "Error de base de datos"); nunca más mostrar `Error: $e` crudo. `too-many-requests` tiene mensaje propio ("Demasiados intentos..."). Flujo correcto ahora: contraseña mal → "Contraseña incorrecta." (vía migración email-already-in-use→signIn fail); usuario inexistente → "Usuario no encontrado en el directorio."
+- **Builds Play (ago 2026)**: último `.aab` generado = `araucaria_sur-v29.aab` (build 29, con fix login v68). Subir a Play Console manualmente. Después de generar, restaurar pubspec al contador de prueba (+68).
+- **Seguridad (endurecida)**: `firestore.rules` versionado y desplegado — sesiones anónimas SOLO pueden leer `usuarios`, `configuracion/codigo_acceso` y crear avisos en `notificaciones` (flujos de login/recuperación); todo lo demás exige sesión real (provider != anonymous). Algolia: la app YA NO usa la admin key; usa 2 claves restringidas al índice `direcciones` (search-only + sync con addObject/deleteObject/settings/editSettings), creadas vía API REST. **Pendiente manual**: revocar en el dashboard de Algolia la admin key expuesta (2773...6ba9e) tras verificar que v55 funciona; el PIN de mantenimiento y código de acceso siguen legibles para autenticados.
+- **Multi-casas/condominio (v65 — DECISIÓN FINAL del usuario)**: cada casa/apartamento se guarda como **DOCUMENTO SEPARADO** en `direcciones_globales` (misma calle, complemento distinto: "Casa 2", "Casa 3"...). NO se usan arrays `condominio_unidades` para direcciones nuevas — razón: el contador de direcciones y el envío de tarjetas cargan atributos por doc. Tipos de solicitud en `solicitudes_localizador`: `condominio_nueva_unidad`/`casas_nueva_unidad` (dirección YA existe → crea doc separado con complemento) y `condominio_nueva_direccion`/`casas_nueva_direccion` (dirección NUEVA → SOLO doc de la unidad, SIN doc base genérico). UI publicador: botón superior "Enviar dirección" (avión) hace la búsqueda y se OCULTA cuando no existe la dirección; checkboxes exclusivos condominio/varias-casas revelan campos de unidad; un solo botón Enviar real + "Cancelar" para volver. La herramienta "Fusionar casas gemelas" fue ELIMINADA del mantenimiento. Los docs legacy con `condominio_unidades` siguen mostrándose con chips 🏠 en territorios/admin.
+- **Limpieza arrays multi-casas (v67)**: eliminada TODA la maquinaria de arrays abandonada — enviar_direccion_widget (`_unidadesExistentes`, checkboxes inline duplicados → helper `_buildChecksUnidad`, `_buscar` ya no lee flags es_condominio/varias_casas del doc encontrado, sin chequeo yaExiste); territorios_tab (generador de rangos bloques/pisos/aptos del diálogo de crear dirección, chips de unidades, `_expandirRango`, `_liberarTodasLasTarjetasDelTerritorio` muerta); admin_tab (checkboxes condominio/casas en editar y crear, chips, `_expandirRango`, importador CSV columnas de condominio, `_mostrarDialogoEnviar` muerta). Los docs legacy que aún tienen los campos siguen funcionando (solo se ignoran).
+- **Agente auditor de territorios (v67)**: botón "🤖 Auditar territorios (agente Mapbox)" en Mantenimiento (`_auditarTerritorios`). Recorre `direcciones_globales` paginado (400/pág), geocodifica cada calle vía `MapboxService.formatearDireccion()` (con caché por calle + delay 150ms rate-limit), compara barrio Mapbox vs `territorio_nombre` y `barrio` guardados (comparación normalizada sin acentos, contiene/equal) y muestra informe AlertDialog SOLO LECTURA con las discrepancias. `formatearDireccion` ahora también retorna `barrio` y `ciudad`. Progreso en diálogo no-dismissibles con botón Detener.
+- **Depuración global (v67)**: `flutter analyze lib/` quedó en 0 errores y 0 warnings unused (antes ~45). home_page.dart pasó de 4034 a 1333 líneas eliminando el árbol muerto completo de `_abrirTerritorio` + `_logicaReinicio` + ~18 helpers solo llamados desde ellos (diálogos legacy de admin duplicados por territorios_tab/admin_tab). Ojo al revertir: esos diálogos legacy NO existen más.
+- **Formato de direcciones (v66)**: al aprobar solicitudes y crear direcciones desde territorios_tab, la calle cruda del usuario ("rua onze de fevereiro 163") se formatea vía `MapboxService.formatearDireccion()` al formato completo ("Rua Onze de Fevereiro, 163 - Centro, Araucária - PR, 83702-135") antes de guardar. El método construye desde partes (texto_calle + número - barrio, ciudad + sigla región, CEP) y también devuelve lat/lng. Fallback silencioso al texto original si Mapbox falla.
+- **Localización pestaña Estadísticas (v69)**: los 39+ strings hardcoded en español de `estadisticas_tab.dart` (meses, etiquetas de período, títulos de sección, métricas, movimientos, exportar PDF) fueron conectados al sistema i18n via `context.t('clave')`. Se agregaron ~50 claves nuevas en `app_translations.dart` (ES/PT) incluyendo textos del PDF generado. El nombre del mes (`_nombreMes`) ahora usa claves `stat_month_jan`…`stat_month_dec`. El SNACKBAR de "Generando PDF…" también se traduce. Fondo verde claro (`Color(0xFFF1F8E9)` en `home_page.dart`) suavizado a `Color(0xFFF6F8F5)` — tono más neutro y menos saturado.
+- **Ecosistema Secundario — Fase 1: Familias + Roles (v70)**: módulo de congregación aislado bajo `lib/features/ecosistema2/`. Nuevos archivos: `models/familia_model.dart` (Familia: id, nombre, miembros[], creadoPor, activa), `models/usuario_eco2_model.dart` (UsuarioEco2: uid, nombre, email, rolEco2, familiaId, funcionesAsignadas), `data/familia_service.dart` (CRUD + stream + count), `data/usuario_eco2_service.dart` (roles, familia, funciones). UI: `presentation/familias/familias_screen.dart` (lista/stream, crear, editar miembros con chips, eliminar con dismiss), `presentation/usuarios/eco2_usuarios_screen.dart` (lista con filtro por rol, segmented button para cambiar rol, chips de familia). `ecosistema2_home.dart` ahora es `StatefulWidget` con conteos dinámicos desde Firestore y dos tarjetas nuevas: Familias (púrpura) + Usuarios (azul). ~26 claves ES/PT nuevas en `app_translations.dart`. Firestore collection: `eco2_familias`. Campos nuevos en `usuarios`: `rol_eco2`, `familia_id`. Admins iniciales: Angel Rivas + José Escobar. Web desplegado + APK v70.
+- **Web hosting**: firebase.json tiene headers `Cache-Control: no-cache` para main.dart.js/index.html/flutter_bootstrap.js (evita bundles viejos por caché HTTP). Service worker de Flutter DESACTIVADO en web/index.html.
+
+

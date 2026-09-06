@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function esAnonimo() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+    function sesionReal() {
+      return request.auth != null && !esAnonimo();
+    }
+
+    // --- Mantenimiento y Admin ---
+    // PIN de mantenimiento: 272700
+    // Los administradores desbloqueados tienen acceso total
+    
+    // Configuración general
+    match /configuracion/{doc} {
+      allow read, write: if sesionReal();
+    }
+
+    // Usuarios
+    match /usuarios/{uid} {
+      allow get, list: if sesionReal();
+      allow create, update, delete: if sesionReal();
+    }
+
+    // Notificaciones
+    match /notificaciones/{id} {
+      allow read: if sesionReal();
+      allow create: if sesionReal();
+      allow update, delete: if sesionReal() && request.auth.uid == id;
+    }
+
+    // --- Colecciones de mantenimiento ---
+    // Tarjetas - requiere desbloqueo PIN 272700 (manejado en cliente)
+    match /territorios/{terId}/tarjetas/{tarjetaId} {
+      allow read, write: if sesionReal();
+    }
+    
+    // Tarjetas temporales
+    match /territorios/temporales/tarjetas/{tarjetaId} {
+      allow read, write: if sesionReal();
+    }
+    
+    // Direcciones globales
+    match /direcciones_globales/{doc} {
+      allow read, write: if sesionReal();
+    }
+    
+    // Direcciones removidas
+    match /direcciones_removidas/{doc} {
+      allow read, write: if sesionReal();
+    }
+    
+    // --- Collection group queries (para auditoría) ---
+    // Permitir collection_group queries en tarjetas
+    match /tarjetas/{tarjetaId=**} {
+      allow read: if sesionReal();
+      allow write: if sesionReal();
+    }
+
+    // --- Todo lo demas requiere sesion real ---
+    match /{document=**} {
+      allow read, write: if sesionReal();
+    }
+  }
+}

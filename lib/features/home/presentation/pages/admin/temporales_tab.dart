@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../../../core/utils/direccion_utils.dart';
 
 class TemporalesTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -716,7 +717,6 @@ class _TemporalesTabState extends State<TemporalesTab> {
             final territorioOrigen =
                 (data['territorio_origen_nombre'] as String?) ?? '';
             final enviadoNombre = (data['enviado_nombre'] as String?) ?? '';
-            final asignadoA = (data['asignado_a'] as String?) ?? '';
             final yaEnviada = enviadoNombre.isNotEmpty;
             final enviadoEn = data['enviado_en'] as Timestamp?;
             String fechaHora = '';
@@ -1063,7 +1063,7 @@ class _TemporalesTabState extends State<TemporalesTab> {
   }
 
   String _normalizarDireccionTemporal(String direccion) {
-    return direccion.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    return normalizarDireccion(direccion);
   }
 
   // ─────────────────────────────────────────────────────────

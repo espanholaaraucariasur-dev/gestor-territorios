@@ -59,12 +59,16 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
+<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Esta app necesita acceso a tu ubicación para mostrar el mapa de entrega.</string>
+		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>Esta app necesita acceso a tu ubicación siempre para funcionar correctamente con el mapa.</string>
+		<key>UISupportedInterfaceOrientations~ipad</key>
+		<array>
+			<string>UIInterfaceOrientationPortrait</string>
+			<string>UIInterfaceOrientationPortraitUpsideDown</string>
+			<string>UIInterfaceOrientationLandscapeLeft</string>
+			<string>UIInterfaceOrientationLandscapeRight</string>
+		</array>
 </dict>
 </plist>

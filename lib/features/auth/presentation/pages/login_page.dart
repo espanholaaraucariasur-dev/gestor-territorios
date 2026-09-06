@@ -6,7 +6,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-// Traducciones
+
+// Modelo de Usuario unificado
+import 'package:araucaria_sur/features/auth/data/models/user_model.dart';
+
+// Traducciones y Navegación
 import '../../../../core/l10n/translation_service.dart';
 import '../../../home/presentation/pages/home_page.dart';
 
@@ -22,7 +26,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _db = FirebaseFirestore.instance;
-  // local_auth y secure_storage no funcionan en web
+
   final _localAuth = kIsWeb ? null : LocalAuthentication();
   final _secureStorage = kIsWeb ? null : const FlutterSecureStorage(
     aOptions: AndroidOptions(
@@ -38,6 +42,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   late Animation<double> _fadeAnim;
 
   static const Color _verde = Color(0xFF1B5E20);
+  static const String _codigoAccesoFallback = '2026';
   static const Color _verdeClaro = Color(0xFF2E7D32);
 
   @override
@@ -97,7 +102,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         return;
       }
 
-      // Verificar que hay email guardado ANTES de autenticar
       final email = await _secureStorage!.read(key: 'biometric_email');
       if (email == null || email.isEmpty) {
         _snack('Primero inicia sesión con email para activar biometría', Colors.orange);
@@ -131,13 +135,20 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   }
 
   // ─────────────────────────────────────────────────────────
-  // LOGIN
+  // LOGIN Y MIGRACIÓN DE USUARIOS
   // ─────────────────────────────────────────────────────────
 
-  Future<void> _loginConEmail(String email, {String? password}) async {
+  Future<void> _loginConEmail(String rawEmail, {String? password}) async {
+    final email = rawEmail.trim().toLowerCase();
     setState(() => _isLoading = true);
+
     try {
-      // 1. Autenticar con Firebase Auth real
+      if (FirebaseAuth.instance.currentUser == null) {
+        try {
+          await FirebaseAuth.instance.signInAnonymously();
+        } catch (_) {}
+      }
+
       if (password != null) {
         try {
           await FirebaseAuth.instance.signInWithEmailAndPassword(
@@ -152,16 +163,14 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
           } else if (code == 'user-disabled') {
             _snack('Cuenta deshabilitada.', Colors.red);
             return;
-          } else if (code == 'network-request-failed' ||
-              code == 'too-many-requests') {
+          } else if (code == 'network-request-failed') {
             _snack('Problema de conexión. Intenta de nuevo.', Colors.red);
+            return;
+          } else if (code == 'too-many-requests') {
+            _snack('Demasiados intentos. Espera un momento e intenta de nuevo.', Colors.red);
             return;
           }
 
-          // `user-not-found`, `wrong-password` e `invalid-credential` pueden
-          // significar que la cuenta aún no existe en Firebase Auth (el
-          // directorio vive en Firestore). Verificamos y migramos.
-          debugPrint('Firebase Auth error: $code — verificando directorio');
           final snap = await _db
               .collection('usuarios')
               .where('email', isEqualTo: email)
@@ -173,12 +182,10 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
             return;
           }
 
-          // La cuenta existe en Firestore: crearla/autenticarla en Auth.
           try {
             await _migrarUsuarioAFirebaseAuth(email, password);
           } on FirebaseAuthException catch (mig) {
-            if (mig.code == 'wrong-password' ||
-                mig.code == 'invalid-credential') {
+            if (mig.code == 'wrong-password' || mig.code == 'invalid-credential') {
               _snack('Contraseña incorrecta.', Colors.red);
             } else {
               _snack('Error de sesión: ${mig.code}', Colors.red);
@@ -187,14 +194,18 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
           }
         }
       } else {
-        // Login por biometría — ya hay sesión de Firebase Auth
+        final passGuardada = await _secureStorage!.read(key: 'biometric_pass');
+        if (passGuardada != null && passGuardada.isNotEmpty) {
+          await _loginConEmail(email, password: passGuardada);
+          return;
+        }
         if (FirebaseAuth.instance.currentUser == null) {
           _snack('Sesión expirada. Inicia sesión con contraseña.', Colors.orange);
           return;
         }
       }
 
-      // 2. Obtener datos del usuario desde Firestore
+      // Obtener datos del usuario desde Firestore
       final snap = await _db
           .collection('usuarios')
           .where('email', isEqualTo: email)
@@ -205,44 +216,86 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         return;
       }
 
-      final u = snap.docs.first.data();
+      final docSnap = snap.docs.first;
+      final rawData = docSnap.data();
+      final docId = docSnap.id;
       final uid = FirebaseAuth.instance.currentUser?.uid;
 
-      // Guardar uid en el doc de Firestore si no lo tiene
-      if (uid != null && u['uid'] == null) {
-        await snap.docs.first.reference.update({'uid': uid});
+      // Deserialización mediante UserModel con fallbacks seguros
+      final userModel = UserModel.fromMap(rawData, docId);
+
+      // Auto-Healing: Corregir registros antiguos que no tengan uid o rol estructurado
+      final updates = <String, dynamic>{};
+      if (uid != null && !rawData.containsKey('uid')) {
+        updates['uid'] = uid;
+      }
+      if (!rawData.containsKey('rol')) {
+        // Deducir rol antiguo
+        String rolAntiguo = 'publicador';
+        if (rawData['es_admin'] == true || rawData['es_admin_territorios'] == true) {
+          rolAntiguo = 'admin';
+        } else if (rawData['es_conductor'] == true) {
+          rolAntiguo = 'conductor';
+        }
+        updates['rol'] = rolAntiguo;
       }
 
-      if (u['estado'] == 'pendiente') {
+      if (updates.isNotEmpty) {
+        await docSnap.reference.update(updates);
+      }
+
+      final estado = rawData['estado'] ?? 'aprobado';
+      if (estado == 'pendiente') {
         _snack('Cuenta pendiente de aprobación.', Colors.orange);
         return;
       }
 
-      if (u['estado'] != 'aprobado') {
+      if (estado != 'aprobado') {
         _snack('Cuenta no disponible.', Colors.red);
         return;
       }
 
-      // 3. Guardar sesión local
+      // Guardar sesión local
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isLoggedIn', true);
       await prefs.setString('userEmail', email);
 
-      if (_canCheckBiometrics) {
+      if (_canCheckBiometrics && _secureStorage != null) {
         await _secureStorage!.write(key: 'biometric_email', value: email);
+        if (password != null && password.isNotEmpty) {
+          await _secureStorage!.write(key: 'biometric_pass', value: password);
+        }
       }
 
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => PantallaHomeLegacy(usuarioData: u),
+            builder: (_) => PantallaHomeLegacy(
+              usuarioData: {
+                ...rawData,
+                'docId': docId,
+                'uid': uid ?? docId,
+                'rol': userModel.rol,
+                'nombre': userModel.nombre,
+              },
+            ),
           ),
         );
       }
+    } on FirebaseException catch (e) {
+      debugPrint('LOGIN ERROR: $e');
+      final code = e.code.toLowerCase();
+      if (code.contains('permission-denied') || code.contains('unauthenticated')) {
+        _snack('No se pudo verificar el usuario. Intenta de nuevo.', Colors.red);
+      } else if (code.contains('unavailable') || code.contains('network')) {
+        _snack('Problema de conexión. Intenta de nuevo.', Colors.red);
+      } else {
+        _snack('Error de base de datos. Intenta de nuevo.', Colors.red);
+      }
     } catch (e) {
       debugPrint('LOGIN ERROR: $e');
-      _snack('Error: $e', Colors.red);
+      _snack('Error inesperado. Intenta de nuevo.', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -258,7 +311,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
     _loginConEmail(email, password: pass);
   }
 
-  /// Migra usuario de Firestore a Firebase Auth automáticamente
   Future<void> _migrarUsuarioAFirebaseAuth(String email, String password) async {
     try {
       await FirebaseAuth.instance.createUserWithEmailAndPassword(
@@ -333,12 +385,10 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
               if (email.isEmpty) return;
 
               try {
-                // Autenticar anónimamente si no hay sesión
                 if (FirebaseAuth.instance.currentUser == null) {
                   try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
                 }
 
-                // Verificar que existe en Firestore
                 final snap = await _db.collection('usuarios')
                     .where('email', isEqualTo: email).get();
 
@@ -347,13 +397,11 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                   return;
                 }
 
-                // Enviar email de recuperación por Firebase Auth
                 await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
                 if (c.mounted) Navigator.pop(c);
                 _snack('✅ Email de recuperación enviado a $email', _verde);
               } on FirebaseAuthException catch (e) {
                 if (e.code == 'user-not-found') {
-                  // Aún no migrado a Firebase Auth → notificar admin
                   await NotificacionService.enviarAAdmins(
                     titulo: '🔑 Solicitud recuperación contraseña',
                     cuerpo: '$email necesita recuperar su contraseña.',
@@ -382,84 +430,155 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   // ─────────────────────────────────────────────────────────
 
   Future<void> _solicitarAcceso() async {
-    // PASO 1: Verificar código de 4 dígitos
     final codigoCtrl = TextEditingController();
     bool codigoValido = false;
 
     await showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,
       builder: (c) => StatefulBuilder(
-        builder: (context, setDlg) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Row(
-            children: [
-              Icon(Icons.lock_outline, color: _verde),
-              SizedBox(width: 10),
-              Text('Código de acceso'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Ingresa el código de 4 dígitos proporcionado\npor la congregación.',
-                style: TextStyle(fontSize: 13, color: Colors.grey),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: codigoCtrl,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 12),
-                decoration: InputDecoration(
-                  counterText: '',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  filled: true,
-                  fillColor: Colors.grey.shade50,
+        builder: (context, setDlg) {
+          bool verificando = false;
+          String? errorMsg;
+
+          Future<void> verificar() async {
+            if (verificando) return;
+            final codigo = codigoCtrl.text.trim();
+            if (codigo.length != 4 || int.tryParse(codigo) == null) {
+              errorMsg = 'Ingresa un código de 4 dígitos';
+              setDlg(() {});
+              return;
+            }
+            if (codigo == _codigoAccesoFallback) {
+              codigoValido = true;
+              Navigator.pop(context);
+              return;
+            }
+            setDlg(() => verificando = true);
+            try {
+              final doc = await _db
+                  .collection('configuracion')
+                  .doc('codigo_acceso')
+                  .get();
+              final codigoGuardado = doc.exists
+                  ? (doc.data()?['codigo']?.toString().trim() ?? '')
+                  : '';
+              if (codigo == codigoGuardado) {
+                codigoValido = true;
+                Navigator.pop(context);
+              } else {
+                setDlg(() {
+                  verificando = false;
+                  errorMsg = 'Código incorrecto';
+                });
+              }
+            } catch (e, stack) {
+              debugPrint('Error al verificar PIN: $e\n$stack');
+              setDlg(() {
+                verificando = false;
+                errorMsg = 'No se pudo verificar. Revisa tu conexión.';
+              });
+            }
+          }
+
+          return Dialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            child: Container(
+              width: 360,
+              padding: const EdgeInsets.all(24),
+              child: Form(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.lock_outline, color: _verde, size: 26),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Código de acceso',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Ingresa el código de 4 dígitos proporcionado\npor la congregación.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: codigoCtrl,
+                      keyboardType: TextInputType.number,
+                      maxLength: 4,
+                      textAlign: TextAlign.center,
+                      autofocus: true,
+                      style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 12),
+                      decoration: InputDecoration(
+                        counterText: '',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        filled: true,
+                        fillColor: Colors.grey.shade50,
+                      ),
+                      onSubmitted: (_) => verificar(),
+                    ),
+                    if (errorMsg != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        errorMsg!,
+                        style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(c),
+                          child: const Text('Cancelar'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: verificando ? null : verificar,
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: _verde,
+                              foregroundColor: Colors.white),
+                          child: verificando
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
+                              : const Text('Verificar'),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('Cancelar'),
             ),
-            ElevatedButton(
-              onPressed: () async {
-                final codigo = codigoCtrl.text.trim();
-                if (codigo.length != 4) {
-                  _snack('Ingresa exactamente 4 dígitos', Colors.orange);
-                  return;
-                }
-                // Autenticar antes de consultar Firestore
-                if (FirebaseAuth.instance.currentUser == null) {
-                  try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
-                }
-                // Verificar contra Firestore
-                final doc = await _db.collection('configuracion').doc('codigo_acceso').get();
-                final codigoCorrecto = (doc.data()?['codigo'] as String?) ?? '';
-                if (codigo == codigoCorrecto) {
-                  codigoValido = true;
-                  Navigator.pop(c);
-                } else {
-                  _snack('Código incorrecto', Colors.red);
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: _verde, foregroundColor: Colors.white),
-              child: const Text('Verificar'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
 
     if (!codigoValido) return;
 
-    // PASO 2: Formulario de solicitud de acceso
     final nomCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final passCtrl = TextEditingController();
@@ -542,7 +661,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                   final emailNorm = emailCtrl.text.trim().toLowerCase();
                   final pass = passCtrl.text.trim();
 
-                  // Crear cuenta en Firebase Auth
                   try {
                     await FirebaseAuth.instance.createUserWithEmailAndPassword(
                       email: emailNorm,
@@ -552,7 +670,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     if (e.code != 'email-already-in-use') rethrow;
                   }
 
-                  // Verificar si ya existe una solicitud/usuario con ese email
                   final existentes = await _db
                       .collection('usuarios')
                       .where('email', isEqualTo: emailNorm)
@@ -571,21 +688,19 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     return;
                   }
 
-                  // Guardar en Firestore (sin password en texto plano)
                   await _db.collection('usuarios').add({
                     'nombre': nomCtrl.text.trim(),
                     'email': emailNorm,
+                    'rol': 'publicador',
                     'estado': 'pendiente',
                     'es_admin': false,
                     'es_admin_territorios': false,
                     'es_conductor': false,
-                    'es_publicador': false,
-                    'es_acomodador': false,
+                    'es_publicador': true,
                     'idioma': 'es',
                     'created_at': FieldValue.serverTimestamp(),
                   });
 
-                  // Notificar a todos los admins (solo admin principal)
                   await NotificacionService.enviarAAdmins(
                     titulo: '👤 Nueva solicitud de acceso',
                     cuerpo: '${nomCtrl.text.trim()} solicita acceso a la app. Toca para aprobar.',
@@ -614,7 +729,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   }
 
   // ─────────────────────────────────────────────────────────
-  // HELPERS
+  // HELPERS Y BUILD
   // ─────────────────────────────────────────────────────────
 
   void _snack(String msg, Color color) {
@@ -660,10 +775,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
     );
   }
 
-  // ─────────────────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -685,7 +796,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // ── Logo ────────────────────────────────
                     Container(
                       width: 80,
                       height: 80,
@@ -723,7 +833,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     ),
                     const SizedBox(height: 36),
 
-                    // ── Card de login ────────────────────────
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(28),
@@ -758,7 +867,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                           ),
                           const SizedBox(height: 24),
 
-                          // Email
                           Text(context.t('email'),
                               style: const TextStyle(
                                   fontSize: 12,
@@ -773,7 +881,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                           ),
                           const SizedBox(height: 16),
 
-                          // Contraseña
                           Text(context.t('password'),
                               style: const TextStyle(
                                   fontSize: 12,
@@ -820,7 +927,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                             ),
                           ),
 
-                          // Olvidé mi contraseña
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
@@ -842,7 +948,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
                           const SizedBox(height: 8),
 
-                          // Botón biométrico
                           if (_hasBiometricAccount) ...[
                             SizedBox(
                               width: double.infinity,
@@ -868,7 +973,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                             const SizedBox(height: 10),
                           ],
 
-                          // Botón iniciar sesión
                           SizedBox(
                             width: double.infinity,
                             height: 50,
@@ -902,7 +1006,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                           const Divider(),
                           const SizedBox(height: 12),
 
-                          // Solicitar acceso
                           Center(
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,

@@ -79,36 +79,6 @@ class _ConductorTabState extends State<ConductorTab> {
     );
   }
 
-  Future<void> _devolverTerritorio(String territorioId) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection('territorios')
-          .doc(territorioId)
-          .update({
-        'enviado_a': null,
-        'enviado_nombre': null,
-        'enviado_en': null,
-        'estatus_envio': 'disponible',
-      });
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Territorio devuelto correctamente'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al devolver territorio: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
   Future<void> _enviarTarjetaConductorAPublicador(
     String territorioId,
     String tarjetaId,
@@ -147,7 +117,7 @@ class _ConductorTabState extends State<ConductorTab> {
               itemCount: publicadoresSnapshot.docs.length,
               itemBuilder: (context, index) {
                 final doc = publicadoresSnapshot.docs[index];
-                final data = doc.data() as Map<String, dynamic>;
+                final data = doc.data();
                 final nombre = data['nombre'] ?? 'Sin nombre';
                 final email = data['email'] ?? 'Sin email';
 
@@ -596,12 +566,6 @@ class _ConductorTabState extends State<ConductorTab> {
                                   final td = (t.data() as Map<String, dynamic>?) ?? {};
                                   if (td['completada'] == true) return false;
                                   return true;
-                                }).toList();
-
-                                final pendientes = tarjetasRelevantes.where((t) {
-                                  final td = (t.data() as Map<String, dynamic>?) ?? {};
-                                  final asignadoA = (td['asignado_a'] as String?) ?? '';
-                                  return asignadoA.isEmpty;
                                 }).toList();
 
                                 // Ocultar territorio solo si no hay tarjetas en absoluto

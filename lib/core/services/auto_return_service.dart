@@ -134,7 +134,7 @@ class AutoReturnService {
         return;
       }
 
-      final data = doc.data() as Map<String, dynamic>?;
+      final data = doc.data();
       final completada = data?['completada'] as bool? ?? false;
       final asignadoA = data?['asignado_a'] as String? ?? '';
       if (completada || asignadoA.isEmpty) {
@@ -215,7 +215,7 @@ class AutoReturnService {
           .get();
 
       for (final doc in snap.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final asignadoA = data['asignado_a'] as String? ?? '';
         final asignadoEn = data['asignado_en'] as Timestamp?;
         if (asignadoA.isEmpty || asignadoEn == null) continue;
@@ -244,6 +244,12 @@ class AutoReturnService {
       }
       if (devueltas > 0) debugPrint('✅ $devueltas tarjetas devueltas automáticamente');
     } catch (e) {
+      // Sin permiso la verificación se ignora en silencio: en web un rechazo
+      // de Firestore para lectura global puede propagarse como error no
+      // capturado del SDK aunque aquí se capture.
+      if (e is FirebaseException && e.code == 'permission-denied') {
+        return 0;
+      }
       debugPrint('❌ verificarYDevolverVencidas: $e');
     }
     return devueltas;
@@ -259,7 +265,7 @@ class AutoReturnService {
           .get();
 
       for (final doc in snap.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final asignadoEn = data['asignado_en'] as Timestamp?;
         if (asignadoEn == null) continue;
 

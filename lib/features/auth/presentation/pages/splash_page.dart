@@ -30,11 +30,9 @@ class _SplashPageState extends State<SplashPage> {
     await UpdateService.verificarActualizacion(context);
     if (!mounted) return;
 
-    // Verificar y devolver tarjetas vencidas globalmente
-    // Funciona aunque el publicador no haya abierto la app
-    AutoReturnService.verificarYDevolverVencidas().catchError((e) {
-      debugPrint('Auto-return check: $e');
-    });
+    // La verificación global de vencidas se ejecuta SOLO tras autenticación y
+    // para roles con acceso global (es_admin / es_auditor), evitando
+    // permission-denied en web al arrancar como usuario sin permisos.
 
     // Esperar a que Firebase Auth inicialice
     User? firebaseUser = FirebaseAuth.instance.currentUser;
@@ -73,11 +71,22 @@ class _SplashPageState extends State<SplashPage> {
           .timeout(const Duration(seconds: 8));
 
       if (snap.docs.isNotEmpty && mounted) {
+        final datos = snap.docs.first.data();
+        final esAdmin = datos['es_admin'] == true;
+        final esAuditor = datos['es_auditor'] == true;
+        if (esAdmin || esAuditor) {
+          // Solo roles con acceso global a TODAS las tarjetas ejecutan la
+          // devolución automática de vencidas al abrir la app.
+          AutoReturnService.verificarYDevolverVencidas().catchError((e) {
+            debugPrint('Auto-return check: $e');
+            return 0;
+          });
+        }
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
             builder: (_) => PantallaHomeLegacy(
-              usuarioData: snap.docs.first.data() as Map<String, dynamic>,
+              usuarioData: _conDocId(snap.docs.first),
             ),
           ),
         );
@@ -95,7 +104,7 @@ class _SplashPageState extends State<SplashPage> {
             context,
             MaterialPageRoute(
               builder: (_) => PantallaHomeLegacy(
-                usuarioData: snap.docs.first.data() as Map<String, dynamic>,
+                usuarioData: _conDocId(snap.docs.first),
               ),
             ),
           );
@@ -105,6 +114,11 @@ class _SplashPageState extends State<SplashPage> {
     }
 
     _irALogin();
+  }
+
+  Map<String, dynamic> _conDocId(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>? ?? <String, dynamic>{};
+    return {...data, 'docId': doc.id};
   }
 
   void _irALogin() {

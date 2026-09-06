@@ -43,6 +43,7 @@ class NotificationService {
       FirebaseMessaging.onBackgroundMessage(
           _firebaseMessagingBackgroundHandler);
       await _getAndSaveToken();
+      _firebaseMessaging.onTokenRefresh.listen(_saveTokenToFirestore);
       debugPrint('✅ NotificationService initialized successfully');
     } catch (e) {
       debugPrint('❌ Error initializing NotificationService: $e');
@@ -132,13 +133,16 @@ class NotificationService {
   Future<void> _saveTokenToFirestore(String token) async {
     try {
       User? currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser != null) {
-        await FirebaseFirestore.instance
-            .collection('usuarios')
-            .doc(currentUser.uid)
-            .update({'fcm_token': token});
-        debugPrint('✅ FCM token saved to Firestore');
-      }
+      if (currentUser == null || currentUser.email == null) return;
+      // Los docs de usuarios tienen ID automático: localizar por email
+      final snap = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('email', isEqualTo: currentUser.email)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return;
+      await snap.docs.first.reference.update({'fcm_token': token});
+      debugPrint('✅ FCM token saved to Firestore');
     } catch (e) {
       debugPrint('❌ Error saving FCM token to Firestore: $e');
     }

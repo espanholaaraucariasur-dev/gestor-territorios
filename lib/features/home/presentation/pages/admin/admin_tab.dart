@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'comunicacion_tab.dart';
 import 'usuarios_tab.dart';
+import 'auditor_panel_page.dart';
 import 'mantenimiento_tab.dart';
 import '../../../../../core/services/csv_upload.dart';
 import '../../../../../core/services/algolia_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
-
+import '../../../../../core/utils/direccion_utils.dart';
+import 'package:araucaria_sur/features/home/presentation/pages/admin/auditor_panel_page.dart'; // Ajusta la ruta si está en otra carpeta
 class AdminTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
   final TabController tabController;
@@ -27,41 +29,31 @@ class _AdminTabState extends State<AdminTab> {
   int _tabAnterior = 0;
 
   String _normalizarDireccion(String direccion) {
-    var texto = direccion.toLowerCase();
-    texto = texto.replaceAll(RegExp(r'cep[:\s]*\d{4,10}'), ' ');
-    texto = texto.replaceAll(RegExp(r'\b\d{5}-?\d{3}\b'), ' ');
-    texto = texto.replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
-    texto = texto.replaceAll('apto', 'apartamento');
-    texto = texto.replaceAll('apt', 'apartamento');
-    texto = texto.replaceAll('dpto', 'departamento');
-    texto = texto.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return texto;
-  }
-
-  List<String> _expandirRango(String texto) {
-    final resultado = <String>[];
-    for (final parte in texto.split(',')) {
-      final p = parte.trim();
-      if (p.isEmpty) continue;
-      if (p.contains('-')) {
-        final bounds = p.split('-');
-        if (bounds.length == 2) {
-          final ini = int.tryParse(bounds[0].trim());
-          final fin = int.tryParse(bounds[1].trim());
-          if (ini != null && fin != null && ini <= fin) {
-            for (int i = ini; i <= fin; i++) {
-              resultado.add(i.toString().padLeft(2, '0'));
-            }
-            continue;
-          }
-        }
-      }
-      resultado.add(p.padLeft(2, '0'));
-    }
-    return resultado;
+    return normalizarDireccion(direccion);
   }
 
   List<String> _parsearLineaCSV(String linea) {
+    final comas = _contarSeparador(linea, ',');
+    final puntosComa = _contarSeparador(linea, ';');
+    final separador = puntosComa > comas ? ';' : ',';
+    return _dividirPorSeparador(linea, separador);
+  }
+
+  int _contarSeparador(String linea, String sep) {
+    int conteo = 0;
+    bool dentroComillas = false;
+    for (int i = 0; i < linea.length; i++) {
+      final char = linea[i];
+      if (char == '"') {
+        dentroComillas = !dentroComillas;
+      } else if (char == sep && !dentroComillas) {
+        conteo++;
+      }
+    }
+    return conteo;
+  }
+
+  List<String> _dividirPorSeparador(String linea, String separador) {
     List<String> resultado = [];
     bool dentroComillas = false;
     StringBuffer campo = StringBuffer();
@@ -69,7 +61,7 @@ class _AdminTabState extends State<AdminTab> {
       final char = linea[i];
       if (char == '"') {
         dentroComillas = !dentroComillas;
-      } else if (char == ',' && !dentroComillas) {
+      } else if (char == separador && !dentroComillas) {
         resultado.add(campo.toString());
         campo.clear();
       } else {
@@ -80,13 +72,14 @@ class _AdminTabState extends State<AdminTab> {
     return resultado;
   }
 
-  // _logicaReinicio moved to MantenimientoTab
-
-  // _limpiarDatosDinamicos moved to MantenimientoTab
-
-  // _limpiarDireccionesHuerfanas moved to MantenimientoTab
-
-  // _restaurarTarjetaIds moved to MantenimientoTab
+  bool _esFilaEncabezado(String campo) {
+    final c = campo.toUpperCase();
+    return c.contains('CALLES') ||
+        c.contains('HAGA CLICK') ||
+        c.contains('DIRECCIONES') ||
+        c.contains('DEVOLUCION') ||
+        c.contains('HTTP');
+  }
 
   Future<bool> _pedirSenaMantenimiento() async {
     final controller = TextEditingController();
@@ -148,64 +141,30 @@ class _AdminTabState extends State<AdminTab> {
 
   void _levantarArchivoCSV() {
     startCsvUpload(
-      (String contenidoDelArchivo) {
+      context,
+      (String contenidoDelArchivo) async {
         try {
-          // Convertir bytes a string con UTF-8 para manejar caracteres especiales
           List<String> lineas = contenidoDelArchivo.split('\n');
-          if (lineas.isNotEmpty) lineas.removeAt(0); // Remover header si existe
+          if (lineas.isNotEmpty) lineas.removeAt(0);
 
           Map<String, List<Map<String, String>>> tarjetasMap = {};
 
           for (var linea in lineas) {
             if (linea.trim().isEmpty) continue;
 
-            // Parse CSV más robusto que maneja campos entre comillas
-            List<String> columnas = [];
-            bool enComillas = false;
-            String campoActual = '';
-
-            for (int i = 0; i < linea.length; i++) {
-              String char = linea[i];
-
-              if (char == '"') {
-                enComillas = !enComillas;
-              } else if (char == ',' && !enComillas) {
-                columnas.add(campoActual);
-                campoActual = '';
-              } else {
-                campoActual += char;
-              }
-            }
-
-            // Agregar último campo si no está vacío
-            if (campoActual.isNotEmpty) {
-              columnas.add(campoActual);
-            }
+            List<String> columnas = _parsearLineaCSV(linea);
 
             if (columnas.length >= 3) {
               final tarjeta = columnas[0].trim();
               final calle = columnas.length > 2 ? columnas[2].trim() : '';
               final complemento = columnas.length > 3 ? columnas[3].trim() : '';
-              // Columnas opcionales de condominio
-              final esCondominioStr = columnas.length > 4 ? columnas[4].trim().toLowerCase() : '';
-              final esCondominio = ['true', '1', 'si', 'sí', 'yes', 'y'].contains(esCondominioStr);
-              final bloques = columnas.length > 5 ? columnas[5].trim() : '';
-              final pisos = columnas.length > 6 ? columnas[6].trim() : '';
-              final aptos = columnas.length > 7 ? columnas[7].trim() : '';
 
               if (tarjeta.isNotEmpty && calle.isNotEmpty) {
                 tarjetasMap.putIfAbsent(tarjeta, () => []);
-                final dirData = <String, String>{
+                tarjetasMap[tarjeta]!.add({
                   'calle': calle,
                   'complemento': complemento,
-                };
-                if (esCondominio) {
-                  dirData['es_condominio'] = 'true';
-                  dirData['bloques'] = bloques;
-                  dirData['pisos'] = pisos;
-                  dirData['aptos'] = aptos;
-                }
-                tarjetasMap[tarjeta]!.add(dirData);
+                });
               }
             }
           }
@@ -313,40 +272,12 @@ class _AdminTabState extends State<AdminTab> {
         for (final dir in direcciones) {
           final calle = dir['calle'] ?? '';
           final complemento = dir['complemento'] ?? '';
-          final esCondominio = dir['es_condominio'] == 'true';
-          final bloques = esCondominio ? (dir['bloques'] ?? '') : '';
-          final pisos = esCondominio ? (dir['pisos'] ?? '') : '';
-          final aptos = esCondominio ? (dir['aptos'] ?? '') : '';
           final timestamp = DateTime.now().millisecondsSinceEpoch;
           final complementoSlug = complemento.isNotEmpty
               ? '_${complemento.replaceAll(' ', '_')}'
               : '';
           final docId =
               '${territorioId}_${nombreTarjeta}_${calle.replaceAll(' ', '_')}${complementoSlug}_$timestamp';
-
-          List<Map<String, dynamic>> unidadesBase = [];
-          if (esCondominio) {
-            final bloquesList = bloques
-                .split(',')
-                .map((e) => e.trim())
-                .where((e) => e.isNotEmpty)
-                .toList();
-            final pisosList = _expandirRango(pisos);
-            final aptosList = _expandirRango(aptos);
-            for (final bl in bloquesList) {
-              for (final pi in pisosList) {
-                for (final ap in aptosList) {
-                  unidadesBase.add({
-                    'bloque': bl,
-                    'piso': pi,
-                    'apto': ap,
-                    'ocupado': false,
-                    'created_at': FieldValue.serverTimestamp(),
-                  });
-                }
-              }
-            }
-          }
 
           final Map<String, dynamic> data = {
             'calle': calle,
@@ -370,17 +301,6 @@ class _AdminTabState extends State<AdminTab> {
             'campana_especial': false,
             'asignado_a': null,
           };
-          if (esCondominio) {
-            data['es_condominio'] = true;
-            data['condominio_unidades'] = unidadesBase;
-            data['condominio_bloques'] = bloques
-                .split(',')
-                .map((e) => e.trim())
-                .where((e) => e.isNotEmpty)
-                .toList();
-            data['condominio_pisos_range'] = pisos;
-            data['condominio_aptos_range'] = aptos;
-          }
 
           batch.set(
             FirebaseFirestore.instance
@@ -388,13 +308,11 @@ class _AdminTabState extends State<AdminTab> {
                 .doc(docId),
             data,
           );
-          // Guardar para sincronizar Algolia después del commit
           direccionesParaAlgolia[docId] = data;
           totalDirecciones++;
         }
         await batch.commit();
 
-        // Sincronizar con Algolia
         for (final entry in direccionesParaAlgolia.entries) {
           await AlgoliaService.sincronizarUna(entry.key, entry.value);
         }
@@ -619,6 +537,55 @@ class _AdminTabState extends State<AdminTab> {
     );
   }
 
+  Widget _buildTarjetaCupo(int count) {
+    Color fondo;
+    Color texto;
+    String etiqueta;
+    if (count > 8) {
+      fondo = Colors.red.shade100;
+      texto = Colors.red.shade900;
+      etiqueta = 'Saturada (>8) · Requiere división';
+    } else if (count >= 4 && count <= 6) {
+      fondo = Colors.green.shade100;
+      texto = Colors.green.shade900;
+      etiqueta = 'Capacidad recomendada (4-6)';
+    } else if (count == 7 || count == 8) {
+      fondo = Colors.orange.shade100;
+      texto = Colors.orange.shade900;
+      etiqueta = 'Límite máximo (hasta 8)';
+    } else {
+      fondo = Colors.grey.shade100;
+      texto = Colors.grey.shade700;
+      etiqueta = 'Baja ocupación';
+    }
+    return Container(
+      margin: const EdgeInsets.only(top: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: fondo,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: texto),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (count > 8) const Icon(Icons.warning, color: Colors.red, size: 12),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              etiqueta,
+              style: TextStyle(
+                fontSize: 10,
+                color: texto,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _abrirTerritorio(String territorioId, String nombre,
       {bool readOnly = false}) {
     showDialog(
@@ -726,7 +693,14 @@ class _AdminTabState extends State<AdminTab> {
                                     builder: (context, dirSnap) {
                                       final count =
                                           dirSnap.data?.docs.length ?? 0;
-                                      return Text('Dir. vinculadas: $count');
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _buildTarjetaCupo(count),
+                                          Text('Dir. vinculadas: $count'),
+                                        ],
+                                      );
                                     },
                                   ),
                                   trailing: Row(
@@ -825,78 +799,86 @@ class _AdminTabState extends State<AdminTab> {
                                                 d['estado_predicacion']
                                                         as String? ??
                                                     'pendiente';
-                                            return ListTile(
-                                              dense: true,
-                                              leading: const Icon(
-                                                  Icons.location_on,
-                                                  color: Colors.blue,
-                                                  size: 18),
-                                              title: Text(calle,
-                                                  style: const TextStyle(
-                                                      fontSize: 13)),
-                                              subtitle: complemento.isNotEmpty
-                                                  ? Text(complemento,
+                                            return Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                ListTile(
+                                                  dense: true,
+                                                  leading: const Icon(
+                                                      Icons.location_on,
+                                                      color: Colors.blue,
+                                                      size: 18),
+                                                  title: Text(calle,
                                                       style: const TextStyle(
-                                                          fontSize: 11))
-                                                  : null,
-                                              trailing: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Container(
-                                                    padding: const EdgeInsets
-                                                        .symmetric(
-                                                        horizontal: 5,
-                                                        vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color:
-                                                          estado == 'completada'
-                                                              ? Colors.green
-                                                                  .shade100
-                                                              : Colors.grey
-                                                                  .shade100,
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              5),
-                                                    ),
-                                                    child: Text(estado,
-                                                        style: TextStyle(
-                                                            fontSize: 9,
-                                                            color: estado ==
-                                                                    'completada'
-                                                                ? Colors.green
-                                                                    .shade800
-                                                                : Colors.grey
-                                                                    .shade700)),
+                                                          fontSize: 13)),
+                                                  subtitle: complemento
+                                                          .isNotEmpty
+                                                      ? Text(complemento,
+                                                          style:
+                                                              const TextStyle(
+                                                                  fontSize: 11))
+                                                      : null,
+                                                  trailing: Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Container(
+                                                        padding: const EdgeInsets
+                                                            .symmetric(
+                                                            horizontal: 5,
+                                                            vertical: 2),
+                                                        decoration: BoxDecoration(
+                                                          color:
+                                                              estado == 'completada'
+                                                                  ? Colors.green
+                                                                      .shade100
+                                                                  : Colors.grey
+                                                                      .shade100,
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                  5),
+                                                        ),
+                                                        child: Text(estado,
+                                                            style: TextStyle(
+                                                                fontSize: 9,
+                                                                color: estado ==
+                                                                        'completada'
+                                                                    ? Colors.green
+                                                                        .shade800
+                                                                    : Colors.grey
+                                                                        .shade700)),
+                                                      ),
+                                                      IconButton(
+                                                        icon: const Icon(Icons.edit,
+                                                            color: Colors.orange,
+                                                            size: 16),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints:
+                                                            const BoxConstraints(),
+                                                        onPressed: () =>
+                                                            _editarDireccion(
+                                                                dir.id, d),
+                                                        tooltip: 'Editar',
+                                                      ),
+                                                      IconButton(
+                                                        icon: const Icon(
+                                                            Icons.delete_forever,
+                                                            color: Colors.redAccent,
+                                                            size: 16),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints:
+                                                            const BoxConstraints(),
+                                                        onPressed: () =>
+                                                            _eliminarDireccion(
+                                                                dir.id,
+                                                                territorioId,
+                                                                tarjetaId),
+                                                        tooltip: 'Eliminar',
+                                                      ),
+                                                    ],
                                                   ),
-                                                  IconButton(
-                                                    icon: const Icon(Icons.edit,
-                                                        color: Colors.orange,
-                                                        size: 16),
-                                                    padding: EdgeInsets.zero,
-                                                    constraints:
-                                                        const BoxConstraints(),
-                                                    onPressed: () =>
-                                                        _editarDireccion(
-                                                            dir.id, d),
-                                                    tooltip: 'Editar',
-                                                  ),
-                                                  IconButton(
-                                                    icon: const Icon(
-                                                        Icons.delete_forever,
-                                                        color: Colors.redAccent,
-                                                        size: 16),
-                                                    padding: EdgeInsets.zero,
-                                                    constraints:
-                                                        const BoxConstraints(),
-                                                    onPressed: () =>
-                                                        _eliminarDireccion(
-                                                            dir.id,
-                                                            territorioId,
-                                                            tarjetaId),
-                                                    tooltip: 'Eliminar',
-                                                  ),
-                                                ],
-                                              ),
+                                                ),
+                                              ],
                                             );
                                           }).toList(),
                                         );
@@ -1097,6 +1079,7 @@ class _AdminTabState extends State<AdminTab> {
                 ),
               ),
             ),
+            const SizedBox(height: 4),
           ],
         ),
         actions: [
@@ -1173,7 +1156,6 @@ class _AdminTabState extends State<AdminTab> {
     );
     if (confirmar != true) return;
     try {
-      // Delete directly from direcciones_globales — removes from everywhere instantly
       await FirebaseFirestore.instance
           .collection('direcciones_globales')
           .doc(docId)
@@ -1249,7 +1231,6 @@ class _AdminTabState extends State<AdminTab> {
                   'created_at': FieldValue.serverTimestamp(),
                 });
 
-                // Limpiar campos para siguiente dirección
                 calleCtrl.clear();
                 complementoCtrl.clear();
                 detallesCtrl.clear();
@@ -1489,7 +1470,6 @@ class _AdminTabState extends State<AdminTab> {
   }
 
   void _editarNombreTerritorio(DocumentSnapshot doc) {
-    // Implementación simulada - en el código original habría diálogo
     final nombre =
         (doc.data() as Map<String, dynamic>)['nombre'] ?? 'Sin nombre';
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1550,16 +1530,6 @@ class _AdminTabState extends State<AdminTab> {
     }
   }
 
-  void _mostrarDialogoEnviar({required String terId, required String nombre}) {
-    // Implementación simulada - en el código original habría diálogo
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Enviar Territorio: $nombre'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
   void _subirCSVATarjeta(
     BuildContext context,
     String terId,
@@ -1567,11 +1537,26 @@ class _AdminTabState extends State<AdminTab> {
     String tarjetaNombre,
   ) {
     startCsvUpload(
+      context,
       (String contenido) async {
         List<String> lineas = contenido.split('\n');
-        // Quitar header si existe
-        if (lineas.isNotEmpty && lineas[0].toUpperCase().contains('CALLE')) {
-          lineas.removeAt(0);
+
+        int idxCalle = 1;
+        int idxComplemento = 8;
+        int idxInfo = 11;
+
+        for (var l in lineas) {
+          final upper = l.toUpperCase();
+          if (upper.contains('CALLES')) {
+            final h = _parsearLineaCSV(l);
+            for (var i = 0; i < h.length; i++) {
+              final col = h[i].trim().toUpperCase();
+              if (col == 'CALLES') idxCalle = i;
+              if (col == 'COMPLEMENTO') idxComplemento = i;
+              if (col == 'INFORMACIONES' || col == 'INFO') idxInfo = i;
+            }
+            break;
+          }
         }
 
         List<Map<String, String>> direcciones = [];
@@ -1579,16 +1564,17 @@ class _AdminTabState extends State<AdminTab> {
           linea = linea.trim().replaceAll('\r', '');
           if (linea.isEmpty) continue;
 
-          // Parser CSV que respeta comillas
           final partes = _parsearLineaCSV(linea);
-          if (partes.length < 3) continue;
+          if (idxCalle >= partes.length) continue;
 
-          // Columna 2 = CALLE, columna 3 = COMPLEMENTO, columna 4 = INFO
-          final calle = partes[2].trim();
-          final complemento = partes.length > 3 ? partes[3].trim() : '';
-          final informacion = partes.length > 4 ? partes[4].trim() : '';
+          final calle = partes[idxCalle].trim();
+          if (calle.isEmpty || _esFilaEncabezado(calle)) continue;
 
-          if (calle.isEmpty) continue;
+          final complemento =
+              idxComplemento < partes.length ? partes[idxComplemento].trim() : '';
+          final informacion =
+              idxInfo < partes.length ? partes[idxInfo].trim() : '';
+
           direcciones.add({
             'calle': calle,
             'complemento': complemento,
@@ -1654,7 +1640,6 @@ class _AdminTabState extends State<AdminTab> {
           }
           await batch.commit();
 
-          // Sincronizar con Algolia
           for (final entry in direccionesParaAlgolia.entries) {
             await AlgoliaService.sincronizarUna(entry.key, entry.value);
           }
@@ -1695,8 +1680,8 @@ class _AdminTabState extends State<AdminTab> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.admin_panel_settings, color: Color(0xFF1B5E20)),
-                    SizedBox(width: 10),
+                    const Icon(Icons.admin_panel_settings, color: Color(0xFF1B5E20)),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         context.t('administration'),
@@ -1749,6 +1734,10 @@ class _AdminTabState extends State<AdminTab> {
                 Tab(
                   icon: const Icon(Icons.people_outline, color: Color(0xFF1B5E20)),
                   text: context.t('users'),
+                ),
+                const Tab(
+                  icon: Icon(Icons.precision_manufacturing, color: Color(0xFF1B5E20)),
+                  text: 'Auditoría',
                 ),
                 Tab(
                   icon: const Icon(Icons.build, color: Color(0xFF1B5E20)),
@@ -1973,7 +1962,8 @@ class _AdminTabState extends State<AdminTab> {
                 ),
                 ComunicacionTab(usuarioData: widget.usuarioData),
                 UsuariosTab(usuarioData: widget.usuarioData),
-                const MantenimientoTab(),
+                AuditorPanelPage(usuarioData: widget.usuarioData),
+                MantenimientoTab(usuarioData: widget.usuarioData),
               ],
             ),
           ),

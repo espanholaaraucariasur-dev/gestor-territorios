@@ -7,7 +7,7 @@ import '../config/app_secrets.dart';
 class AlgoliaService {
   static const String _appId = AppSecrets.algoliaAppId;
   static const String _searchKey = AppSecrets.algoliaSearchKey;
-  static const String _adminKey = AppSecrets.algoliaAdminKey;
+  static const String _syncKey = AppSecrets.algoliaSyncKey;
   static const String _indexName = 'direcciones';
 
   // Cliente singleton (read + write usan mismo client con keys diferentes)
@@ -21,7 +21,7 @@ class AlgoliaService {
 
   static SearchClient get _writeClient => _adminClient ??= SearchClient(
         appId: _appId,
-        apiKey: _adminKey,
+        apiKey: _syncKey,
       );
 
   // ─────────────────────────────────────────────────────────
@@ -176,6 +176,15 @@ class AlgoliaService {
       return {'exito': false, 'mensaje': 'Error de red: ${e.error}'};
     } catch (e) {
       return {'exito': false, 'mensaje': 'Error: $e'};
+    }
+  }
+
+  /// Elimina un objeto del índice por docId.
+  static Future<void> eliminarObjeto(String docId) async {
+    try {
+      await _writeClient.deleteObject(indexName: _indexName, objectID: docId);
+    } catch (_) {
+      // Silencioso para no bloquear flujo principal
     }
   }
 

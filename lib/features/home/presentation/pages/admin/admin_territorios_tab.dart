@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:flutter/material.dart';
 import 'territorios_tab.dart';
 import 'temporales_tab.dart';
 import 'devueltas_tab_original.dart';
 import 'estadisticas_tab.dart';
+import 'package:araucaria_sur/core/l10n/translation_service.dart';
 
 class AdminTerritoriosTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -63,7 +63,7 @@ class _AdminTerritoriosTabState extends State<AdminTerritoriosTab> {
             ),
             Container(
               color: Colors.white,
-              child: const TabBar(
+              child: TabBar(
                 indicatorColor: Color(0xFF4A148C),
                 labelColor: Color(0xFF4A148C),
                 unselectedLabelColor: Colors.black54,
@@ -76,13 +76,13 @@ class _AdminTerritoriosTabState extends State<AdminTerritoriosTab> {
                     icon: Icon(Icons.timer, color: Color(0xFF4A148C)),
                     text: 'Temporales',
                   ),
-                  Tab(
+                  const Tab(
                     icon: Icon(Icons.delete_sweep, color: Color(0xFF4A148C)),
-                    text: 'Devueltas',
+                    text: 'Removidas',
                   ),
                   Tab(
-                    icon: Icon(Icons.bar_chart, color: Color(0xFF4A148C)),
-                    text: 'Estadísticas',
+                    icon: const Icon(Icons.bar_chart, color: Color(0xFF4A148C)),
+                    text: context.t('territory_statistics_tab'),
                   ),
                 ],
               ),
@@ -92,7 +92,7 @@ class _AdminTerritoriosTabState extends State<AdminTerritoriosTab> {
                 children: [
                   TerritoriosTab(usuarioData: widget.usuarioData),
                   TemporalesTab(usuarioData: widget.usuarioData),
-                  DevueltasTab(usuarioData: widget.usuarioData),
+                  RemovidasTab(usuarioData: widget.usuarioData),
                   EstadisticasTab(usuarioData: widget.usuarioData),
                 ],
               ),

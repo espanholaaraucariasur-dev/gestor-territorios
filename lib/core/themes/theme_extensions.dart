@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:araucaria_sur/core/constants/app_colors.dart';
 
 extension ThemeColors on BuildContext {
   bool get isDark => Theme.of(this).brightness == Brightness.dark;
@@ -9,9 +10,9 @@ extension ThemeColors on BuildContext {
   Color get inputFill => isDark ? const Color(0xFF2D333B) : const Color(0xFFF5F5F5);
   Color get dividerColor => isDark ? const Color(0xFF373E47) : Colors.grey.shade200;
   Color get borderColor => isDark ? const Color(0xFF373E47) : Colors.grey.shade200;
-  Color get textPrimary => isDark ? const Color(0xFFCDD9E5) : const Color(0xFF1A1A1A);
-  Color get textSecondary => isDark ? const Color(0xFF768390) : Colors.grey.shade600;
-  Color get textHint => isDark ? const Color(0xFF545D68) : Colors.grey.shade400;
+  Color get textPrimary => isDark ? const Color(0xFFCDD9E5) : AppColors.onBackground;
+  Color get textSecondary => isDark ? const Color(0xFF768390) : AppColors.mediumGray;
+  Color get textHint => isDark ? const Color(0xFF545D68) : AppColors.lightGray;
   Color get verde => isDark ? const Color(0xFF2EA043) : const Color(0xFF1B5E20);
   Color get verdeLight => isDark ? const Color(0xFF3FB950) : const Color(0xFF2E7D32);
   Color get statBlueBg => isDark ? const Color(0xFF0D2137) : const Color(0xFFE3F2FD);

@@ -24,6 +24,18 @@ void main() async {
     } catch (e) {
       debugPrint('Firestore settings: $e');
     }
+  } else {
+    // Web: Configurar settings básicos para Web
+    // Not: El transporte QUIC/WEBChannel puede ser inestable en algunos navegadores,
+    // pero la configuración por defecto debería funcionar en la mayoría de casos.
+    try {
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: false, // Web no soporta persistence
+        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+      );
+    } catch (e) {
+      debugPrint('Firestore web settings: $e');
+    }
   }
 
   // En web, no bloquear el arranque con notificaciones
