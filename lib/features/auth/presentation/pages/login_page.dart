@@ -1,3 +1,4 @@
+import 'package:araucaria_sur/features/home/presentation/pages/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -271,7 +272,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => PantallaHomeLegacy(
+            builder: (_) => TerritoriosTab(
               usuarioData: {
                 ...rawData,
                 'docId': docId,

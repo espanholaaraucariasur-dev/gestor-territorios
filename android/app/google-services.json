@@ -12,7 +12,20 @@
           "package_name": "com.congregacion.araucaria_sur"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "288799954885-837mjsdmt817t6ktk6169cbku0tajqgj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.congregacion.araucaria_sur",
+            "certificate_hash": "81f05b3f6f0f0bc9fdce2e4d41df304861c4603c"
+          }
+        },
+        {
+          "client_id": "288799954885-l1s1vh9qva09gt9g0ii6rvrrv1rn6qck.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyB2FakN7gtSzWekqRbDmKR_1WQCkBowXDs"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "288799954885-l1s1vh9qva09gt9g0ii6rvrrv1rn6qck.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
