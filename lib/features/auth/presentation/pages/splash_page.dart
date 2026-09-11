@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:araucaria_sur/features/home/presentation/pages/home_page.dart';
 import '../../../../core/services/update_service.dart';
 import '../../../../core/services/auto_return_service.dart';
 import 'package:flutter/material.dart';

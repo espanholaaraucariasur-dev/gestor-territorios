@@ -182,6 +182,7 @@ class _ConductorTabState extends State<ConductorTab> {
           .doc(tarjetaId)
           .update({
         'asignado_a': nombreElegido,
+        'enviado_a': selectedPublicador['email'] ?? '',
         'enviado_nombre': nombreElegido,
         'publicador_email': selectedPublicador['email'] ?? '',
         'enviado_en': FieldValue.serverTimestamp(),

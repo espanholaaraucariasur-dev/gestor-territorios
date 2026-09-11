@@ -25,6 +25,16 @@ class GroqTerritoryService {
   static const int _maxTarjetasPorLlamada = 30;
   static const int _maxOutputTokens = 900;
 
+  /// Lote más chico que [_maxSugerenciasPorLlamada] porque la respuesta de
+  /// normalización es más verbosa (incluye la dirección completa por ítem).
+  static const int _maxDireccionesPorLoteGeocoding = 25;
+  static const int _maxOutputTokensGeocoding = 1400;
+
+  /// Expuesto para que el orquestador de backfill sepa en qué lotes dividir
+  /// las direcciones sin coordenadas.
+  static int get maxDireccionesPorLoteGeocoding =>
+      _maxDireccionesPorLoteGeocoding;
+
   static Uri _url() => Uri.parse(_baseUrl);
 
   static Map<String, String> _headers() =>
@@ -115,7 +125,8 @@ class GroqTerritoryService {
   }
 
   static Future<Map<String, dynamic>> _chat(
-      String systemPrompt, String userPrompt, {String model = _model}) async {
+      String systemPrompt, String userPrompt,
+      {String model = _model, int maxTokens = _maxOutputTokens}) async {
     _checkKey();
     final response = await http.post(
       _url(),
@@ -123,7 +134,7 @@ class GroqTerritoryService {
       body: jsonEncode({
         "model": model,
         "temperature": 0.2,
-        "max_tokens": _maxOutputTokens,
+        "max_tokens": maxTokens,
         "response_format": {"type": "json_object"},
         "messages": [
           {"role": "system", "content": systemPrompt},
@@ -257,16 +268,83 @@ Reglas de Negocio:
    (razonamiento humano y detallado).
 ''';
 
-    final userPrompt = '''
-Dirección nueva (compacta): ${jsonEncode({
+    final direccionJson = jsonEncode({
       'calle': direccion['calle'],
       'numero': direccion['numero'],
       'complemento': direccion['complemento'],
       'barrio': direccion['barrio'],
-    })}
+    });
+
+    final userPrompt = '''
+Dirección nueva (compacta): $direccionJson
 Tarjetas actuales (resumen): ${jsonEncode(tarjetasCompactas)}
 ''';
 
     return _chat(systemPrompt, userPrompt, model: _razonamientoModel);
+  }
+
+  /// Normaliza y ordena un lote de direcciones crudas para enviarlas a
+  /// geocodificar a Mapbox con la mayor precisión posible.
+  ///
+  /// Groq completa ciudad/estado faltantes, corrige abreviaturas comunes
+  /// (R. -> Rua, Av. -> Avenida, etc.) SIN inventar datos que no estén en
+  /// el original, y devuelve el orden sugerido de envío agrupando por
+  /// barrio/cercanía (así, si una geocodificación falla, sus vecinas del
+  /// mismo lote sirven de contexto para reintentar).
+  ///
+  /// [direccionesCrudas]: cada mapa debe tener al menos "id" y
+  /// "calle"/"direccion"; "numero", "complemento" y "barrio" son opcionales.
+  ///
+  /// Retorna una lista de mapas:
+  /// { id, direccion_normalizada, orden, confianza }.
+  /// "confianza" es "alta"/"media"/"baja" según qué tan completa estaba la
+  /// dirección original.
+  static Future<List<Map<String, dynamic>>> normalizarDireccionesParaGeocoding(
+    List<Map<String, dynamic>> direccionesCrudas,
+  ) async {
+    if (direccionesCrudas.isEmpty) return [];
+
+    final lote =
+        direccionesCrudas.take(_maxDireccionesPorLoteGeocoding).toList();
+    final compactas = lote
+        .map((d) => {
+              'id': d['id']?.toString() ?? '',
+              'calle': (d['calle'] ?? d['direccion'] ?? '').toString(),
+              'numero': d['numero']?.toString() ?? '',
+              'complemento': d['complemento']?.toString() ?? '',
+              'barrio': d['barrio']?.toString() ?? '',
+            })
+        .toList();
+
+    final systemPrompt = '''
+Actúa como un Motor de Inteligencia Territorial para una congregación en Araucária, Paraná, Brasil.
+Recibe una lista de direcciones crudas (posiblemente incompletas o mal escritas) y las prepara para ser geocodificadas por Mapbox con la máxima precisión posible.
+
+Reglas de Negocio:
+1. Arma "direccion_normalizada" como un string completo listo para geocodificar: calle + número (si existe) + barrio (si existe) + ciudad/estado. Si el original NO especifica ciudad/estado, agrega ", Araucária - PR, Brasil" al final. Si el original YA especifica una ciudad/estado distinto, respétalo tal cual (no lo sobrescribas).
+2. Corrige abreviaturas comunes de calles en portugués: "R." -> "Rua", "Av." -> "Avenida", "Pça." -> "Praça", "Trav." -> "Travessa". No inventes número, barrio ni ningún dato que no esté en el original.
+3. Asigna "confianza" ("alta", "media", "baja") según qué tan completa/clara está la dirección original para ser geocodificada (ej. sin número = "baja").
+4. Asigna "orden" (entero desde 1) agrupando las direcciones por barrio/cercanía, de forma que direcciones del mismo barrio queden consecutivas.
+5. No omitas ninguna dirección recibida: la cantidad de salida debe ser igual a la de entrada.
+
+Responde SIEMPRE con un JSON válido de esta forma exacta:
+{
+  "direcciones": [
+    {"id": "...", "direccion_normalizada": "...", "orden": 1, "confianza": "alta"}
+  ]
+}
+''';
+
+    final userPrompt = 'Direcciones a normalizar: ${jsonEncode(compactas)}';
+
+    final objeto = await _chat(
+      systemPrompt,
+      userPrompt,
+      model: _razonamientoModel,
+      maxTokens: _maxOutputTokensGeocoding,
+    );
+
+    final lista = objeto['direcciones'] as List? ?? [];
+    return lista.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 }

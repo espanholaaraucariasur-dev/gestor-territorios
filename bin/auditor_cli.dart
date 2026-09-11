@@ -1,27 +1,26 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:firebase_admin/firebase_admin.dart';
-import 'package:firebase_admin/auth.dart';
-import 'package:firebase_admin/firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main(List<String> arguments) async {
   print('🔧 Iniciando Auditoría Automatizada de Araucaria Sur');
   print('==================================================\n');
 
-  // Inicializar Firebase Admin
+  // Inicializar Firebase
   try {
-    final app = FirebaseApp(name: '[DEFAULT]');
-    print('✅ Firebase Admin inicializado correctamente');
+    final app = await Firebase.initializeApp();
+    print('✅ Firebase inicializado correctamente');
   } catch (e) {
-    print('❌ Error al inicializar Firebase Admin:');
-    print('   Asegúrate de tener las credenciales de servicio en ~/.config/firebase/');
-    print('   Ejemplo: dart run --args="-c credentials.json" bin/auditor_cli.dart');
+    print('❌ Error al inicializar Firebase:');
+    print('   Asegúrate de tener la configuración de Firebase');
+    print('   Ejemplo: dart run bin/auditor_cli.dart');
     exit(1);
   }
 
   // Obtener referencia a Firestore
-  final db = Firestore.instance;
+  final db = FirebaseFirestore.instance;
   final dirColl = db.collection('direcciones_globales');
 
   try {
@@ -76,7 +75,6 @@ void main(List<String> arguments) async {
     print('\n==================================================');
     print('📋 Auditoría finalizada. Revisa los detalles arriba.');
     print('==================================================\n');
-
   } catch (e) {
     print('\n❌ Error durante la ejecución:');
     print('   $e');

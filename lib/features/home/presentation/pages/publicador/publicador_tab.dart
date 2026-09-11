@@ -1,6 +1,7 @@
-import 'dart:html' as Html;
 // eslint-disable-next-line prefer-const
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter/foundation.dart';
 import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -55,6 +56,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
   final Map<String, Map<String, String>> _textosPorTarjeta = {};
   final Map<String, Map<String, bool>> _modificadosPorTarjeta = {};
   final Set<String> _tarjetasCompletadas = {};
+  final Map<String, bool> selectedAddresses = {};
+  List<Marker> _markers = [];
 
   @override
   void initState() {
@@ -154,6 +157,23 @@ class _PublicadorTabState extends State<PublicadorTab> {
     } catch (_) {
       return {};
     }
+  }
+
+  List<Marker> _buildMarkers() {
+    final markers = <Marker>[];
+    selectedAddresses.forEach((addressId, isSelected) {
+      if (isSelected) {
+        // Encontrar la dirección correspondiente y crear marker
+        // This is a simplified implementation - actual implementation
+        // would need to map addressId to coordinates
+        markers.add(Marker(
+          markerId: MarkerId('addr_$addressId'),
+          position: LatLng(0, 0), // placeholder
+          infoWindow: InfoWindow(title: 'Dirección $addressId'),
+        ));
+      }
+    });
+    return markers;
   }
 
   // ───────────────────────────────────────────────────────────
@@ -972,16 +992,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
-                              onPressed: () async {
-                            // PASO 1: Abrir pestaña en blanco IMEDIATAMENTE
-                            // Crítico para iOS - debe ser el primer gesto del usuario
-                            // Usamos Html.window.open (API de dart:html)
-                            final mapsWindow = await Html.window.open('', '_blank');
-
-                            if (!mounted) return;
-                            // PASO 2: Ejecutar la lógica asíncrona y actualizar la pestaña
-                            await _abrirRutaGoogleMapsConPestana(direcciones, mapsWindow!);
-                          },
+onPressed: () =>
+                              _abrirRutaGoogleMapsConPestana(direcciones),
                               icon: const Icon(Icons.map_outlined, size: 18),
                               label: const Text('Ver ruta en Google Maps',
                                   style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1063,7 +1075,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // RUTA GOOGLE MAPS
   // ───────────────────────────────────────────────────────────
 
-  Future<void> _abrirRutaGoogleMapsConPestana(List<QueryDocumentSnapshot> direcciones, Object mapsWindow) async {
+  Future<void> _abrirRutaGoogleMapsConPestana(List<QueryDocumentSnapshot> direcciones) async {
     if (direcciones.isEmpty) return;
 
     if (mounted) {
@@ -1160,42 +1172,28 @@ class _PublicadorTabState extends State<PublicadorTab> {
       final latLng = coordsDirecciones.first;
       final appleUri = Uri.parse('https://maps.apple.com/?q=$latLng');
       try {
-        final win = mapsWindow is Html.Window ? mapsWindow : null;
-        if (win != null) {
-          // Usar location.href en lugar de href directo en dart:html
-          win.location.href = appleUri.toString();
-        } else {
-          // Fallback: lanzar Apple Maps normalmente
-          final ok = await launchUrl(appleUri,
-              mode: LaunchMode.externalApplication,
-              webOnlyWindowName: '_blank');
-          if (ok) return;
-        }
+        final ok = await launchUrl(appleUri,
+            mode: LaunchMode.externalApplication,
+            webOnlyWindowName: '_blank');
+        if (ok) return;
       } catch (_) {}
     }
 
     // Abrir Google Maps en la pestaña ya existente (solución para iOS)
     try {
-      // mapsWindow puede ser un Window de dart:html o el resultado de window.open
+      // Google Maps URL para todas las plataformas
       final String urlGoogleMaps = urlString;
-      // Intentar setear la ubicación de la ventana existente
-      if (mapsWindow is Html.Window) {
-        // Usar location.href en lugar de href directo en dart:html
-        (mapsWindow as Html.Window).location.href = urlGoogleMaps;
-      } else {
-        // Si no es Window de dart:html, intentar con launchUrl como fallback
-        final uri = Uri.parse(urlGoogleMaps);
-        final ok = await launchUrl(uri,
-            mode: LaunchMode.externalApplication,
-            webOnlyWindowName: '_blank');
-        if (!ok && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No se pudo abrir el mapa'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+      final ok = await launchUrl(
+        Uri.parse(urlGoogleMaps),
+        mode: LaunchMode.externalApplication,
+        webOnlyWindowName: '_blank');
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir el mapa'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (_) {
       if (mounted) {
@@ -1209,7 +1207,47 @@ class _PublicadorTabState extends State<PublicadorTab> {
     }
   }
 
+
+  // MANEJO DE DIRECCIONES TOGGLED
+
+  void _onAddressToggled(String addressId, bool isSelected) {
+    setState(() {
+      selectedAddresses[addressId] = isSelected;
+      _markers = _buildMarkers();
+    });
+  }
+
   // ───────────────────────────────────────────────────────────
+  // REINTENTAR ENVIO RUTA
+  // ───────────────────────────────────────────────────────────
+
+  void reintentarEnvioRuta(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No se puede abrir la URL'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al reintentar: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // CONFIRMAR PROCESAMIENTO
   // ───────────────────────────────────────────────────────────
 

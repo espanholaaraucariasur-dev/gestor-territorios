@@ -57,6 +57,7 @@ class EnviarDireccionCard extends StatefulWidget {
 
 class _EnviarDireccionCardState extends State<EnviarDireccionCard> {
   final TextEditingController _direccionController = TextEditingController();
+  final TextEditingController _complementoController = TextEditingController();
   bool _enviando = false;
 
   // Modos compuestos
@@ -113,7 +114,7 @@ class _EnviarDireccionCardState extends State<EnviarDireccionCard> {
         {
           'texto': base,
           'tipo': 'normal',
-          'complemento': '',
+          'complemento': _complementoController.text.trim(),
         }
       ];
     }
@@ -170,6 +171,7 @@ class _EnviarDireccionCardState extends State<EnviarDireccionCard> {
       await batch.commit();
 
       _direccionController.clear();
+      _complementoController.clear();
       for (final u in _unidades) {
         u.dispose();
       }
@@ -220,6 +222,7 @@ class _EnviarDireccionCardState extends State<EnviarDireccionCard> {
   @override
   void dispose() {
     _direccionController.dispose();
+    _complementoController.dispose();
     for (final u in _unidades) {
       u.dispose();
     }
@@ -227,79 +230,92 @@ class _EnviarDireccionCardState extends State<EnviarDireccionCard> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.add_location_alt_outlined, color: Color(0xFF1B5E20)),
-                SizedBox(width: 8),
-                Text(
-                  'Enviar dirección nueva',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _direccionController,
-              decoration: InputDecoration(
-                hintText: 'Calle y número (ej: Rua das Flores 123)',
-                filled: true,
-                fillColor: Colors.grey.shade100,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
+Widget build(BuildContext context) {
+  return Card(
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.add_location_alt_outlined, color: Color(0xFF1B5E20)),
+              SizedBox(width: 8),
+              Text(
+                'Enviar dirección nueva',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
-            ),
-            const SizedBox(height: 12),
-            _buildModalidadSelector(),
-            if (_modalidadMultiples) ...[
-              const SizedBox(height: 10),
-              _buildUnidadesEditor(),
             ],
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: _enviando ? null : _enviarDirecciones,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1B5E20),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24)),
-                ),
-                icon: _enviando
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send, color: Colors.white),
-                label: Text(
-                  _enviando
-                      ? 'Enviando...'
-                      : _modalidadMultiples
-                          ? 'Enviar ${_generarDirecciones().length} direcciones'
-                          : 'Enviar dirección',
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold),
-                ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _direccionController,
+            decoration: InputDecoration(
+              hintText: 'Calle y número (ej: Rua das Flores 123)',
+              filled: true,
+              fillColor: Colors.grey.shade100,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
               ),
             ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _complementoController,
+            decoration: InputDecoration(
+              hintText: 'Complemento (opcional). Ex: casa 5, bloco B, apto 3',
+              filled: true,
+              fillColor: Colors.grey.shade100,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildModalidadSelector(),
+          if (_modalidadMultiples) ...[
+            const SizedBox(height: 10),
+            _buildUnidadesEditor(),
           ],
-        ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _enviando ? null : _enviarDirecciones,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24)),
+              ),
+              icon: _enviando
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send, color: Colors.white),
+              label: Text(
+                _enviando
+                    ? 'Enviando...'
+                    : _modalidadMultiples
+                        ? 'Enviar ${_generarDirecciones().length} direcciones'
+                        : 'Enviar dirección',
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildModalidadSelector() {
     return Column(

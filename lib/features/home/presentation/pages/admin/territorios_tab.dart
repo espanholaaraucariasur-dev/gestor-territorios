@@ -549,10 +549,10 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                           fontSize: 11))
                                                   : null,
                                               trailing: Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 6,
-                                                        vertical: 2),
+                                                  color: Colors.transparent,
+                                                  child: Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                    horizontal: 6, vertical: 2),
                                                 decoration: BoxDecoration(
                                                   color: estado == 'completada'
                                                       ? Colors.green.shade100
@@ -570,6 +570,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                             : Colors.grey
                                                                 .shade700)),
                                               ),
+                                                ),
                                                 ),
                                                 // Badge campaña — lee de la misma colección que usa el publicador
                                                 StreamBuilder<QuerySnapshot>(

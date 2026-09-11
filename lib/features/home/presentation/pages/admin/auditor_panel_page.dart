@@ -7,6 +7,7 @@ import 'package:araucaria_sur/core/services/groq_territory_service.dart';
 import 'package:araucaria_sur/core/services/mapbox_poi_service.dart';
 import 'package:araucaria_sur/core/services/auto_asignador_service.dart';
 import 'package:araucaria_sur/core/services/notificacion_service.dart';
+import 'package:araucaria_sur/core/services/geocoding_backfill_service.dart';
 import 'whatsapp_ingestion_dialog.dart';
 
 class AuditorPanelPage extends StatefulWidget {
@@ -158,6 +159,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   bool _autoAsignacionActiva = false;
   bool _iaConectada = false;
   bool _cargandoEstado = true;
+
+  // --- Backfill de coordenadas (Groq normaliza y ordena, Mapbox geocodifica) ---
+  bool _backfillEnCurso = false;
+  int _backfillProcesadas = 0;
+  int _backfillTotal = 0;
+  int _backfillActualizadas = 0;
+  int _backfillFallidas = 0;
 
   // Filtros
   List<String> _reglasProtegidas = ['FARMACIAS', 'COMERCIOS', 'ESCUELAS', 'PUESTO DE GASOLINA'];
@@ -884,6 +892,262 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     );
   }
 
+  /// Umbral de "pantalla angosta" (celular). Por encima de esto se muestra
+  /// todo el AppBar como antes; por debajo, se colapsa en un menú "⋮" para
+  /// no desbordar (RenderFlex overflow), que era la causa del caos visual
+  /// y de que las funciones "desaparecieran" en celulares.
+  static const double _anchoAngostoBreakpoint = 700;
+
+  /// Dispara el backfill de coordenadas: Groq normaliza/ordena las
+  /// direcciones sin lat/lng de `direcciones_globales`, Mapbox las
+  /// geocodifica, y se guardan lat/lng (uso interno) + CEP (visible).
+  Future<void> _ejecutarBackfillCoordenadas() async {
+    if (_backfillEnCurso) return;
+
+    setState(() {
+      _backfillEnCurso = true;
+      _backfillProcesadas = 0;
+      _backfillTotal = 0;
+      _backfillActualizadas = 0;
+      _backfillFallidas = 0;
+    });
+
+    try {
+      final resultado = await GeocodingBackfillService.ejecutarBackfillCoordenadas(
+        onProgreso: (procesadas, total, actualizadas, fallidas) {
+          if (!mounted) return;
+          setState(() {
+            _backfillProcesadas = procesadas;
+            _backfillTotal = total;
+            _backfillActualizadas = actualizadas;
+            _backfillFallidas = fallidas;
+          });
+        },
+      );
+
+      if (!mounted) return;
+
+      if (resultado.sinPendientes) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Todas las direcciones ya tienen coordenadas. ✅'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        await showDialog(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Text('Backfill de coordenadas completado'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Total revisadas: ${resultado.total}'),
+                Text('Actualizadas con coordenadas: ${resultado.actualizadas}',
+                    style: const TextStyle(color: Colors.green)),
+                if (resultado.fallidas > 0)
+                  Text('No se pudieron geocodificar: ${resultado.fallidas}',
+                      style: const TextStyle(color: Colors.orange)),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Cerrar'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error en el backfill de coordenadas: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _backfillEnCurso = false);
+    }
+  }
+
+  List<Widget> _buildAppBarActions(BuildContext context) {
+    final anchoAngosto =
+        MediaQuery.of(context).size.width < _anchoAngostoBreakpoint;
+
+    if (!anchoAngosto) {
+      // Pantallas anchas (tablet/desktop/web escritorio): todo visible.
+      return [
+        Padding(
+          padding: const EdgeInsets.only(right: 8, top: 8, bottom: 8),
+          child: _buildStatusBadge(),
+        ),
+        IconButton(
+          tooltip: 'Carga Masiva desde WhatsApp',
+          icon: const Icon(Icons.input, color: Colors.white),
+          onPressed: _abrirCargaMasivaWhatsApp,
+        ),
+        IconButton(
+          tooltip: _direccionesSinVinculo > 0
+              ? 'Mantenimiento: $_direccionesSinVinculo dirección(es) sin vínculo detectada(s)'
+              : 'Mantenimiento: limpiar direcciones huérfanas',
+          icon: Badge(
+            isLabelVisible: _direccionesSinVinculo > 0,
+            label: Text('$_direccionesSinVinculo'),
+            backgroundColor: Colors.red,
+            child: const Icon(Icons.cleaning_services, color: Colors.white),
+          ),
+          onPressed: _limpiarDireccionesHuerfanas,
+        ),
+        IconButton(
+          tooltip: _backfillEnCurso
+              ? 'Revisando direcciones... ($_backfillProcesadas/$_backfillTotal)'
+              : 'Revisar direcciones globales (coordenadas Groq + Mapbox)',
+          icon: _backfillEnCurso
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.travel_explore, color: Colors.white),
+          onPressed: _backfillEnCurso ? null : _ejecutarBackfillCoordenadas,
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Auto-División', style: TextStyle(color: Colors.white, fontSize: 12)),
+            Switch(
+              value: _autoDivision,
+              activeColor: Colors.amber,
+              onChanged: (val) => setState(() => _autoDivision = val),
+            ),
+            IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _cargarConsolaDinamica),
+          ],
+        ),
+      ];
+    }
+
+    // Pantallas angostas (celular): solo el estado de la IA (ícono) queda
+    // inline; todo lo demás se colapsa en un menú de "más opciones".
+    return [
+      Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: _buildStatusBadgeCompacto(),
+      ),
+      PopupMenuButton<String>(
+        icon: const Icon(Icons.more_vert, color: Colors.white),
+        tooltip: 'Más opciones',
+        onSelected: (valor) {
+          switch (valor) {
+            case 'whatsapp':
+              _abrirCargaMasivaWhatsApp();
+              break;
+            case 'mantenimiento':
+              _limpiarDireccionesHuerfanas();
+              break;
+            case 'coordenadas':
+              _ejecutarBackfillCoordenadas();
+              break;
+            case 'refresh':
+              _cargarConsolaDinamica();
+              break;
+          }
+        },
+        itemBuilder: (context) => [
+          const PopupMenuItem(
+            value: 'whatsapp',
+            child: ListTile(
+              leading: Icon(Icons.input),
+              title: Text('Carga masiva desde WhatsApp'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'mantenimiento',
+            child: ListTile(
+              leading: Badge(
+                isLabelVisible: _direccionesSinVinculo > 0,
+                label: Text('$_direccionesSinVinculo'),
+                backgroundColor: Colors.red,
+                child: const Icon(Icons.cleaning_services),
+              ),
+              title: const Text('Limpiar direcciones huérfanas'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'coordenadas',
+            enabled: !_backfillEnCurso,
+            child: ListTile(
+              leading: _backfillEnCurso
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.travel_explore),
+              title: Text(_backfillEnCurso
+                  ? 'Revisando... ($_backfillProcesadas/$_backfillTotal)'
+                  : 'Revisar coordenadas (Groq + Mapbox)'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          // enabled: false deja el Switch interactivo sin que el ítem se
+          // auto-seleccione/cierre el menú al tocarlo (patrón estándar de
+          // Flutter para widgets interactivos dentro de PopupMenuItem).
+          PopupMenuItem(
+            enabled: false,
+            child: StatefulBuilder(
+              builder: (context, setLocalState) => Row(
+                children: [
+                  const Expanded(child: Text('Auto-División')),
+                  Switch(
+                    value: _autoDivision,
+                    onChanged: (val) {
+                      setState(() => _autoDivision = val);
+                      setLocalState(() {});
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'refresh',
+            child: ListTile(
+              leading: Icon(Icons.refresh),
+              title: Text('Actualizar consola'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  /// Versión compacta (solo ícono + tooltip) del estado de la IA, para no
+  /// ocupar ancho innecesario en el AppBar de celulares.
+  Widget _buildStatusBadgeCompacto() {
+    if (_cargandoEstado) {
+      return const SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+      );
+    }
+    return Tooltip(
+      message: _iaConectada ? 'Motor IA: Conectado' : 'Motor IA: Inoperativo',
+      child: Icon(
+        _iaConectada ? Icons.check_circle : Icons.error,
+        color: _iaConectada ? Colors.greenAccent.shade400 : Colors.redAccent,
+        size: 22,
+      ),
+    );
+  }
+
   Widget _buildStatusBadge() {
     if (_cargandoEstado) {
       return const SizedBox(
@@ -1485,6 +1749,242 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     return mejor;
   }
 
+  /// Igual que `_buscarPuntoMasCercano`, pero devuelve hasta 2 candidatos de
+  /// TARJETAS DISTINTAS (no solo el punto más cercano en general), ordenados
+  /// por distancia. Sirve para ofrecer una alternativa real —de otra
+  /// tarjeta— cuando el auditor no está de acuerdo con la principal. El
+  /// primer elemento siempre coincide con `_buscarPuntoMasCercano`.
+  List<Map<String, dynamic>> _buscarDosTarjetasMasCercanas(double lat, double lng) {
+    final mejorPorTarjeta = <String, Map<String, dynamic>>{};
+    for (final p in _puntosReferencia) {
+      final d = _distanciaKm(lat, lng, p['lat'] as double, p['lng'] as double);
+      final tid = p['tarjeta_id'] as String;
+      final actual = mejorPorTarjeta[tid];
+      if (actual == null || d < (actual['distancia_km'] as double)) {
+        mejorPorTarjeta[tid] = {...p, 'distancia_km': d};
+      }
+    }
+    final ordenados = mejorPorTarjeta.values.toList()
+      ..sort((a, b) =>
+          (a['distancia_km'] as double).compareTo(b['distancia_km'] as double));
+    return ordenados.take(2).toList();
+  }
+
+  /// Direcciones ya existentes (con coordenadas) de una tarjeta, para
+  /// mostrarlas en el diagrama de sugerencia junto con su distancia a la
+  /// dirección nueva. Se toman de `_puntosReferencia` (ya filtrado a
+  /// tarjetas activas con lat/lng reales).
+  List<Map<String, dynamic>> _direccionesDeTarjeta(String tarjetaId) {
+    return _puntosReferencia.where((p) => p['tarjeta_id'] == tarjetaId).toList();
+  }
+
+  /// Formatea una distancia en km como metros (< 1 km) o km con un decimal.
+  String _formatDistancia(double km) {
+    if (km < 1) return '${(km * 1000).round()} m';
+    return '${km.toStringAsFixed(1)} km';
+  }
+
+  /// Construye el nodo visual "carpeta (territorio) → tarjeta" en estilo
+  /// diagrama/flowchart: la tarjeta muestra sus direcciones existentes (con
+  /// la distancia aproximada a la dirección nueva) y la dirección nueva
+  /// resaltada. [destacado] controla si se pinta como la opción activa
+  /// (verde, con glow) o como alternativa atenuada (gris).
+  Widget _nodoSugerencia({
+    required String territorioNombre,
+    required String tarjetaNombre,
+    required List<Map<String, dynamic>> direccionesExistentes,
+    required String nuevaDireccionTexto,
+    required String nuevaComplemento,
+    required double? nuevaLat,
+    required double? nuevaLng,
+    required int cupoActual,
+    required bool destacado,
+  }) {
+    final colorBase = destacado ? const Color(0xFF1B4D2E) : Colors.grey.shade500;
+    final colorFondo =
+        destacado ? const Color(0xFF1B4D2E).withOpacity(0.06) : Colors.grey.shade50;
+    final lleno = cupoActual >= 8;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // --- Nodo "carpeta" = territorio ---
+        Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: destacado
+                    ? [const Color(0xFF1B4D2E), const Color(0xFF2E7D52)]
+                    : [Colors.grey.shade400, Colors.grey.shade500],
+              ),
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: destacado
+                  ? [
+                      BoxShadow(
+                          color: const Color(0xFF1B4D2E).withOpacity(0.35),
+                          blurRadius: 10,
+                          spreadRadius: 1),
+                    ]
+                  : [],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.folder_open, color: Colors.white, size: 15),
+                const SizedBox(width: 6),
+                Text(
+                  territorioNombre,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11.5,
+                      letterSpacing: 0.3),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // --- Conector ---
+        Center(
+          child: Column(
+            children: [
+              Container(width: 2, height: 9, color: colorBase.withOpacity(0.5)),
+              Icon(Icons.arrow_drop_down, color: colorBase.withOpacity(0.7), size: 18),
+            ],
+          ),
+        ),
+        // --- Nodo "tarjeta" ---
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: colorFondo,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colorBase, width: destacado ? 1.4 : 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.badge, size: 14, color: colorBase),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      tarjetaNombre,
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12.5,
+                          color: destacado ? const Color(0xFF1B4D2E) : Colors.grey.shade700),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: lleno ? Colors.red.shade100 : colorBase.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '$cupoActual/8',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: lleno ? Colors.red.shade800 : colorBase),
+                    ),
+                  ),
+                ],
+              ),
+              if (direccionesExistentes.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('YA EN ESTA TARJETA',
+                    style: TextStyle(
+                        fontSize: 9,
+                        color: Colors.grey[500],
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 5,
+                  runSpacing: 5,
+                  children: direccionesExistentes.take(4).map((d) {
+                    String? dist;
+                    final dLat = d['lat'];
+                    final dLng = d['lng'];
+                    if (nuevaLat != null &&
+                        nuevaLng != null &&
+                        dLat is double &&
+                        dLng is double) {
+                      dist = _formatDistancia(
+                          _distanciaKm(nuevaLat, nuevaLng, dLat, dLng));
+                    }
+                    final etiqueta =
+                        (d['calle'] as String? ?? '?').split(',').first.trim();
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Text(
+                        dist != null ? '$etiqueta · $dist' : etiqueta,
+                        style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                if (direccionesExistentes.length > 4)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text('+${direccionesExistentes.length - 4} más',
+                        style: TextStyle(fontSize: 9, color: Colors.grey[500])),
+                  ),
+                const SizedBox(height: 8),
+              ],
+              // --- Dirección nueva, resaltada ---
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: destacado ? Colors.amber.shade50 : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: destacado ? Colors.amber.shade700 : Colors.grey.shade400,
+                      width: 1.3),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.push_pin,
+                        size: 14, color: destacado ? Colors.amber.shade800 : Colors.grey.shade600),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(nuevaDireccionTexto,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 11.5)),
+                          if (nuevaComplemento.isNotEmpty)
+                            Text(nuevaComplemento,
+                                style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Text('NUEVA',
+                        style: TextStyle(
+                            fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Abre el flujo de asignación MANUAL para una sugerencia de la bandeja.
   /// Usa 3 niveles de evidencia, de más a menos fuerte:
   ///
@@ -1541,25 +2041,57 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       porVia = hermanas.firstWhere((h) => h['tarjeta_id'] == tidGanadora);
     }
 
-    // --- NIVEL 2: cercanía geográfica (solo si el Nivel 1 no encontró nada) ---
-    Map<String, dynamic>? cercano;
-    if (porVia == null && tieneCoords) {
-      cercano = _buscarPuntoMasCercano((lat as num).toDouble(), (lng as num).toDouble());
-    }
+    // --- NIVEL 2: cercanía geográfica. Se calcula SIEMPRE que haya
+    // coordenadas (no solo cuando el Nivel 1 no encontró nada), porque
+    // también sirve como candidata a ALTERNATIVA cuando el Nivel 1 sí
+    // encontró algo pero el auditor prefiere ver otra opción cercana.
+    final List<Map<String, dynamic>> dosMasCercanas =
+        tieneCoords ? _buscarDosTarjetasMasCercanas((lat as num).toDouble(), (lng as num).toDouble()) : const [];
+    final Map<String, dynamic>? cercano = dosMasCercanas.isNotEmpty ? dosMasCercanas.first : null;
 
     // Candidato ganador para esta sugerencia (Nivel 1 tiene prioridad).
     final Map<String, dynamic>? ganador = porVia ?? cercano;
     final bool porMultiCasa = porVia != null;
 
-    // Nombres legibles del territorio/tarjeta ganadores.
+    // Candidato ALTERNATIVO: la tarjeta cercana más próxima que NO sea la
+    // misma que el ganador (así siempre es una opción realmente distinta).
+    Map<String, dynamic>? alternativa;
+    if (ganador != null) {
+      for (final c in dosMasCercanas) {
+        if (c['tarjeta_id'] != ganador['tarjeta_id']) {
+          alternativa = c;
+          break;
+        }
+      }
+    }
+
+    // Nombres legibles del territorio/tarjeta ganadores y de la alternativa.
     String? territorioNombre;
     String? tarjetaNombre;
+    String? territorioNombreAlt;
+    String? tarjetaNombreAlt;
+    int cupoGanador = 0;
+    int cupoAlternativa = 0;
+    final tMeta = await _catalogo.tarjetaMeta();
     if (ganador != null) {
-      final tMeta = await _catalogo.tarjetaMeta();
       final tNombres = await _catalogo.territorioNombre();
       tarjetaNombre = tMeta[ganador['tarjeta_id']]?['nombre']?.toString();
       territorioNombre = tNombres[ganador['territorio_id']];
+      cupoGanador = (tMeta[ganador['tarjeta_id']]?['totalDirecciones'] as int?) ?? 0;
     }
+    if (alternativa != null) {
+      final tNombres = await _catalogo.territorioNombre();
+      tarjetaNombreAlt = tMeta[alternativa['tarjeta_id']]?['nombre']?.toString();
+      territorioNombreAlt = tNombres[alternativa['territorio_id']];
+      cupoAlternativa = (tMeta[alternativa['tarjeta_id']]?['totalDirecciones'] as int?) ?? 0;
+    }
+
+    // Direcciones ya existentes de cada tarjeta candidata, para el diagrama.
+    final direccionesGanador =
+        ganador != null ? _direccionesDeTarjeta(ganador['tarjeta_id'] as String) : const <Map<String, dynamic>>[];
+    final direccionesAlternativa = alternativa != null
+        ? _direccionesDeTarjeta(alternativa['tarjeta_id'] as String)
+        : const <Map<String, dynamic>>[];
 
     // --- NIVEL 3 / refuerzo: explicación enriquecida con IA (Groq). ------
     // Best-effort: si falla o no hay conexión, se usa solo la explicación
@@ -1621,88 +2153,156 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           'confianza. Elige el territorio/tarjeta manualmente abajo.';
     }
 
+    // Estado local del diálogo: si el auditor tocó "Usar esta alternativa",
+    // se destaca ella en vez del ganador original, y "Asignar aquí" apunta
+    // a la que esté activa en ese momento.
+    bool usarAlternativa = false;
+    bool verAlternativa = false;
+
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(porMultiCasa ? 'Misma dirección detectada' : 'Asignación manual'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(calle, style: const TextStyle(fontWeight: FontWeight.bold)),
-              if (barrio.isNotEmpty)
-                Text(barrio, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
-              const Divider(height: 20),
-              if (ganador != null) ...[
-                Row(children: [
-                  const Icon(Icons.map, size: 16, color: Color(0xFF1B4D2E)),
-                  const SizedBox(width: 6),
-                  Text('Territorio: ${territorioNombre ?? ganador['territorio_id']}',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                ]),
-                const SizedBox(height: 4),
-                Row(children: [
-                  const Icon(Icons.badge, size: 16, color: Color(0xFF1B4D2E)),
-                  const SizedBox(width: 6),
-                  Text('Tarjeta: ${tarjetaNombre ?? ganador['tarjeta_id']}',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                ]),
-                const SizedBox(height: 4),
-                if (porMultiCasa)
-                  Row(children: [
-                    const Icon(Icons.home_work, size: 16, color: Color(0xFF1B4D2E)),
-                    const SizedBox(width: 6),
-                    Text('${hermanas.length} dirección(es) más en el mismo predio'),
-                  ])
-                else
-                  Row(children: [
-                    const Icon(Icons.social_distance, size: 16, color: Color(0xFF1B4D2E)),
-                    const SizedBox(width: 6),
-                    Text('${(cercano!['distancia_km'] as double).toStringAsFixed(2)} km de la dirección más cercana'),
-                  ]),
-                const SizedBox(height: 10),
-              ],
-              const Text('¿Por qué es mejor local?',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-              const SizedBox(height: 4),
-              Text(explicacionLocal, style: const TextStyle(fontSize: 12)),
-              if (explicacionIA.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text('IA (Groq): $explicacionIA',
-                    style: TextStyle(
-                        fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey[700])),
-              ],
-            ],
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        final Map<String, dynamic>? activo = usarAlternativa ? alternativa : ganador;
+        final String? territorioActivo = usarAlternativa ? territorioNombreAlt : territorioNombre;
+        final String? tarjetaActiva = usarAlternativa ? tarjetaNombreAlt : tarjetaNombre;
+
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(porMultiCasa ? 'Misma dirección detectada' : 'Asignación manual'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(calle, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  if (barrio.isNotEmpty)
+                    Text(barrio, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+                  const SizedBox(height: 14),
+
+                  // --- Diagrama de la opción activa (principal o alternativa) ---
+                  if (ganador != null)
+                    _nodoSugerencia(
+                      territorioNombre: territorioActivo ?? activo!['territorio_id'] as String,
+                      tarjetaNombre: tarjetaActiva ?? activo!['tarjeta_id'] as String,
+                      direccionesExistentes: usarAlternativa ? direccionesAlternativa : direccionesGanador,
+                      nuevaDireccionTexto: calle,
+                      nuevaComplemento: (item['complemento'] ?? '').toString(),
+                      nuevaLat: tieneCoords ? (lat as num).toDouble() : null,
+                      nuevaLng: tieneCoords ? (lng as num).toDouble() : null,
+                      cupoActual: usarAlternativa ? cupoAlternativa : cupoGanador,
+                      destacado: true,
+                    ),
+
+                  if (porMultiCasa && !usarAlternativa) ...[
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      const Icon(Icons.home_work, size: 14, color: Color(0xFF1B4D2E)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text('${hermanas.length} dirección(es) más en el mismo predio',
+                            style: const TextStyle(fontSize: 11)),
+                      ),
+                    ]),
+                  ],
+
+                  const SizedBox(height: 12),
+                  const Text('¿Por qué es mejor local?',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  const SizedBox(height: 4),
+                  Text(explicacionLocal, style: const TextStyle(fontSize: 12)),
+                  if (explicacionIA.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text('IA (Groq): $explicacionIA',
+                        style: TextStyle(
+                            fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey[700])),
+                  ],
+
+                  // --- Alternativa colapsable ---
+                  if (alternativa != null) ...[
+                    const SizedBox(height: 14),
+                    const Divider(height: 1),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () => setLocal(() => verAlternativa = !verAlternativa),
+                      child: Row(
+                        children: [
+                          Icon(verAlternativa ? Icons.expand_less : Icons.expand_more,
+                              size: 18, color: Colors.grey[700]),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              verAlternativa
+                                  ? 'Ocultar alternativa'
+                                  : 'Ver alternativa: ${tarjetaNombreAlt ?? alternativa['tarjeta_id']} (${_formatDistancia(alternativa['distancia_km'] as double)})',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (verAlternativa) ...[
+                      const SizedBox(height: 8),
+                      _nodoSugerencia(
+                        territorioNombre: territorioNombreAlt ?? alternativa['territorio_id'] as String,
+                        tarjetaNombre: tarjetaNombreAlt ?? alternativa['tarjeta_id'] as String,
+                        direccionesExistentes: direccionesAlternativa,
+                        nuevaDireccionTexto: calle,
+                        nuevaComplemento: (item['complemento'] ?? '').toString(),
+                        nuevaLat: tieneCoords ? (lat as num).toDouble() : null,
+                        nuevaLng: tieneCoords ? (lng as num).toDouble() : null,
+                        cupoActual: cupoAlternativa,
+                        destacado: false,
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => setLocal(() => usarAlternativa = !usarAlternativa),
+                          icon: Icon(usarAlternativa ? Icons.check_circle : Icons.swap_horiz, size: 16),
+                          label: Text(usarAlternativa
+                              ? 'Usando la alternativa'
+                              : 'Usar esta alternativa'),
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
+              ),
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await _abrirSelectorManualTerritorioTarjeta(item);
-            },
-            child: const Text('Elegir otro territorio/tarjeta'),
-          ),
-          if (ganador != null)
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B4D2E)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
               onPressed: () async {
                 Navigator.pop(ctx);
-                await _confirmarAsignacionManual(
-                  item: item,
-                  tarjetaId: ganador['tarjeta_id'] as String,
-                  territorioId: ganador['territorio_id'] as String,
-                );
+                await _abrirSelectorManualTerritorioTarjeta(item);
               },
-              child: const Text('Asignar aquí', style: TextStyle(color: Colors.white)),
+              child: const Text('Elegir otro territorio/tarjeta'),
             ),
-        ],
-      ),
+            if (activo != null)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B4D2E)),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await _confirmarAsignacionManual(
+                    item: item,
+                    tarjetaId: activo['tarjeta_id'] as String,
+                    territorioId: activo['territorio_id'] as String,
+                  );
+                },
+                child: const Text('Asignar aquí', style: TextStyle(color: Colors.white)),
+              ),
+          ],
+        );
+      }),
     );
   }
 
@@ -2233,9 +2833,14 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
     final avance = total <= 0 ? 0.0 : (lote / total).clamp(0.0, 1.0);
 
+    // Ancho responsive: hasta 360px en pantallas anchas, pero nunca más del
+    // 90% del ancho disponible (evita overflow en celulares angostos).
+    final anchoDialogo =
+        (MediaQuery.of(context).size.width * 0.9).clamp(0.0, 360.0);
+
     return AlertDialog(
       content: SizedBox(
-        width: 360,
+        width: anchoDialogo,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2786,43 +3391,15 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       backgroundColor: const Color(0xFF151821),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1B4D2E),
-        title: const Text('Consola de Control y Auditoría', style: TextStyle(color: Colors.white, fontSize: 18)),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8, top: 8, bottom: 8),
-            child: _buildStatusBadge(),
-          ),
-          IconButton(
-            tooltip: 'Carga Masiva desde WhatsApp',
-            icon: const Icon(Icons.input, color: Colors.white),
-            onPressed: _abrirCargaMasivaWhatsApp,
-          ),
-          IconButton(
-            tooltip: _direccionesSinVinculo > 0
-                ? 'Mantenimiento: ${_direccionesSinVinculo} dirección(es) sin vínculo detectada(s)'
-                : 'Mantenimiento: limpiar direcciones huérfanas',
-            icon: Badge(
-              isLabelVisible: _direccionesSinVinculo > 0,
-              label: Text('$_direccionesSinVinculo'),
-              backgroundColor: Colors.red,
-              child: const Icon(Icons.cleaning_services, color: Colors.white),
-            ),
-            onPressed: _limpiarDireccionesHuerfanas,
-          ),
-          Row(
-            children: [
-              const Text('Auto-División', style: TextStyle(color: Colors.white, fontSize: 12)),
-              Switch(
-                value: _autoDivision,
-                activeColor: Colors.amber,
-                onChanged: (val) => setState(() => _autoDivision = val),
-              ),
-              IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _cargarConsolaDinamica),
-            ],
-          ),
-        ],
+        title: const Text(
+          'Consola de Control y Auditoría',
+          style: TextStyle(color: Colors.white, fontSize: 18),
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: _buildAppBarActions(context),
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: MediaQuery.of(context).size.width < _anchoAngostoBreakpoint,
           indicatorColor: Colors.amber,
           labelColor: Colors.amber,
           unselectedLabelColor: Colors.white70,
@@ -2874,12 +3451,17 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                         children: [
                           const Text('Progreso mensual',
                               style: TextStyle(color: Colors.white70, fontSize: 12)),
-                          Text(
-                            '$_direccionesCompletadas / $_direccionesExistentes  '
-                            '(${(_porcentajeProgresoMensual * 100).toStringAsFixed(0)}%)'
-                            '${_direccionesSinVinculo > 0 ? '  ·  ${_direccionesSinVinculo} sin vínculo' : ''}',
-                            style: const TextStyle(
-                                color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
+                          Flexible(
+                            child: Text(
+                              '$_direccionesCompletadas / $_direccionesExistentes  '
+                              '(${(_porcentajeProgresoMensual * 100).toStringAsFixed(0)}%)'
+                              '${_direccionesSinVinculo > 0 ? '  ·  ${_direccionesSinVinculo} sin vínculo' : ''}',
+                              style: const TextStyle(
+                                  color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
+                              textAlign: TextAlign.right,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       ),
@@ -3057,7 +3639,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             children: [
               Text(valor, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textCol)),
               const SizedBox(height: 2),
-              Text(titulo, style: TextStyle(fontSize: 10, color: textCol), textAlign: TextAlign.center),
+              Text(
+                titulo,
+                style: TextStyle(fontSize: 10, color: textCol),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),
@@ -3209,65 +3797,12 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             ),
           ),
         ),
-        // Pegar texto (WhatsApp desordenado) y organizar con IA.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.orange.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.shade200),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.chat, color: Colors.orange, size: 18),
-                    const SizedBox(width: 6),
-                    Text('Pegar direcciones desordenadas (WhatsApp)',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.orange.shade900)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _textoPegadoController,
-                  maxLines: 3,
-                  style: const TextStyle(fontSize: 12),
-                  decoration: InputDecoration(
-                    hintText:
-                        'Pega aquí todo el texto con las direcciones. La IA lo organiza...',
-                    filled: true,
-                    fillColor: Colors.white,
-                    isDense: true,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange.shade700,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: _organizarTextoPegado,
-                    icon: const Icon(Icons.auto_awesome, size: 16),
-                    label: const Text('Organizar con IA',
-                        style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        // El cuadro de "pegar direcciones desordenadas" se eliminó de acá:
+        // ya existe el mismo flujo (organizado por Groq) en el botón
+        // "Carga Masiva desde WhatsApp" de la barra superior, que abre
+        // WhatsAppIngestionDialog. Tenerlo duplicado acá generaba confusión
+        // visual y dos caminos distintos para lo mismo.
+
         Expanded(
           child: _nuevasDireccionesLista.isEmpty
               ? const Center(child: Text('No hay nuevas direcciones en la bandeja.'))
@@ -3379,7 +3914,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       padding: const EdgeInsets.all(12.0),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 220,
-        mainAxisExtent: 128,
+        mainAxisExtent: 144,
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
       ),
@@ -3389,6 +3924,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         final maxTarjeta = (card['maxTarjeta'] as int?) ?? 0;
         final total = (card['total'] as int?) ?? 0;
         final totalTarjetas = (card['totalTarjetas'] as int?) ?? 0;
+        // El dato ya se calculaba (línea ~1175: 'esProtegida': item['esProtegida'])
+        // pero esta tarjeta nunca lo leía, así que zonas protegidas como
+        // FARMACIAS o COMERCIOS no se distinguían visualmente en la grilla.
+        final bool esProtegida = (card['esProtegida'] as bool?) ?? false;
 
         // Nivel de saturación por la tarjeta más cargada del territorio:
         // verde (ok, <=4), amarillo (5-8), rojo (saturada, >8).
@@ -3401,6 +3940,12 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
         return Card(
           elevation: 2,
+          shape: esProtegida
+              ? RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(4),
+                  side: BorderSide(color: Colors.amber.shade700, width: 1.5),
+                )
+              : null,
           child: InkWell(
             onTap: () => _abrirDetalleTerritorio(context, card),
             borderRadius: BorderRadius.circular(4),
@@ -3429,6 +3974,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if (esProtegida)
+                        Tooltip(
+                          message: 'Zona protegida (no se cuenta como '
+                              'pendiente en el progreso mensual)',
+                          child: Icon(Icons.lock,
+                              size: 14, color: Colors.amber.shade800),
+                        ),
                     ],
                   ),
                   Text(
@@ -3436,6 +3988,23 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                     style: const TextStyle(
                         fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black87),
                   ),
+                  if (esProtegida)
+                    Container(
+                      margin: const EdgeInsets.only(top: 2, bottom: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade100,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'PROTEGIDA',
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.amber.shade900,
+                            letterSpacing: 0.5),
+                      ),
+                    ),
                   // Barra de progreso de saturación dinámica.
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
