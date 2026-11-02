@@ -149,69 +149,75 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
     setState(() => _isLoading = true);
 
     try {
-      if (FirebaseAuth.instance.currentUser == null) {
-        try {
-          await FirebaseAuth.instance.signInAnonymously();
-        } catch (_) {}
-      }
-
-      if (password != null) {
-        try {
-          await FirebaseAuth.instance.signInWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-        } on FirebaseAuthException catch (e) {
-          final code = e.code;
-          if (code == 'invalid-email') {
-            _snack('Email inválido.', Colors.red);
-            return;
-          } else if (code == 'user-disabled') {
-            _snack('Cuenta deshabilitada.', Colors.red);
-            return;
-          } else if (code == 'network-request-failed') {
-            _snack('Problema de conexión. Intenta de nuevo.', Colors.red);
-            return;
-          } else if (code == 'too-many-requests') {
-            _snack('Demasiados intentos. Espera un momento e intenta de nuevo.',
-                Colors.red);
-            return;
-          }
-
-          final snap = await _db
-              .collection('usuarios')
-              .where('email', isEqualTo: email)
-              .limit(1)
-              .get();
-
-          if (snap.docs.isEmpty) {
-            _snack('Usuario no encontrado en el directorio.', Colors.red);
-            return;
-          }
-
-          try {
-            await _migrarUsuarioAFirebaseAuth(email, password);
-          } on FirebaseAuthException catch (mig) {
-            if (mig.code == 'wrong-password' ||
-                mig.code == 'invalid-credential') {
-              _snack('Contraseña incorrecta.', Colors.red);
-            } else {
-              _snack('Error de sesión: ${mig.code}', Colors.red);
-            }
-            return;
-          }
-        }
-      } else {
-        final passGuardada = await _secureStorage!.read(key: 'biometric_pass');
-        if (passGuardada != null && passGuardada.isNotEmpty) {
-          await _loginConEmail(email, password: passGuardada);
-          return;
-        }
-        if (FirebaseAuth.instance.currentUser == null) {
+      // La biometría solo reutiliza una contraseña ya guardada. Sin esta
+      // guarda, una sesión abierta bastaba para entrar como cualquier correo
+      // del directorio sin comprobar la contraseña.
+      if (password == null) {
+        final passGuardada = await _secureStorage?.read(key: 'biometric_pass');
+        if (passGuardada == null || passGuardada.isEmpty) {
           _snack(
               'Sesión expirada. Inicia sesión con contraseña.', Colors.orange);
           return;
         }
+        await _loginConEmail(email, password: passGuardada);
+        return;
+      }
+
+      try {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } on FirebaseAuthException catch (e) {
+        final code = e.code;
+        if (code == 'invalid-email') {
+          _snack('Email inválido.', Colors.red);
+          return;
+        } else if (code == 'user-disabled') {
+          _snack('Cuenta deshabilitada.', Colors.red);
+          return;
+        } else if (code == 'network-request-failed') {
+          _snack('Problema de conexión. Intenta de nuevo.', Colors.red);
+          return;
+        } else if (code == 'too-many-requests') {
+          _snack('Demasiados intentos. Espera un momento e intenta de nuevo.',
+              Colors.red);
+          return;
+        }
+
+        // No se crea la cuenta automáticamente: cualquiera que conociera un
+        // correo del directorio podía elegir la contraseña y entrar. Las
+        // cuentas antiguas sin contraseña las restablece un administrador.
+        if (code == 'user-not-found') {
+          bool? enDirectorio;
+          try {
+            final snap = await _db
+                .collection('usuarios')
+                .where('email', isEqualTo: email)
+                .limit(1)
+                .get();
+            enDirectorio = snap.docs.isNotEmpty;
+          } catch (_) {}
+          if (enDirectorio == null) {
+            _snack('No se pudo verificar tu cuenta. Intenta de nuevo.',
+                Colors.red);
+          } else if (enDirectorio) {
+            _snack(
+              'Tu cuenta existe pero no tiene contraseña configurada. '
+              'Pide al administrador que restablezca tu acceso.',
+              Colors.red,
+            );
+          } else {
+            _snack('Usuario no encontrado en el directorio.', Colors.red);
+          }
+        } else {
+          _snack(
+            'Correo o contraseña incorrectos. Si tu cuenta es anterior, '
+            'usa "Recuperar contraseña".',
+            Colors.red,
+          );
+        }
+        return;
       }
 
       // Obtener datos del usuario desde Firestore
@@ -221,6 +227,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
           .get();
 
       if (snap.docs.isEmpty) {
+        await FirebaseAuth.instance.signOut();
         _snack('Usuario no encontrado en el directorio.', Colors.red);
         return;
       }
@@ -228,6 +235,27 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       final docSnap = snap.docs.first;
       final rawData = docSnap.data();
       final docId = docSnap.id;
+
+      // Se valida el estado antes de escribir o dejar la sesión abierta: una
+      // cuenta pendiente o desactivada no debe conservar acceso a Firestore.
+      final estado = rawData['estado'] ?? 'aprobado';
+      if (estado != 'aprobado') {
+        await FirebaseAuth.instance.signOut();
+        _snack(
+          estado == 'pendiente'
+              ? 'Cuenta pendiente de aprobación.'
+              : 'Cuenta no disponible.',
+          estado == 'pendiente' ? Colors.orange : Colors.red,
+        );
+        return;
+      }
+
+      if (rawData['activo'] == false) {
+        await FirebaseAuth.instance.signOut();
+        _snack('Cuenta desactivada. Contacta al administrador.', Colors.red);
+        return;
+      }
+
       final uid = FirebaseAuth.instance.currentUser?.uid;
 
       // Deserialización mediante UserModel con fallbacks seguros
@@ -254,17 +282,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         await docSnap.reference.update(updates);
       }
 
-      final estado = rawData['estado'] ?? 'aprobado';
-      if (estado == 'pendiente') {
-        _snack('Cuenta pendiente de aprobación.', Colors.orange);
-        return;
-      }
-
-      if (estado != 'aprobado') {
-        _snack('Cuenta no disponible.', Colors.red);
-        return;
-      }
-
       // Guardar sesión local
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('isLoggedIn', true);
@@ -272,7 +289,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
       if (_canCheckBiometrics && _secureStorage != null) {
         await _secureStorage!.write(key: 'biometric_email', value: email);
-        if (password != null && password.isNotEmpty) {
+        if (password.isNotEmpty) {
           await _secureStorage!.write(key: 'biometric_pass', value: password);
         }
       }
@@ -321,27 +338,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       return;
     }
     _loginConEmail(email, password: pass);
-  }
-
-  Future<void> _migrarUsuarioAFirebaseAuth(
-      String email, String password) async {
-    try {
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      debugPrint('✅ Usuario migrado a Firebase Auth: $email');
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'email-already-in-use') {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-      } else {
-        debugPrint('Error migrando: ${e.code}');
-        rethrow;
-      }
-    }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -398,22 +394,9 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
               if (email.isEmpty) return;
 
               try {
-                if (FirebaseAuth.instance.currentUser == null) {
-                  try {
-                    await FirebaseAuth.instance.signInAnonymously();
-                  } catch (_) {}
-                }
-
-                final snap = await _db
-                    .collection('usuarios')
-                    .where('email', isEqualTo: email)
-                    .get();
-
-                if (snap.docs.isEmpty) {
-                  _snack('Email no registrado en el directorio.', Colors.red);
-                  return;
-                }
-
+                // No requiere sesión: si la cuenta aún no existe en Auth
+                // (usuario legado), Firebase responde user-not-found y se
+                // deriva la solicitud al administrador.
                 await FirebaseAuth.instance
                     .sendPasswordResetEmail(email: email);
                 if (c.mounted) Navigator.pop(c);
@@ -679,17 +662,27 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                   _snack('Completa todos los campos.', Colors.orange);
                   return;
                 }
-                try {
-                  final emailNorm = emailCtrl.text.trim().toLowerCase();
-                  final pass = passCtrl.text.trim();
+                final emailNorm = emailCtrl.text.trim().toLowerCase();
+                final nombre = nomCtrl.text.trim();
+                final pass = passCtrl.text.trim();
+                User? creado;
+                bool yaExistia = false;
 
+                try {
+                  // La cuenta se crea primero porque las reglas solo permiten
+                  // consultar `usuarios` con una sesión real. Si el correo ya
+                  // figura en el directorio, la cuenta recién creada se borra
+                  // y se cierra la sesión para no dejar una vía de acceso.
                   try {
-                    await FirebaseAuth.instance.createUserWithEmailAndPassword(
+                    final cred = await FirebaseAuth.instance
+                        .createUserWithEmailAndPassword(
                       email: emailNorm,
                       password: pass,
                     );
+                    creado = cred.user;
                   } on FirebaseAuthException catch (e) {
                     if (e.code != 'email-already-in-use') rethrow;
+                    yaExistia = true;
                   }
 
                   final existentes = await _db
@@ -701,6 +694,12 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     final estadoExistente =
                         (existentes.docs.first.data()['estado'] as String?) ??
                             'pendiente';
+                    if (creado != null) {
+                      try {
+                        await creado.delete();
+                      } catch (_) {}
+                    }
+                    await FirebaseAuth.instance.signOut();
                     if (c.mounted) Navigator.pop(c);
                     if (estadoExistente == 'aprobado') {
                       _snack(
@@ -714,8 +713,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     return;
                   }
 
-                  await _db.collection('usuarios').add({
-                    'nombre': nomCtrl.text.trim(),
+                  final solicitud = <String, dynamic>{
+                    'nombre': nombre,
                     'email': emailNorm,
                     'rol': 'publicador',
                     'estado': 'pendiente',
@@ -725,25 +724,41 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                     'es_publicador': true,
                     'idioma': 'es',
                     'created_at': FieldValue.serverTimestamp(),
-                  });
+                    if (creado != null) 'uid': creado.uid,
+                  };
+                  if (creado != null) {
+                    await _db
+                        .collection('usuarios')
+                        .doc(creado.uid)
+                        .set(solicitud);
+                  } else {
+                    await _db.collection('usuarios').add(solicitud);
+                  }
 
                   await NotificacionService.enviarAAdmins(
                     titulo: '👤 Nueva solicitud de acceso',
-                    cuerpo:
-                        '${nomCtrl.text.trim()} solicita acceso a la app. Toca para aprobar.',
+                    cuerpo: '$nombre solicita acceso a la app. Toca para aprobar.',
                     tipo: TipoNotificacion.solicitudAcceso,
                     extra: {
-                      'solicitante_nombre': nomCtrl.text.trim(),
-                      'solicitante_email': emailCtrl.text.trim(),
+                      'solicitante_nombre': nombre,
+                      'solicitante_email': emailNorm,
                       'screen': 'usuarios_pendientes',
                       'tipo': 'solicitud_acceso',
                     },
                   );
 
+                  await FirebaseAuth.instance.signOut();
                   if (c.mounted) Navigator.pop(c);
                   _snack(context.t('request_sent'), _verde);
                 } catch (e) {
-                  _snack('Error: $e', Colors.red);
+                  await FirebaseAuth.instance.signOut();
+                  if (yaExistia) {
+                    _snack(
+                        'Ese correo ya está registrado. Inicia sesión o usa "Recuperar contraseña".',
+                        Colors.orange);
+                  } else {
+                    _snack('Error: $e', Colors.red);
+                  }
                 }
               },
               style: ElevatedButton.styleFrom(backgroundColor: _verde),

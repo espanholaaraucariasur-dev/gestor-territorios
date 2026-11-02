@@ -33,7 +33,7 @@ service cloud.firestore {
     }
 
     // --- Colecciones de mantenimiento ---
-    // Tarjetas - requiere desbloqueo PIN 272700 (manejado en cliente)
+    // Tarjetas - el desbloqueo se valida en cliente
     match /territorios/{terId}/tarjetas/{tarjetaId} {
       allow read, write: if sesionReal();
     }
