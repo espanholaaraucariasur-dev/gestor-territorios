@@ -70,5 +70,13 @@
 			<string>UIInterfaceOrientationLandscapeLeft</string>
 			<string>UIInterfaceOrientationLandscapeRight</string>
 		</array>
+
+	<!-- AGREGAR ESTAS LÍNEAS PARA MAPAS EN IOS -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>https</string>
+		<string>http</string>
+		<string>comgooglemaps</string>
+	</array>
 </dict>
 </plist>

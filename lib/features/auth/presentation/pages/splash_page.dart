@@ -115,7 +115,7 @@ class _SplashPageState extends State<SplashPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => PantallaHomeLegacy(
+            builder: (_) => TerritoriosTab(
               usuarioData: _conDocId(snap.docs.first),
             ),
           ),
@@ -130,15 +130,15 @@ class _SplashPageState extends State<SplashPage> {
             .where('email', isEqualTo: email)
             .get(const GetOptions(source: Source.cache));
         if (snap.docs.isNotEmpty && mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PantallaHomeLegacy(
-                usuarioData: _conDocId(snap.docs.first),
+Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TerritoriosTab(
+                  usuarioData: _conDocId(snap.docs.first),
+                ),
               ),
-            ),
-          );
-          return;
+            );
+            return;
         }
       } catch (_) {}
     }

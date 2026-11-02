@@ -1,17 +1,20 @@
-// eslint-disable-next-line prefer-const
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:flutter/foundation.dart';
-import '../../../../../core/services/notificacion_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
-// Servicios
-import '../../../../../core/services/mapbox_service.dart';
-import '../../../../../core/services/auto_return_service.dart';
-// Traducciones
-import '../../../../../core/l10n/translation_service.dart';
+
+// Servicios Core
+import 'package:araucaria_sur/core/services/notificacion_service.dart';
+import 'package:araucaria_sur/core/services/mapbox_service.dart';
+import 'package:araucaria_sur/core/services/auto_return_service.dart';
+import 'package:araucaria_sur/core/services/map_launcher_service.dart';
+
+// Temas y Traducciones
+import 'package:araucaria_sur/core/themes/theme_extensions.dart';
+import 'package:araucaria_sur/core/l10n/translation_service.dart';
+
+// Componentes locales
 import 'enviar_direccion_card.dart';
 
 class PublicadorTab extends StatefulWidget {
@@ -21,7 +24,7 @@ class PublicadorTab extends StatefulWidget {
   final String nombreCampanaEspecial;
   final bool campanaGeneralActiva;
   final String anuncioGeneral;
-  final VoidCallback onSolicitarTerritorio; // ✅ nuevo
+  final VoidCallback onSolicitarTerritorio;
 
   const PublicadorTab({
     super.key,
@@ -31,7 +34,7 @@ class PublicadorTab extends StatefulWidget {
     required this.nombreCampanaEspecial,
     required this.campanaGeneralActiva,
     required this.anuncioGeneral,
-    required this.onSolicitarTerritorio, // ✅ nuevo
+    required this.onSolicitarTerritorio,
   });
 
   @override
@@ -56,8 +59,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
   final Map<String, Map<String, String>> _textosPorTarjeta = {};
   final Map<String, Map<String, bool>> _modificadosPorTarjeta = {};
   final Set<String> _tarjetasCompletadas = {};
-  final Map<String, bool> selectedAddresses = {};
-  List<Marker> _markers = [];
 
   @override
   void initState() {
@@ -71,14 +72,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
             backgroundColor: color,
             duration: const Duration(seconds: 8),
           ),
-        );
-        // Guardar aviso en Firestore
-        NotificacionService.enviarAUser(
-          destinatarioNombre:
-              widget.usuarioData['nombre']?.toString() ?? widget.usuarioEmail,
-          titulo: '⏰ Aviso de devolución',
-          cuerpo: mensaje,
-          tipo: TipoNotificacion.avisoDevolucion,
         );
       }
     };
@@ -123,12 +116,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
   }
 
   // ───────────────────────────────────────────────────────────
-  // HELPERS
+  // HELPERS & STREAMS
   // ───────────────────────────────────────────────────────────
-
-  // ─────────────────────────────────────────────────────────
-  // STREAM DE TARJETAS — sin collectionGroup (no requiere indice)
-  // ─────────────────────────────────────────────────────────
 
   Stream<QuerySnapshot> _buildTarjetasStream() {
     final nombre = widget.usuarioData['nombre']?.toString() ?? '';
@@ -157,23 +146,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
     } catch (_) {
       return {};
     }
-  }
-
-  List<Marker> _buildMarkers() {
-    final markers = <Marker>[];
-    selectedAddresses.forEach((addressId, isSelected) {
-      if (isSelected) {
-        // Encontrar la dirección correspondiente y crear marker
-        // This is a simplified implementation - actual implementation
-        // would need to map addressId to coordinates
-        markers.add(Marker(
-          markerId: MarkerId('addr_$addressId'),
-          position: LatLng(0, 0), // placeholder
-          infoWindow: InfoWindow(title: 'Dirección $addressId'),
-        ));
-      }
-    });
-    return markers;
   }
 
   // ───────────────────────────────────────────────────────────
@@ -292,13 +264,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
   }
 
   // ───────────────────────────────────────────────────────────
-  // DEVOLVER TARJETA
+  // DEVOLVER TARJETA Y MOTIVACIONALES
   // ───────────────────────────────────────────────────────────
 
   Future<void> _devolverTarjeta(String territorioId, String tarjetaId) async {
     final nombre = widget.usuarioData['nombre'] as String? ?? widget.usuarioEmail;
     try {
-      // Actualizar tarjeta con estado devuelta
       await FirebaseFirestore.instance
           .collection('territorios')
           .doc(territorioId)
@@ -318,7 +289,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
         'completada': false,
       });
 
-      // Notificar a admins de territorios
       await NotificacionService.enviarAAdminTerritorios(
         titulo: '↩️ Tarjeta devuelta',
         cuerpo: '$nombre devolvió la tarjeta "$tarjetaId"',
@@ -333,7 +303,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
           backgroundColor: Colors.orange,
         ),
       );
-      // Verificar si ya terminó todas → programar motivacional
       _programarMensajeMotivacional();
     } catch (e) {
       if (!mounted) return;
@@ -346,38 +315,28 @@ class _PublicadorTabState extends State<PublicadorTab> {
     }
   }
 
-  // Programa un mensaje motivacional en Firestore — se envía al verificar al iniciar
   Future<void> _programarMensajeMotivacional() async {
     try {
       final nombre = widget.usuarioData['nombre'] as String? ?? '';
       final email = widget.usuarioEmail;
       if (nombre.isEmpty) return;
 
-      // Verificar si aún tiene tarjetas activas
       final activas = await FirebaseFirestore.instance
           .collectionGroup('tarjetas')
           .where('asignado_a', isEqualTo: nombre)
           .where('completada', isEqualTo: false)
           .get();
 
-      // Si ya no tiene tarjetas, programar mensaje para dentro de 5 min
       if (activas.docs.isEmpty) {
-        // Verificar si ya hay una tarea pendiente o enviada recientemente
         final tareaExistente = await FirebaseFirestore.instance
             .collection('tareas_motivacionales').doc(email).get();
 
         if (tareaExistente.exists) {
           final t = tareaExistente.data() as Map<String, dynamic>;
-          // No sobrescribir si ya está programado o enviado recientemente
-          if (t['enviado'] != true) {
-            debugPrint('📅 Ya hay tarea motivacional pendiente — no crear otra');
-            return;
-          }
-          // Si ya fue enviado, verificar cooldown de 2h
+          if (t['enviado'] != true) return;
           final ultimoEnvio = (t['ultimo_envio'] as Timestamp?)?.toDate();
           if (ultimoEnvio != null &&
               DateTime.now().difference(ultimoEnvio).inHours < 2) {
-            debugPrint('⏳ Cooldown activo — no programar nuevo mensaje');
             return;
           }
         }
@@ -393,9 +352,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
           'enviado': false,
           'created_at': FieldValue.serverTimestamp(),
         });
-        debugPrint('📅 Mensaje motivacional programado para $nombre en 5 min');
 
-        // Future.delayed como respaldo (solo uno por llamada)
         Future.delayed(const Duration(minutes: 5), () => _enviarMensajeMotivacional());
       }
     } catch (e) {
@@ -403,62 +360,45 @@ class _PublicadorTabState extends State<PublicadorTab> {
     }
   }
 
-  // Envía el mensaje motivacional si la tarea está pendiente
   Future<void> _enviarMensajeMotivacional() async {
     try {
       final nombre = widget.usuarioData['nombre'] as String? ?? '';
       final email = widget.usuarioEmail;
       if (nombre.isEmpty) return;
 
-      // Verificar que la tarea aún existe y no fue enviada
       final tareaDoc = await FirebaseFirestore.instance
           .collection('tareas_motivacionales').doc(email).get();
       if (!tareaDoc.exists) return;
       final tarea = tareaDoc.data() as Map<String, dynamic>;
       if (tarea['enviado'] == true) return;
 
-      // Cooldown: no enviar si ya se envió uno en las últimas 2 horas
       final ultimoEnvio = (tarea['ultimo_envio'] as Timestamp?)?.toDate();
       if (ultimoEnvio != null &&
           DateTime.now().difference(ultimoEnvio).inHours < 2) {
-        debugPrint('⏳ Cooldown motivacional activo — último envío hace ${DateTime.now().difference(ultimoEnvio).inMinutes} min');
         return;
       }
 
-      // Verificar que sigue sin tarjetas
       final activas = await FirebaseFirestore.instance
           .collectionGroup('tarjetas')
           .where('asignado_a', isEqualTo: nombre)
           .where('completada', isEqualTo: false)
           .get();
       if (activas.docs.isNotEmpty) {
-        // Recibió nueva tarjeta — cancelar
         await FirebaseFirestore.instance
             .collection('tareas_motivacionales').doc(email).delete();
         return;
       }
 
-      // Obtener mensaje aleatorio activo
       final msgsSnap = await FirebaseFirestore.instance
           .collection('configuracion').doc('mensajes_motivacionales')
           .collection('mensajes').where('activo', isEqualTo: true).get();
-      if (msgsSnap.docs.isEmpty) return; // sin mensajes configurados → no enviar nada
+      if (msgsSnap.docs.isEmpty) return;
 
       final idx = DateTime.now().millisecondsSinceEpoch % msgsSnap.docs.length;
       final msgData = msgsSnap.docs[idx].data();
-      final texto = (msgData['texto'] as String? ?? '')
-          .replaceAll('{nombre}', nombre);
+      final texto = (msgData['texto'] as String? ?? '').replaceAll('{nombre}', nombre);
       if (texto.isEmpty) return;
 
-      // Enviar solo el mensaje configurado, sin título redundante
-      await NotificacionService.enviarAUser(
-        destinatarioNombre: nombre,
-        titulo: '🌟 Mensaje para ti',
-        cuerpo: texto,
-        tipo: TipoNotificacion.motivacional,
-      );
-
-      // Marcar tarea como enviada con timestamp para cooldown
       await FirebaseFirestore.instance
           .collection('tareas_motivacionales').doc(email)
           .update({
@@ -521,7 +461,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                 final direcciones = snapshot.data!.docs;
 
-                // Ordenar: prioridades del mes anterior primero
                 final dirs = [...direcciones];
                 dirs.sort((a, b) {
                   final aP = (_safeData(a)['prioridad_mes_anterior'] as bool?) == true ? 0 : 1;
@@ -545,7 +484,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                 return Column(
                   children: [
-                    // Banner de prioridades si hay pendientes del mes anterior
                     if (cantPrioridad > 0)
                       Container(
                         margin: const EdgeInsets.only(bottom: 8),
@@ -567,7 +505,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         ]),
                       ),
 
-                    // ── Lista de direcciones ──────────────────
                     ...dirs.map((dirDoc) {
                       final data = _safeData(dirDoc);
                       final estadoLocal =
@@ -617,7 +554,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         ),
                         child: Column(
                           children: [
-                            // Borde superior de color
                             Container(
                               height: 4,
                               decoration: BoxDecoration(
@@ -634,7 +570,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // Cabecera
                                   Row(
                                     children: [
                                       Icon(Icons.location_on,
@@ -666,7 +601,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     ],
                                   ),
 
-                                  // Complemento
                                   if (complemento.isNotEmpty) ...[
                                     const SizedBox(height: 4),
                                     Row(children: [
@@ -686,7 +620,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     ]),
                                   ],
 
-                                  // Detalles / observaciones
                                   if (detalles.isNotEmpty) ...[
                                     const SizedBox(height: 4),
                                     Container(
@@ -716,7 +649,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     ),
                                   ],
 
-                                  // Badge prioridad mes anterior
                                   if (esPrioridad) ...[
                                     const SizedBox(height: 4),
                                     Container(
@@ -740,7 +672,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                   Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
                                   const SizedBox(height: 8),
 
-                                  // ── Opciones de predicación ──
                                   ...[
                                     {
                                       'label': 'Se predicó',
@@ -773,53 +704,37 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
                                     return InkWell(
                                       onTap: () => setLocalState(() {
-                                        _estadosPorTarjeta[tarjetaId]![
-                                            dirDoc.id] = val;
-                                        _modificadosPorTarjeta[tarjetaId]![
-                                            dirDoc.id] = true;
+                                        _estadosPorTarjeta[tarjetaId]![dirDoc.id] = val;
+                                        _modificadosPorTarjeta[tarjetaId]![dirDoc.id] = true;
                                       }),
                                       borderRadius: BorderRadius.circular(8),
                                       child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 3),
+                                        padding: const EdgeInsets.symmetric(vertical: 3),
                                         child: Row(
                                           children: [
                                             Radio<String>(
                                               value: val,
                                               groupValue: estadoLocal,
-                                              onChanged: (v) =>
-                                                  setLocalState(() {
-                                                _estadosPorTarjeta[tarjetaId]![
-                                                    dirDoc.id] = v!;
-                                                _modificadosPorTarjeta[
-                                                        tarjetaId]![dirDoc.id] =
-                                                    true;
+                                              onChanged: (v) => setLocalState(() {
+                                                _estadosPorTarjeta[tarjetaId]![dirDoc.id] = v!;
+                                                _modificadosPorTarjeta[tarjetaId]![dirDoc.id] = true;
                                               }),
                                               activeColor: color,
-                                              materialTapTargetSize:
-                                                  MaterialTapTargetSize
-                                                      .shrinkWrap,
-                                              visualDensity:
-                                                  VisualDensity.compact,
+                                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              visualDensity: VisualDensity.compact,
                                             ),
                                             Icon(
                                               opcion['icon'] as IconData,
                                               size: 16,
-                                              color: isSelected
-                                                  ? color
-                                                  : Colors.grey.shade400,
+                                              color: isSelected ? color : Colors.grey.shade400,
                                             ),
                                             const SizedBox(width: 6),
                                             Text(
                                               opcion['label'] as String,
                                               style: TextStyle(
                                                 fontSize: 13,
-                                                fontWeight: isSelected
-                                                    ? FontWeight.w600
-                                                    : FontWeight.w400,
-                                                color: isSelected
-                                                    ? color
-                                                    : const Color(0xFF546E7A),
+                                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                                color: isSelected ? color : const Color(0xFF546E7A),
                                               ),
                                             ),
                                           ],
@@ -828,26 +743,19 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     );
                                   }).toList(),
 
-                                  // Campo texto para "Otro"
                                   if (estadoLocal == 'otro')
                                     Padding(
-                                      padding: const EdgeInsets.only(
-                                          left: 36, top: 6, bottom: 4),
+                                      padding: const EdgeInsets.only(left: 36, top: 6, bottom: 4),
                                       child: TextField(
-                                        controller: TextEditingController(
-                                            text: otroTexto)
-                                          ..selection =
-                                              TextSelection.fromPosition(
-                                            TextPosition(
-                                                offset: otroTexto.length),
+                                        controller: TextEditingController(text: otroTexto)
+                                          ..selection = TextSelection.fromPosition(
+                                            TextPosition(offset: otroTexto.length),
                                           ),
                                         decoration: InputDecoration(
                                           hintText: 'Escribe el motivo...',
                                           border: OutlineInputBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                            borderSide: BorderSide(
-                                                color: Colors.purple.shade200),
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: BorderSide(color: Colors.purple.shade200),
                                           ),
                                           isDense: true,
                                           filled: true,
@@ -855,35 +763,28 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         ),
                                         maxLines: 2,
                                         onChanged: (value) => setLocalState(() {
-                                          _textosPorTarjeta[tarjetaId]![
-                                              dirDoc.id] = value;
+                                          _textosPorTarjeta[tarjetaId]![dirDoc.id] = value;
                                         }),
                                       ),
                                     ),
 
-                                  // ── Checkboxes de campaña ────
                                   if (campanasActivas.isNotEmpty) ...[
                                     const SizedBox(height: 8),
                                     Container(
                                       padding: const EdgeInsets.all(10),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFE65100)
-                                            .withOpacity(0.05),
+                                        color: const Color(0xFFE65100).withOpacity(0.05),
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(
-                                          color: const Color(0xFFE65100)
-                                              .withOpacity(0.2),
+                                          color: const Color(0xFFE65100).withOpacity(0.2),
                                         ),
                                       ),
                                       child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Row(
                                             children: [
-                                              const Icon(Icons.campaign,
-                                                  color: Color(0xFFE65100),
-                                                  size: 14),
+                                              const Icon(Icons.campaign, color: Color(0xFFE65100), size: 14),
                                               const SizedBox(width: 4),
                                               const Text(
                                                 'Campaña especial',
@@ -904,49 +805,27 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                           ),
                                           const SizedBox(height: 6),
                                           ...campanasActivas.map((campDoc) {
-                                            final campData = (campDoc.data()
-                                                    as Map<String, dynamic>?) ??
-                                                {};
-                                            final campNombre =
-                                                (campData['nombre']
-                                                        as String?) ??
-                                                    'Campaña';
-                                            final campKey =
-                                                'campana_inv_${campNombre}_${dirDoc.id}';
-                                            final marcada = _estadosPorTarjeta[
-                                                    tarjetaId]![campKey] ==
-                                                'true';
+                                            final campData = (campDoc.data() as Map<String, dynamic>?) ?? {};
+                                            final campNombre = (campData['nombre'] as String?) ?? 'Campaña';
+                                            final campKey = 'campana_inv_${campNombre}_${dirDoc.id}';
+                                            final marcada = _estadosPorTarjeta[tarjetaId]![campKey] == 'true';
 
                                             return InkWell(
                                               onTap: () => setLocalState(() {
-                                                _estadosPorTarjeta[tarjetaId]![
-                                                        campKey] =
-                                                    marcada ? 'false' : 'true';
+                                                _estadosPorTarjeta[tarjetaId]![campKey] = marcada ? 'false' : 'true';
                                               }),
                                               child: Padding(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        vertical: 2),
+                                                padding: const EdgeInsets.symmetric(vertical: 2),
                                                 child: Row(
                                                   children: [
                                                     Checkbox(
                                                       value: marcada,
-                                                      onChanged: (v) =>
-                                                          setLocalState(() {
-                                                        _estadosPorTarjeta[
-                                                                    tarjetaId]![
-                                                                campKey] =
-                                                            v == true
-                                                                ? 'true'
-                                                                : 'false';
+                                                      onChanged: (v) => setLocalState(() {
+                                                        _estadosPorTarjeta[tarjetaId]![campKey] = v == true ? 'true' : 'false';
                                                       }),
-                                                      activeColor: const Color(
-                                                          0xFFE65100),
-                                                      materialTapTargetSize:
-                                                          MaterialTapTargetSize
-                                                              .shrinkWrap,
-                                                      visualDensity:
-                                                          VisualDensity.compact,
+                                                      activeColor: const Color(0xFFE65100),
+                                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                      visualDensity: VisualDensity.compact,
                                                     ),
                                                     const SizedBox(width: 4),
                                                     Expanded(
@@ -954,15 +833,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                                         'Invitación entregada — $campNombre',
                                                         style: TextStyle(
                                                           fontSize: 12,
-                                                          color: marcada
-                                                              ? const Color(
-                                                                  0xFFE65100)
-                                                              : Colors
-                                                                  .grey[600],
-                                                          fontWeight: marcada
-                                                              ? FontWeight.w600
-                                                              : FontWeight
-                                                                  .normal,
+                                                          color: marcada ? const Color(0xFFE65100) : Colors.grey[600],
+                                                          fontWeight: marcada ? FontWeight.w600 : FontWeight.normal,
                                                         ),
                                                       ),
                                                     ),
@@ -983,17 +855,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       );
                     }).toList(),
 
-                    // ── Botones ──────────────────────────────
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                       child: Column(
                         children: [
-                          // Botón Ver Ruta
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
-onPressed: () =>
-                              _abrirRutaGoogleMapsConPestana(direcciones),
+                              onPressed: () => _abrirRutaGoogleMaps(direcciones),
                               icon: const Icon(Icons.map_outlined, size: 18),
                               label: const Text('Ver ruta en Google Maps',
                                   style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1007,57 +876,46 @@ onPressed: () =>
                           const SizedBox(height: 10),
                           Row(
                             children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => setLocalState(() {
-                                for (final dir in direcciones) {
-                                  final data = _safeData(dir);
-                                  _estadosPorTarjeta[tarjetaId]![dir.id] =
-                                      (data['estado_predicacion'] as String?) ??
-                                          'pendiente';
-                                  _textosPorTarjeta[tarjetaId]![dir.id] =
-                                      (data['motivo_temporal'] as String?) ??
-                                          '';
-                                  _modificadosPorTarjeta[tarjetaId]![dir.id] =
-                                      false;
-                                }
-                              }),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.black54,
-                                side: const BorderSide(color: Colors.black26),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 12),
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () => setLocalState(() {
+                                    for (final dir in direcciones) {
+                                      final data = _safeData(dir);
+                                      _estadosPorTarjeta[tarjetaId]![dir.id] = (data['estado_predicacion'] as String?) ?? 'pendiente';
+                                      _textosPorTarjeta[tarjetaId]![dir.id] = (data['motivo_temporal'] as String?) ?? '';
+                                      _modificadosPorTarjeta[tarjetaId]![dir.id] = false;
+                                    }
+                                  }),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.black54,
+                                    side: const BorderSide(color: Colors.black26),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                  child: const Text('Cancelar'),
+                                ),
                               ),
-                              child: const Text('Cancelar'),
-                            ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                flex: 2,
+                                child: ElevatedButton.icon(
+                                  onPressed: () async => _confirmarProcesamientoTarjeta(
+                                    tarjetaId,
+                                    territorioId,
+                                    tarjetaNombre,
+                                    direcciones,
+                                    context,
+                                  ),
+                                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                                  label: const Text('Confirmar', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF1B5E20),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            flex: 2,
-                            child: ElevatedButton.icon(
-                              onPressed: () async =>
-                                  _confirmarProcesamientoTarjeta(
-                                tarjetaId,
-                                territorioId,
-                                tarjetaNombre,
-                                direcciones,
-                                context,
-                              ),
-                              icon: const Icon(Icons.check_circle_outline,
-                                  size: 18),
-                              label: const Text('Confirmar',
-                                  style:
-                                      TextStyle(fontWeight: FontWeight.bold)),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF1B5E20),
-                                foregroundColor: Colors.white,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 14),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
                         ],
                       ),
                     ),
@@ -1075,7 +933,7 @@ onPressed: () =>
   // RUTA GOOGLE MAPS
   // ───────────────────────────────────────────────────────────
 
-  Future<void> _abrirRutaGoogleMapsConPestana(List<QueryDocumentSnapshot> direcciones) async {
+  Future<void> _abrirRutaGoogleMaps(List<QueryDocumentSnapshot> direcciones) async {
     if (direcciones.isEmpty) return;
 
     if (mounted) {
@@ -1087,12 +945,10 @@ onPressed: () =>
       );
     }
 
-    // 1. Obtener ubicación del usuario
     String? origenCoords;
     try {
       final permiso = await Geolocator.requestPermission();
-      if (permiso == LocationPermission.always ||
-          permiso == LocationPermission.whileInUse) {
+      if (permiso == LocationPermission.always || permiso == LocationPermission.whileInUse) {
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
@@ -1103,8 +959,6 @@ onPressed: () =>
       }
     } catch (_) {}
 
-    // 2. Obtener coordenadas de cada dirección
-    // Primero intentar desde Firestore (ya guardadas), sino geocodificar
     final List<String> coordsDirecciones = [];
 
     for (final doc in direcciones) {
@@ -1112,39 +966,30 @@ onPressed: () =>
       final lat = data['lat'];
       final lng = data['lng'];
 
-      if (lat != null && lng != null &&
-          lat.toString() != '0' && lng.toString() != '0') {
-        // Coordenadas ya guardadas en Firestore
+      if (lat != null && lng != null && lat.toString() != '0' && lng.toString() != '0') {
         coordsDirecciones.add('$lat,$lng');
       } else {
-        // Geocodificar con Mapbox
         final calle = (data['calle'] as String? ?? '').trim();
         final comp = (data['complemento'] as String? ?? '').trim();
         final texto = comp.isNotEmpty ? '$calle, $comp' : calle;
 
         final coords = await MapboxService.geocodificar(texto);
         if (coords != null) {
-          // Guardar en Firestore para la próxima vez
           FirebaseFirestore.instance
               .collection('direcciones_globales')
               .doc(doc.id)
               .update({'lat': coords[0], 'lng': coords[1]});
           coordsDirecciones.add('${coords[0]},${coords[1]}');
         } else {
-          // Fallback: usar texto si no se pudo geocodificar
-          final full = comp.isNotEmpty
-              ? '$calle, $comp, Araucária, PR'
-              : '$calle, Araucária, PR';
+          final full = comp.isNotEmpty ? '$calle, $comp, Araucária, PR' : '$calle, Araucária, PR';
           coordsDirecciones.add(Uri.encodeQueryComponent(full).replaceAll('+', '%20'));
         }
       }
     }
 
     if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
-
     if (coordsDirecciones.isEmpty) return;
 
-    // 3. Construir URL de Google Maps con coordenadas exactas
     String urlString;
     final origen = origenCoords != null ? '&origin=$origenCoords' : '';
 
@@ -1154,7 +999,6 @@ onPressed: () =>
           '&travelmode=walking';
     } else {
       final destino = coordsDirecciones.last;
-      // Waypoints = todas menos la última, separadas por | LITERAL
       final waypoints = coordsDirecciones
           .sublist(0, coordsDirecciones.length - 1)
           .join('|');
@@ -1165,41 +1009,14 @@ onPressed: () =>
           '&travelmode=walking';
     }
 
-    // En iOS, con un solo destino se prefiere Apple Maps; el resto usa Google Maps
-    // y se fuerza una pestaña nueva. Usamos la pestaña ya abierta.
-    if (defaultTargetPlatform == TargetPlatform.iOS &&
-        coordsDirecciones.length == 1) {
-      final latLng = coordsDirecciones.first;
-      final appleUri = Uri.parse('https://maps.apple.com/?q=$latLng');
-      try {
-        final ok = await launchUrl(appleUri,
-            mode: LaunchMode.externalApplication,
-            webOnlyWindowName: '_blank');
-        if (ok) return;
-      } catch (_) {}
-    }
-
-    // Abrir Google Maps en la pestaña ya existente (solución para iOS)
-    try {
-      // Google Maps URL para todas las plataformas
-      final String urlGoogleMaps = urlString;
-      final ok = await launchUrl(
-        Uri.parse(urlGoogleMaps),
-        mode: LaunchMode.externalApplication,
-        webOnlyWindowName: '_blank');
-      if (!ok && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No se pudo abrir el mapa'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } catch (_) {
+    final uri = Uri.parse(urlString);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No se pudo abrir el mapa'),
+            content: Text('No se pudo abrir Google Maps'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1207,47 +1024,7 @@ onPressed: () =>
     }
   }
 
-
-  // MANEJO DE DIRECCIONES TOGGLED
-
-  void _onAddressToggled(String addressId, bool isSelected) {
-    setState(() {
-      selectedAddresses[addressId] = isSelected;
-      _markers = _buildMarkers();
-    });
-  }
-
   // ───────────────────────────────────────────────────────────
-  // REINTENTAR ENVIO RUTA
-  // ───────────────────────────────────────────────────────────
-
-  void reintentarEnvioRuta(String url) async {
-    try {
-      final uri = Uri.parse(url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No se puede abrir la URL'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al reintentar: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
   // CONFIRMAR PROCESAMIENTO
   // ───────────────────────────────────────────────────────────
 
@@ -1260,14 +1037,12 @@ onPressed: () =>
     final estados = _estadosPorTarjeta[tarjetaId] ?? {};
     final textos = _textosPorTarjeta[tarjetaId] ?? {};
 
-    // Validar que todas tengan estado
     for (final dir in direcciones) {
       final estado = estados[dir.id];
       if (estado == null || estado == 'pendiente' || estado.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content:
-                Text('Debes seleccionar un estado para todas las direcciones'),
+            content: Text('Debes seleccionar un estado para todas las direcciones'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -1289,8 +1064,7 @@ onPressed: () =>
       builder: (c) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Confirmar procesamiento'),
-        content: Text(
-            '¿Procesar las ${direcciones.length} direcciones de "$tarjetaNombre"?'),
+        content: Text('¿Procesar las ${direcciones.length} direcciones de "$tarjetaNombre"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
@@ -1298,8 +1072,7 @@ onPressed: () =>
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5E20)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
             child: const Text('Confirmar'),
           ),
         ],
@@ -1310,21 +1083,17 @@ onPressed: () =>
     try {
       final db = FirebaseFirestore.instance;
       final ahora = DateTime.now();
-      final mesActual =
-          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+      final mesActual = '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
 
       final batch = db.batch();
 
-      // Nombre del territorio consistente para toda la tarjeta
       final terDoc = await db.collection('territorios').doc(territorioId).get();
       final territorioNombreGlobal = (terDoc.data()?['nombre'] as String?)?.isNotEmpty == true
           ? terDoc.data()!['nombre'] as String
           : territorioId;
 
-      // Mapa de folders ya verificados: nombre_territorio → {id, existe}
       final Map<String, String> folderIdPorTerritorio = {};
 
-      // Pre-cargar folders existentes para evitar duplicados
       final foldersExistentes = await db
           .collection('territorios')
           .doc('temporales')
@@ -1338,7 +1107,6 @@ onPressed: () =>
         if (terId.isNotEmpty) folderIdPorTerritorio[terId] = f.id;
       }
 
-      // Mapa de folders ya verificados en esta operación
       final Map<String, bool> foldersVerificados = {};
 
       for (final dir in direcciones) {
@@ -1349,16 +1117,14 @@ onPressed: () =>
         final complemento = (data['complemento'] as String?) ?? '';
         final territorioNombre = territorioNombreGlobal;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
-        // Si la dirección ya es temporal, preservar el origen original
+
         final origenReal = (data['tarjeta_id_origen'] as String?)?.isNotEmpty == true
             ? data['tarjeta_id_origen'] as String
             : tarjetaIdOriginal;
 
-        // Territorio de origen REAL — nunca 'temporales'
         String territorioOrigenId = (data['territorio_origen_id'] as String?) ?? '';
         String territorioOrigenNombre = (data['territorio_origen_nombre'] as String?) ?? '';
 
-        // Si no tiene origen explícito o el territorio actual es real (no temporal)
         if (territorioOrigenId.isEmpty || territorioOrigenId == 'temporales') {
           territorioOrigenId = territorioId == 'temporales'
               ? (data['territorio_id'] as String? ?? territorioId)
@@ -1370,32 +1136,26 @@ onPressed: () =>
               : territorioNombre;
         }
 
-        // Buscar si ya existe un folder para este territorio
-        // Primero por ID, luego por nombre — evita duplicados
         String folderDocId = folderIdPorTerritorio[territorioOrigenId]
             ?? folderIdPorTerritorio[territorioOrigenNombre]
             ?? territorioOrigenId;
 
-        // El folder siempre usa el ID del territorio de origen como documento
         final folderRef = db
             .collection('territorios')
             .doc('temporales')
             .collection('tarjetas')
             .doc(folderDocId);
 
-        // Verificar/crear folder solo una vez por folderDocId
         if (!foldersVerificados.containsKey(folderDocId)) {
           final existe = (await folderRef.get()).exists;
           foldersVerificados[folderDocId] = existe;
           if (existe) {
-            // Registrar también por nombre para que otras dirs lo encuentren
             folderIdPorTerritorio[territorioOrigenNombre] = folderDocId;
             folderIdPorTerritorio[territorioOrigenId] = folderDocId;
           }
         }
         bool folderYaExiste = foldersVerificados[folderDocId]!;
 
-        // ── Verificar campañas activas ──────────────────
         final campSnap = await FirebaseFirestore.instance
             .collection('configuracion')
             .where('activa', isEqualTo: true)
@@ -1405,13 +1165,11 @@ onPressed: () =>
           final campData = campDoc.data();
           final campNombre = (campData['nombre'] as String?) ?? '';
           if (campNombre.isEmpty) continue;
-          final mensajePendiente = (campData['mensaje_pendiente'] as String?) ??
-              'Falta entregar invitación';
+          final mensajePendiente = (campData['mensaje_pendiente'] as String?) ?? 'Falta entregar invitación';
           final campKey = 'campana_inv_${campNombre}_${dir.id}';
           final invitacionMarcada = estados[campKey] == 'true';
 
           if (!invitacionMarcada && estado != 'no_hispano') {
-            // ❌ No marcó — va a carpeta de campaña
             batch.set(
               db
                   .collection('territorios')
@@ -1421,8 +1179,7 @@ onPressed: () =>
               {
                 'calle': calle,
                 'complemento': complemento,
-                'direccion_normalizada':
-                    _normalizarDireccion('$calle $complemento'),
+                'direccion_normalizada': _normalizarDireccion('$calle $complemento'),
                 'territorio_origen': territorioNombre,
                 'territorio_origen_id': territorioId,
                 'tarjeta_origen': tarjetaIdOriginal,
@@ -1432,7 +1189,6 @@ onPressed: () =>
               },
             );
           } else if (invitacionMarcada) {
-            // ✅ Marcó invitación — guardar en dirección
             batch.update(dir.reference, {
               'campana_invitacion_$campNombre': true,
               'campana_invitacion_fecha': FieldValue.serverTimestamp(),
@@ -1440,11 +1196,8 @@ onPressed: () =>
           }
         }
 
-        // ── Procesar estado de predicación ─────────────────
         if (estado == 'completada') {
-          // Si tiene tarjeta_id_origen → está en temporal → volver al origen
           if (origenReal != tarjetaIdOriginal && origenReal.isNotEmpty) {
-            // Mover de vuelta a la tarjeta de origen
             batch.update(dir.reference, {
               'tarjeta_id': origenReal,
               'tarjeta_id_origen': null,
@@ -1459,7 +1212,6 @@ onPressed: () =>
               'mes_predicacion': mesActual,
             });
           } else {
-            // Tarjeta normal — solo marcar como completada
             batch.update(dir.reference, {
               'estado': 'activa',
               'estado_predicacion': 'completada',
@@ -1477,7 +1229,6 @@ onPressed: () =>
               'created_at': FieldValue.serverTimestamp(),
             });
             foldersVerificados[folderDocId] = true;
-            // Registrar para que otras dirs del mismo territorio lo encuentren
             folderIdPorTerritorio[territorioOrigenNombre] = folderDocId;
             folderIdPorTerritorio[territorioOrigenId] = folderDocId;
           }
@@ -1485,8 +1236,7 @@ onPressed: () =>
           batch.set(folderRef.collection('direcciones').doc(dir.id), {
             'calle': calle,
             'complemento': complemento,
-            'direccion_normalizada':
-                _normalizarDireccion('$calle $complemento'),
+            'direccion_normalizada': _normalizarDireccion('$calle $complemento'),
             'territorio_id': territorioOrigenId,
             'territorio_nombre': territorioOrigenNombre,
             'tarjeta_id_origen': origenReal,
@@ -1510,8 +1260,7 @@ onPressed: () =>
             {
               'calle': calle,
               'complemento': complemento,
-              'direccion_normalizada':
-                  _normalizarDireccion('$calle $complemento'),
+              'direccion_normalizada': _normalizarDireccion('$calle $complemento'),
               'territorio_id': territorioOrigenId,
               'territorio_nombre': territorioOrigenNombre,
               'tarjeta_id_origen': origenReal,
@@ -1527,7 +1276,6 @@ onPressed: () =>
         }
       }
 
-      // Marcar tarjeta como completada
       batch.update(
         db
             .collection('territorios')
@@ -1541,11 +1289,8 @@ onPressed: () =>
       );
 
       await batch.commit();
-
-      // Cancelar timer de devolución automática
       AutoReturnService().cancelarTimer(tarjetaId);
 
-      // Notificar al admin de territorios si hay "no_predicado" o "no_hispano"
       final dirNoPredicadas = direcciones.where((dir) {
         final estado = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? 'pendiente';
         return estado == 'no_predicado' || estado == 'no_hispano';
@@ -1561,7 +1306,6 @@ onPressed: () =>
           return '$calle — $motivo';
         }).join('\n');
 
-        // Notificar a admins de territorios
         await NotificacionService.enviarAAdminTerritorios(
           titulo: '⚠️ Atención requerida',
           cuerpo: '$nombre reportó ${dirNoPredicadas.length} dirección(es) en "$tarjetaId":\n$resumen',
@@ -1569,7 +1313,7 @@ onPressed: () =>
           extra: {'tarjeta_id': tarjetaId, 'territorio_id': territorioId},
         );
       }
-      // Las direcciones temporales no deben persistir en la BD
+
       final esTemporal = territorioId == 'temporales' ||
           (await db.collection('territorios')
               .doc(territorioId)
@@ -1586,14 +1330,13 @@ onPressed: () =>
         if (dirsTemporales.docs.isNotEmpty) {
           final batchClean = db.batch();
           for (final d in dirsTemporales.docs) {
-            final dData = d.data();
+            final dData = d.data() as Map<String, dynamic>;
             final estadoDir = dData['estado_predicacion'] as String? ?? '';
             final origenId = dData['tarjeta_id_origen'] as String? ?? '';
             final terOrigenId = dData['territorio_origen_id'] as String? ?? '';
             final terOrigenNombre = dData['territorio_origen_nombre'] as String? ?? '';
 
             if (estadoDir == 'completada' && origenId.isNotEmpty) {
-              // Restaurar completamente a tarjeta y territorio de origen
               batchClean.update(d.reference, {
                 'tarjeta_id': origenId,
                 'tarjeta_id_origen': null,
@@ -1605,10 +1348,8 @@ onPressed: () =>
                 'estado_predicacion': 'completada',
               });
             } else if (estadoDir == 'completada') {
-              // Sin origen — eliminar
               batchClean.delete(d.reference);
             }
-            // Las que van a temporal/removidas ya tienen su destino — no tocar
           }
           await batchClean.commit();
         }
@@ -1625,7 +1366,6 @@ onPressed: () =>
           _tarjetasCompletadas.add(tarjetaId);
         });
 
-        // Programar mensaje motivacional en Firestore (persiste aunque se cierre la app)
         _programarMensajeMotivacional();
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1645,8 +1385,7 @@ onPressed: () =>
             backgroundColor: const Color(0xFF1B5E20),
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
@@ -1660,7 +1399,7 @@ onPressed: () =>
         );
       }
     }
-  } // ✅ cierra _confirmarProcesamientoTarjeta
+  }
 
   // ─────────────────────────────────────────────────
   // BUILD
@@ -1669,16 +1408,13 @@ onPressed: () =>
   @override
   Widget build(BuildContext context) {
     final nombrePublicador = widget.usuarioData['nombre'] ?? 'Publicador';
-    debugPrint('=== NOMBRE: ${widget.usuarioData['nombre']}');
-    debugPrint('=== EMAIL: ${widget.usuarioEmail}');
-    final iniciales =
-        nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
+    final iniciales = nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       body: CustomScrollView(
         slivers: [
-          // ── HEADER ─────────────────────────────────────
+          // Header
           SliverToBoxAdapter(
             child: Container(
               decoration: const BoxDecoration(
@@ -1733,24 +1469,20 @@ onPressed: () =>
                     ],
                   ),
                   const SizedBox(height: 16),
-                  // ✅ Botón solicitar integrado al header
                   GestureDetector(
                     onTap: widget.onSolicitarTerritorio,
                     child: Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 12, horizontal: 16),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: Colors.white.withOpacity(0.5), width: 1.5),
+                        border: Border.all(color: Colors.white.withOpacity(0.5), width: 1.5),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.map_outlined,
-                              color: Colors.white, size: 18),
+                          const Icon(Icons.map_outlined, color: Colors.white, size: 18),
                           const SizedBox(width: 8),
                           Text(
                             context.t('request_territory'),
@@ -1770,10 +1502,8 @@ onPressed: () =>
             ),
           ),
 
-          // ── ALERTAS ────────────────────────────────────
-          if (widget.campanaEspecialActiva ||
-              (widget.campanaGeneralActiva &&
-                  widget.anuncioGeneral.trim().isNotEmpty))
+          // Alertas
+          if (widget.campanaEspecialActiva || (widget.campanaGeneralActiva && widget.anuncioGeneral.trim().isNotEmpty))
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               sliver: SliverList(
@@ -1786,8 +1516,7 @@ onPressed: () =>
                       title: 'Campaña especial activa',
                       body: widget.nombreCampanaEspecial,
                     ),
-                  if (widget.campanaGeneralActiva &&
-                      widget.anuncioGeneral.trim().isNotEmpty) ...[
+                  if (widget.campanaGeneralActiva && widget.anuncioGeneral.trim().isNotEmpty) ...[
                     const SizedBox(height: 10),
                     _alertaBanner(
                       icon: Icons.info_outline,
@@ -1801,7 +1530,7 @@ onPressed: () =>
               ),
             ),
 
-          // ── ANUNCIO GENERAL ──────────────────────────────
+          // Anuncio General
           SliverToBoxAdapter(
             child: StreamBuilder<DocumentSnapshot>(
               stream: FirebaseFirestore.instance
@@ -1840,15 +1569,14 @@ onPressed: () =>
             ),
           ),
 
-          // ── STATS ──────────────────────────────────────
+          // Stats
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             sliver: SliverToBoxAdapter(
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collectionGroup('tarjetas')
-                    .where('asignado_a',
-                        isEqualTo: widget.usuarioData['nombre'] ?? '')
+                    .where('asignado_a', isEqualTo: widget.usuarioData['nombre'] ?? '')
                     .snapshots(),
                 builder: (context, tarjetasSnap) {
                   int totalDirAsignadas = 0;
@@ -1858,8 +1586,7 @@ onPressed: () =>
                     for (final t in tarjetasSnap.data!.docs) {
                       final d = _safeData(t);
                       if (d['completada'] == true) continue;
-                      totalDirAsignadas +=
-                          ((d['cantidad_direcciones'] ?? 0) as int);
+                      totalDirAsignadas += ((d['cantidad_direcciones'] ?? 0) as int);
                       tarjetaIds.add(t.id);
                     }
                   }
@@ -1869,38 +1596,28 @@ onPressed: () =>
                         ? Future.value(null)
                         : FirebaseFirestore.instance
                             .collection('direcciones_globales')
-                            .where('tarjeta_id',
-                                whereIn: tarjetaIds.take(10).toList())
+                            .where('tarjeta_id', whereIn: tarjetaIds.take(10).toList())
                             .get(),
                     builder: (context, dirsSnap) {
                       final completadas = dirsSnap.data?.docs.where((doc) {
                             final d = _safeData(doc);
-                            // Contar como completada si está predicada
-                            // (con o sin mes_predicacion)
-                            return d['predicado'] == true ||
-                                d['estado_predicacion'] == 'completada';
-                          }).length ??
-                          0;
+                            return d['predicado'] == true || d['estado_predicacion'] == 'completada';
+                          }).length ?? 0;
 
                       final pendientes = totalDirAsignadas - completadas;
 
                       return Row(
                         children: [
                           Expanded(
-                            child: _statCard('Asignadas', totalDirAsignadas,
-                                Icons.home_work_outlined),
+                            child: _statCard('Asignadas', totalDirAsignadas, Icons.home_work_outlined),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: _statCard('Completadas', completadas,
-                                Icons.check_circle_outline),
+                            child: _statCard('Completadas', completadas, Icons.check_circle_outline),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: _statCard(
-                                'Pendientes',
-                                pendientes < 0 ? 0 : pendientes,
-                                Icons.schedule_outlined),
+                            child: _statCard('Pendientes', pendientes < 0 ? 0 : pendientes, Icons.schedule_outlined),
                           ),
                         ],
                       );
@@ -1911,7 +1628,7 @@ onPressed: () =>
             ),
           ),
 
-          // ── PROGRESO ───────────────────────────────────
+          // Progreso
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
             sliver: SliverToBoxAdapter(
@@ -1924,12 +1641,9 @@ onPressed: () =>
                   final completadasGlobal = snapTotal.data?.docs.where((doc) {
                         final d = _safeData(doc);
                         return d['predicado'] == true;
-                      }).length ??
-                      0;
+                      }).length ?? 0;
                   final pendientesGlobal = totalExistentes - completadasGlobal;
-                  final avance = totalExistentes > 0
-                      ? completadasGlobal / totalExistentes
-                      : 0.0;
+                  final avance = totalExistentes > 0 ? completadasGlobal / totalExistentes : 0.0;
 
                   return Container(
                     padding: const EdgeInsets.all(20),
@@ -1975,29 +1689,22 @@ onPressed: () =>
                             value: avance,
                             minHeight: 10,
                             backgroundColor: const Color(0xFFE8F5E9),
-                            valueColor: const AlwaysStoppedAnimation<Color>(
-                                Color(0xFF1B5E20)),
+                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF1B5E20)),
                           ),
                         ),
                         const SizedBox(height: 16),
                         Row(
                           children: [
                             Expanded(
-                              child: _miniStat('Existentes', totalExistentes,
-                                  Icons.home_work_outlined, Colors.blue),
+                              child: _miniStat('Existentes', totalExistentes, Icons.home_work_outlined, Colors.blue),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: _miniStat(
-                                  'Completadas',
-                                  completadasGlobal,
-                                  Icons.check_circle_outline,
-                                  const Color(0xFF1B5E20)),
+                              child: _miniStat('Completadas', completadasGlobal, Icons.check_circle_outline, const Color(0xFF1B5E20)),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: _miniStat('Pendientes', pendientesGlobal,
-                                  Icons.schedule_outlined, Colors.orange),
+                              child: _miniStat('Pendientes', pendientesGlobal, Icons.schedule_outlined, Colors.orange),
                             ),
                           ],
                         ),
@@ -2009,15 +1716,23 @@ onPressed: () =>
             ),
           ),
 
-          // ── ENVIAR DIRECCIÓN NUEVA ──
+          // Tarjeta para Enviar Direcciones a Auditoría
           SliverToBoxAdapter(
-            child: EnviarDireccionCard(
-              usuarioEmail: widget.usuarioEmail,
-              usuarioNombre: widget.usuarioData['nombre'] ?? widget.usuarioEmail,
+            child: Column(
+              children: [
+                EnviarDireccionCard(
+                  usuarioNombre: widget.usuarioData['nombre']?.toString() ?? widget.usuarioEmail,
+                  usuarioEmail: widget.usuarioEmail,
+                  onEnviado: () {
+                    setState(() {});
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
             ),
           ),
 
-          // ── MIS TARJETAS ───────────────────────────────
+          // Mis Tarjetas
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             sliver: SliverToBoxAdapter(
@@ -2052,7 +1767,6 @@ onPressed: () =>
                       }).toList();
 
                       if (tarjetasVisibles.isEmpty) {
-                        // Verificar si hay tarjetas completadas o simplemente no hay tarjetas
                         final hayCompletadas = snapshot.data!.docs.any((doc) {
                           final d = (doc.data() as Map<String, dynamic>?) ?? {};
                           return d['completada'] == true;
@@ -2060,9 +1774,7 @@ onPressed: () =>
                         return Container(
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            color: hayCompletadas
-                                ? const Color(0xFFE8F5E9)
-                                : Colors.grey.shade50,
+                            color: hayCompletadas ? const Color(0xFFE8F5E9) : Colors.grey.shade50,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                                 color: hayCompletadas
@@ -2073,12 +1785,8 @@ onPressed: () =>
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                hayCompletadas
-                                    ? Icons.check_circle
-                                    : Icons.inbox_outlined,
-                                color: hayCompletadas
-                                    ? const Color(0xFF1B5E20)
-                                    : Colors.grey,
+                                hayCompletadas ? Icons.check_circle : Icons.inbox_outlined,
+                                color: hayCompletadas ? const Color(0xFF1B5E20) : Colors.grey,
                                 size: 20,
                               ),
                               const SizedBox(width: 8),
@@ -2088,9 +1796,7 @@ onPressed: () =>
                                       ? context.t('all_cards_completed')
                                       : context.t('no_cards_this_month'),
                                   style: TextStyle(
-                                    color: hayCompletadas
-                                        ? const Color(0xFF1B5E20)
-                                        : Colors.grey,
+                                    color: hayCompletadas ? const Color(0xFF1B5E20) : Colors.grey,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13,
                                   ),
@@ -2103,25 +1809,21 @@ onPressed: () =>
                       }
 
                       return Column(
-                        children:
-                            List.generate(tarjetasVisibles.length, (index) {
+                        children: List.generate(tarjetasVisibles.length, (index) {
                           final tarjetaDoc = tarjetasVisibles[index];
                           final data = (tarjetaDoc.data() as Map<String, dynamic>?) ?? {};
                           final nombre = (data['nombre'] as String?) ?? tarjetaDoc.id;
                           final territorioId = tarjetaDoc.reference.parent.parent?.id ?? '';
                           final tarjetaId = tarjetaDoc.id;
 
-                          // Color aleatorio pero estable por índice
-                          final color =
-                              _tarjetaColores[index % _tarjetaColores.length];
+                          final color = _tarjetaColores[index % _tarjetaColores.length];
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 14),
                             decoration: BoxDecoration(
                               color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                  color: color.withOpacity(0.2), width: 1),
+                              border: Border.all(color: color.withOpacity(0.2), width: 1),
                               boxShadow: [
                                 BoxShadow(
                                   color: color.withOpacity(0.12),
@@ -2148,40 +1850,25 @@ onPressed: () =>
                                         color: color.withOpacity(0.12),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
-                                      child: Icon(Icons.credit_card,
-                                          color: color, size: 20),
+                                      child: Icon(Icons.credit_card, color: color, size: 20),
                                     ),
-                                    title: Text(nombre,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold)),
+                                    title: Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
                                     subtitle: FutureBuilder<QuerySnapshot>(
                                       future: FirebaseFirestore.instance
                                           .collection('direcciones_globales')
-                                          .where('tarjeta_id',
-                                              isEqualTo: tarjetaId)
-                                          .where('estado',
-                                              isNotEqualTo: 'removida')
+                                          .where('tarjeta_id', isEqualTo: tarjetaId)
+                                          .where('estado', isNotEqualTo: 'removida')
                                           .get(),
                                       builder: (context, dirSnap) {
-                                        final cantReal =
-                                            dirSnap.data?.docs.length ?? 0;
-                                        final enviadoNombre =
-                                            (data['enviado_nombre']
-                                                    as String?) ??
-                                                '';
-                                        final enviadoEn =
-                                            data['enviado_en'] as Timestamp?;
+                                        final cantReal = dirSnap.data?.docs.length ?? 0;
+                                        final enviadoNombre = (data['enviado_nombre'] as String?) ?? '';
+                                        final enviadoEn = data['enviado_en'] as Timestamp?;
                                         String fechaHora = '';
                                         if (enviadoEn != null) {
                                           final dt = enviadoEn.toDate();
-                                          final h = dt.hour
-                                              .toString()
-                                              .padLeft(2, '0');
-                                          final m = dt.minute
-                                              .toString()
-                                              .padLeft(2, '0');
-                                          fechaHora =
-                                              '${dt.day}/${dt.month}/${dt.year} $h:$m';
+                                          final h = dt.hour.toString().padLeft(2, '0');
+                                          final m = dt.minute.toString().padLeft(2, '0');
+                                          fechaHora = '${dt.day}/${dt.month}/${dt.year} $h:$m';
                                         }
                                         return Text(
                                           '$cantReal dir${enviadoNombre.isNotEmpty ? ' · $enviadoNombre' : ''}${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
@@ -2191,46 +1878,32 @@ onPressed: () =>
                                     ),
                                     trailing: TextButton(
                                       onPressed: () async {
-                                        final confirmar =
-                                            await showDialog<bool>(
+                                        final confirmar = await showDialog<bool>(
                                           context: context,
                                           builder: (c) => AlertDialog(
-                                            title:
-                                                Text(context.t('return_card')),
-                                            content: Text(
-                                              '¿Devolver "$nombre"? Quedará disponible para otros.',
-                                            ),
+                                            title: Text(context.t('return_card')),
+                                            content: Text('¿Devolver "$nombre"? Quedará disponible para otros.'),
                                             actions: [
                                               TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(c, false),
-                                                child:
-                                                    Text(context.t('cancel')),
+                                                onPressed: () => Navigator.pop(c, false),
+                                                child: Text(context.t('cancel')),
                                               ),
                                               ElevatedButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(c, true),
-                                                style: ElevatedButton.styleFrom(
-                                                    backgroundColor:
-                                                        Colors.orange),
-                                                child:
-                                                    Text(context.t('return')),
+                                                onPressed: () => Navigator.pop(c, true),
+                                                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                                                child: Text(context.t('return')),
                                               ),
                                             ],
                                           ),
                                         );
                                         if (confirmar == true) {
-                                          await _devolverTarjeta(
-                                              territorioId, tarjetaId);
+                                          await _devolverTarjeta(territorioId, tarjetaId);
                                         }
                                       },
-                                      child: const Text('Devolver',
-                                          style:
-                                              TextStyle(color: Colors.orange)),
+                                      child: const Text('Devolver', style: TextStyle(color: Colors.orange)),
                                     ),
                                     children: [
-                                      _buildDireccionesTarjeta(
-                                          tarjetaId, territorioId, nombre),
+                                      _buildDireccionesTarjeta(tarjetaId, territorioId, nombre),
                                     ],
                                   ),
                                 ),
@@ -2261,7 +1934,6 @@ onPressed: () =>
             ),
           ),
 
-          // Padding para que el FAB no tape el contenido inferior
           const SliverPadding(
             padding: EdgeInsets.only(bottom: 140),
           ),
