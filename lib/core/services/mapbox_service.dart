@@ -35,10 +35,10 @@ class MapboxService {
       // Solo la inspección de Mapbox sin forzar la ciudad; así validamos la
       // calle real en cualquier parte, pero luego exigimos estar dentro de
       // la región esperada.
-      final query = Uri.encodeComponent(consulta);
+      final query = Uri.encodeComponent('$consulta, Araucária, PR');
       final url = Uri.parse(
         '$_baseUrl/$query.json?access_token=$_token&country=BR&language=pt'
-        '&limit=1',
+        '&limit=1&proximity=-49.41,-25.59&bbox=-49.60,-25.80,-49.20,-25.40',
       );
       final response = await http.get(url).timeout(const Duration(seconds: 8));
 
@@ -133,7 +133,7 @@ class MapboxService {
 
       // 4) Dentro de la región esperada (Araucária y alrededores).
       if (lat != null && lng != null) {
-        if (lng < -49.6 || lng > -49.2 || lat < -25.8 || lat > -25.4) {
+        if (lng < -49.60 || lng > -49.20 || lat < -25.80 || lat > -25.40) {
           return {
             'ok': false,
             'motivo': 'Dirección fuera de la zona de la congregación.',

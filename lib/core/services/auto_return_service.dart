@@ -20,12 +20,46 @@ class AutoReturnService {
   // Callback para mostrar snackbar en la UI
   Function(String mensaje, Color color)? onMostrarAlerta;
 
-  static const Duration _tiempoLimite = Duration(hours: 2);
-  static const Duration _tiempoAviso = Duration(hours: 1, minutes: 50);
+  static const Duration _limitePorDefecto = Duration(hours: 2);
+  static const int _avisoPorDefectoMin = 10;
+
+  static Duration _tiempoLimite = _limitePorDefecto;
+  static Duration _tiempoAviso = const Duration(minutes: 110);
+  static bool _activo = true;
+
+  /// Lee de `configuracion/devolucion_automatica` el tiempo límite, los
+  /// minutos de aviso y si la devolución automática está activada.
+  /// Si el documento no existe o falla, usa los valores por defecto.
+  static Future<void> cargarConfiguracion() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('configuracion')
+          .doc('devolucion_automatica')
+          .get();
+      final data = doc.data() ?? {};
+      final limiteMin = (data['tiempo_limite_minutos'] as int?) ?? 120;
+      final avisoMin = (data['aviso_minutos'] as int?) ?? _avisoPorDefectoMin;
+      final limite = limiteMin > 0 ? limiteMin : 120;
+      final aviso = limite - avisoMin;
+      _tiempoLimite = Duration(minutes: limite);
+      _tiempoAviso = Duration(minutes: aviso > 0 ? aviso : 0);
+      _activo = (data['activo'] as bool?) ?? true;
+    } catch (_) {
+      _tiempoLimite = _limitePorDefecto;
+      _tiempoAviso = const Duration(minutes: 110);
+      _activo = true;
+    }
+  }
+
+  /// Tiempo límite configurado (por defecto 2h) tras el cual una tarjeta se
+  /// devuelve automáticamente. Se usa para detectar dueños vencidos.
+  static Future<Duration> obtenerTiempoLimite() async {
+    await cargarConfiguracion();
+    return _tiempoLimite;
+  }
 
   /// Inicia el timer para una tarjeta recién asignada al publicador.
-  void iniciarTimer({
-    required String tarjetaId,
+  void iniciarTimer({    required String tarjetaId,
     required String territorioId,
     required String tarjetaNombre,
     required String usuarioNombre,
@@ -33,6 +67,9 @@ class AutoReturnService {
   }) {
     // Cancelar timers anteriores si existen
     cancelarTimer(tarjetaId);
+
+    // Devolución automática desactivada por el admin: no programar timers.
+    if (!_activo) return;
 
     final ahora = DateTime.now();
     final tiempoTranscurrido = ahora.difference(fechaAsignacion);
@@ -208,6 +245,8 @@ class AutoReturnService {
   static Future<int> verificarYDevolverVencidas() async {
     int devueltas = 0;
     try {
+      await cargarConfiguracion();
+      if (!_activo) return 0;
       final limite = DateTime.now().subtract(_tiempoLimite);
       final snap = await FirebaseFirestore.instance
           .collectionGroup('tarjetas')
@@ -217,7 +256,12 @@ class AutoReturnService {
       for (final doc in snap.docs) {
         final data = doc.data();
         final asignadoA = data['asignado_a'] as String? ?? '';
-        final asignadoEn = data['asignado_en'] as Timestamp?;
+        // `asignado_en` es el campo canónico, pero los envíos viejos desde el
+        // conductor no lo escribían: sin este fallback la tarjeta quedaba
+        // "con dueño" para siempre y nunca se devolvía.
+        final asignadoEn = (data['asignado_en'] as Timestamp?) ??
+            (data['enviado_en'] as Timestamp?) ??
+            (data['tomado_en'] as Timestamp?);
         if (asignadoA.isEmpty || asignadoEn == null) continue;
 
         // Si ya pasó el tiempo límite → devolver
@@ -258,6 +302,8 @@ class AutoReturnService {
   /// Verifica tarjetas asignadas al iniciar la app y reactiva timers si corresponde.
   Future<void> verificarTarjetasAlIniciar(String usuarioNombre) async {
     try {
+      await cargarConfiguracion();
+      if (!_activo) return;
       final snap = await FirebaseFirestore.instance
           .collectionGroup('tarjetas')
           .where('asignado_a', isEqualTo: usuarioNombre)

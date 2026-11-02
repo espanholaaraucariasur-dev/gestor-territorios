@@ -102,6 +102,11 @@ class _SplashPageState extends State<SplashPage> {
 
       if (snap.docs.isNotEmpty && mounted) {
         final datos = snap.docs.first.data();
+        if (!_cuentaHabilitada(datos)) {
+          await _descartarSesionLocal();
+          _irALogin();
+          return;
+        }
         final esAdmin = datos['es_admin'] == true;
         final esAuditor = datos['es_auditor'] == true;
         if (esAdmin || esAuditor) {
@@ -115,7 +120,7 @@ class _SplashPageState extends State<SplashPage> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => TerritoriosTab(
+            builder: (_) => PantallaHomeLegacy(
               usuarioData: _conDocId(snap.docs.first),
             ),
           ),
@@ -130,20 +135,46 @@ class _SplashPageState extends State<SplashPage> {
             .where('email', isEqualTo: email)
             .get(const GetOptions(source: Source.cache));
         if (snap.docs.isNotEmpty && mounted) {
-Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => TerritoriosTab(
-                  usuarioData: _conDocId(snap.docs.first),
-                ),
-              ),
-            );
+          final datos = snap.docs.first.data();
+          if (!_cuentaHabilitada(datos)) {
+            await _descartarSesionLocal();
+            _irALogin();
             return;
+          }
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PantallaHomeLegacy(
+                usuarioData: _conDocId(snap.docs.first),
+              ),
+            ),
+          );
+          return;
         }
       } catch (_) {}
     }
 
     _irALogin();
+  }
+
+  bool _cuentaHabilitada(Map<String, dynamic> datos) {
+    final estado = datos['estado'] ?? 'aprobado';
+    final activo = datos['activo'] ?? true;
+    return estado == 'aprobado' && activo != false;
+  }
+
+  Future<void> _descartarSesionLocal() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      debugPrint('Error al cerrar sesión: $e');
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+    } catch (e) {
+      debugPrint('Error al limpiar preferencias: $e');
+    }
   }
 
   Map<String, dynamic> _conDocId(DocumentSnapshot doc) {

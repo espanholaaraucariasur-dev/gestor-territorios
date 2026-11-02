@@ -1,4 +1,6 @@
+import 'package:araucaria_sur/core/services/navegacion_service.dart';
 import 'package:araucaria_sur/core/services/notificacion_service.dart';
+import 'package:araucaria_sur/features/home/presentation/widgets/mensaje_animado_dialog.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -85,10 +87,16 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
     switch (tipo) {
       case 'motivacional':
         return Icons.emoji_emotions_outlined;
+      case 'anuncio':
+        return Icons.campaign_outlined;
+      case 'sugerencia':
+        return Icons.lightbulb_outline;
       case 'aviso_devolucion':
         return Icons.replay_circle_filled_outlined;
       case 'solicitud_direccion':
         return Icons.location_on_outlined;
+      case 'nueva_direccion_enviada':
+        return Icons.new_releases_outlined;
       case 'alerta_predicacion':
         return Icons.campaign_outlined;
       case 'solicitud_acceso':
@@ -121,6 +129,106 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
     if (diff.inHours < 24) return 'Hace ${diff.inHours} h';
     if (diff.inDays < 7) return 'Hace ${diff.inDays} d';
     return DateFormat('dd/MM/yyyy').format(date);
+  }
+
+  /// Comportamiento al tocar una notificación.
+  ///
+  /// - El motivacional no lleva a ninguna pantalla: se muestra en la ventana
+  ///   animada.
+  /// - Las demás se encolan en [NavegacionService] y `home_page` las ejecuta,
+  ///   porque es el único que sabe cambiar de modo y de pestaña.
+  void _alTocar(
+    BuildContext context,
+    QueryDocumentSnapshot doc,
+    Map<String, dynamic> data,
+    String titulo,
+    String cuerpo,
+    String tipo,
+  ) {
+    // Cierra la hoja para que el destino o la ventana animada se vean a
+    // pantalla completa.
+    Navigator.of(context).pop();
+
+    if (tipo == 'anuncio') {
+      Future.delayed(const Duration(milliseconds: 260), () {
+        if (!mounted) return;
+        showDialog<void>(
+          // ignore: use_build_context_synchronously
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.campaign_outlined,
+                color: Color(0xFF1B5E20), size: 32),
+            title: Text(titulo.isEmpty ? 'Anuncio de la congregación' : titulo),
+            content: Text(cuerpo),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
+      });
+      return;
+    }
+
+    if (tipo == 'motivacional') {
+      // Solo naturaleza, luz y mundo. Sin cruces, templos ni símbolos de
+      // iglesias (tampoco palomas).
+      const emojis = ['🌅', '📖', '🌱', '🌿', '🌍', '✨'];
+      // El emoji se deriva del TEXTO del mensaje (no del título, que es fijo
+      // para todos los motivacionales) para que cada mensaje enviado se sienta
+      // distinto. Si no hay texto, cae de vuelta al título.
+      final baseEmoji = cuerpo.trim().isNotEmpty ? cuerpo : titulo;
+      final semilla = baseEmoji.isEmpty
+          ? 0
+          : baseEmoji.codeUnits.fold<int>(0, (a, b) => a + b);
+      // Contexto del Navigator raíz, capturado AHORA (antes de que se cierre
+      // la hoja). Antes se usaba `if (!mounted) return;` con el contexto de
+      // la hoja: pero la hoja ya fue cerrada con el pop de arriba, y su State
+      // se destruye al terminar de animarse el cierre (~200 ms). Con el
+      // delay de 260 ms, `mounted` ya era false y la ventana nunca se abría.
+      final raiz = Navigator.of(context, rootNavigator: true).context;
+      Future.delayed(const Duration(milliseconds: 220), () {
+        MensajeAnimadoDialog.mostrar(
+          // ignore: use_build_context_synchronously
+          raiz,
+          titulo: titulo.isEmpty ? '¡Vamos con todo!' : titulo,
+          cuerpo: cuerpo,
+          iconoEmoji: emojis[semilla % emojis.length],
+          onVerTarjetas: () =>
+              NavegacionService.solicitar(Pantallas.misTarjetas),
+        );
+      });
+      return;
+    }
+
+    final pantalla = NavegacionService.resolverPantalla(
+      tipo,
+      data,
+      widget.usuarioData,
+    );
+    if (pantalla == null || !Pantallas.todas.contains(pantalla)) return;
+
+    if (!NavegacionService.permitido(pantalla, widget.usuarioData)) {
+      final extra = data['extra'];
+      final contexto = extra is Map ? extra['solicitante_nombre'] : null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            contexto != null
+                ? 'Esta notificacion es sobre "$contexto" y no te corresponde revisarla'
+                : 'No tienes permisos para abrir esta notificacion',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final extra = data['extra'];
+    NavegacionService.solicitar(pantalla,
+        extra is Map ? Map<String, dynamic>.from(extra) : const {});
   }
 
   @override
@@ -263,7 +371,7 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                       leading: CircleAvatar(
                         backgroundColor: leida
                             ? Colors.grey.shade200
-                            : const Color(0xFF1B5E20).withOpacity(0.12),
+                            : const Color(0xFF1B5E20).withValues(alpha: 0.12),
                         child: Icon(
                           _iconoTipo(tipo),
                           color: leida
@@ -310,6 +418,7 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                         if (!leida) {
                           doc.reference.update({'leida': true});
                         }
+                        _alTocar(context, doc, data, titulo, cuerpo, tipo);
                       },
                     );
                   },

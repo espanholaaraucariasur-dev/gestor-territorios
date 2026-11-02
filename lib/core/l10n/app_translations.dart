@@ -1,4 +1,4 @@
-﻿class AppTranslations {
+class AppTranslations {
   static const Map<String, Map<String, String>> _translations = {
     'ES': {
       // === GENERAL ===
@@ -97,13 +97,15 @@
       'locator': 'Localizador',
       // === ENVIAR DIRECCIÓN NUEVA ===
       'enviar_dir_titulo': 'Enviar dirección nueva',
-      'enviar_dir_desc': 'Comprueba si una dirección ya existe y, si no, envíala para revisión.',
+      'enviar_dir_desc':
+          'Comprueba si una dirección ya existe y, si no, envíala para revisión.',
       'enviar_dir_hint': 'Calle y número (ej: Rua das Flores 123)',
       'enviar_dir_complemento': 'Complemento (opcional)',
       'enviar_dir_detalles': 'Detalles (opcional)',
       'enviar_dir_verificar': 'Verificar',
       'enviar_dir_existe': 'Esta dirección ya existe en la base de datos',
-      'enviar_dir_noexiste': 'No encontramos esta dirección. Añade informaciones adicionales y envíala.',
+      'enviar_dir_noexiste':
+          'No encontramos esta dirección. Añade informaciones adicionales y envíala.',
       'enviar_dir_enviar': 'Enviar dirección',
       'enviar_dir_enviando': 'Enviando...',
       'enviar_dir_enviado': 'Dirección enviada al administrador',
@@ -223,7 +225,8 @@
       'request_territory': 'Solicitar territorio',
       'my_cards': 'Mis tarjetas',
       'no_cards_assigned': 'No tienes tarjetas asignadas este mes.',
-      'no_cards_this_month': 'No tienes tarjetas asignadas este mes.\nToca "Solicitar territorio" para comenzar.',
+      'no_cards_this_month':
+          'No tienes tarjetas asignadas este mes.\nToca "Solicitar territorio" para comenzar.',
       'all_cards_completed': '¡Todas las tarjetas completadas!',
       'request_card': 'Solicitar una tarjeta',
       'card_details': 'Detalles de la tarjeta',
@@ -300,7 +303,7 @@
       'user_management': 'Gestión de Usuarios',
       'territory_management': 'Gestión de Territorios',
       'statistics': 'Estadísticas',
-    'territory_statistics_tab': 'Estadística',
+      'territory_statistics_tab': 'Estadística',
       'communications': 'Comunicaciones',
       'communication': 'Comunicación',
       'structure': 'Territorios',
@@ -413,6 +416,78 @@
       'stat_section_global_summary': 'RESUMEN GLOBAL',
       'stat_section_monthly_progress': 'PROGRESO MENSUAL',
       'stat_section_distribution': 'DISTRIBUCIÓN DE DIRECCIONES',
+      'stat_section_temporales': 'TEMPORALES',
+      'ses_section_title': 'PROGRESO DE TERRITORIO · COMPLETADO',
+      'ses_overall': 'Progreso general de los territorios',
+      'ses_overall_pending': 'Faltan %s direcciones por completar.',
+      'ses_note':
+          'Sección independiente. Cuenta solo direcciones marcadas como se predicó. No cambia ninguna estadística existente ni los datos de las direcciones.',
+      'ses_loading': 'Calculando el progreso de los territorios...',
+      'ses_empty': 'Todavía no hay territorios con direcciones para medir.',
+      'ses_refresh': 'Recalcular',
+      'ses_predicated': '%s se predicaron',
+      'ses_complete_count': '%s completos',
+      'ses_total_count': '%s territorios',
+      'ses_predicated_of': '%s de %s se predicaron',
+      'ses_arrived': '%s llegaron',
+      'ses_in_temporal': '%s en temporal',
+      'ses_previous': '%s previas',
+      'ses_retired': '%s retiradas',
+      'ses_state_closed': 'COMPLETO',
+      'ses_state_running': 'En curso',
+      'ses_state_open': 'Sin empezar',
+      'ses_state_no_measure': 'Ya estaba completo',
+      'ses_no_measure_hint': 'Este territorio ya estaba 100% predicado cuando '
+          'se lo midió por primera vez, así que no hay tiempo de trabajo que '
+          'mostrar. A partir de la próxima dirección pendiente se empieza a '
+          'medir.',
+      'ses_cov_total': 'Se miden %s de %s direcciones.%s',
+      'ses_cov_base': '%s están en territorios agrupadores (Farmacias, '
+          'Mercados, Talleres) y no se cuentan en ningún territorio.',
+      'ses_cov_sin_territorio': '%s no tienen territorio asignado.',
+      'ses_finished_in': 'Se terminó en %s · %s',
+      'ses_running_for': 'Lleva %s · %s por día',
+      'ses_cycle': 'Ciclo %s',
+      'ses_time_title': 'TIEMPO',
+      'ses_start': 'Inicio',
+      'ses_close': 'Cierre',
+      'ses_duration': 'Duración',
+      'ses_elapsed': 'Transcurrido',
+      'ses_pace': 'Ritmo',
+      'ses_projection': 'Proyección de cierre',
+      'ses_reopenings': 'Reaperturas',
+      'ses_first_close': 'Primer cierre',
+      'ses_waiting_first':
+          'Todavía no se predicó ninguna dirección del ciclo. La sesión se abre cuando se predique la primera.',
+      'ses_anti_false':
+          'El alcance original terminó, pero %s direcciones que llegaron siguen pendientes: el territorio NO está cerrado.',
+      'ses_no_follow':
+          '%s direcciones del alcance desaparecieron sin dejar rastro. Conviene revisarlo.',
+      'ses_previous_note':
+          'Este territorio ya tenía %s direcciones se predicadas antes de empezar el ciclo. No cuentan en la barra.',
+      'ses_arrived_title': 'Direcciones que llegaron en el ciclo (%s)',
+      'ses_arrived_pending': '%s pendientes',
+      'ses_arrived_note':
+          'Cada dirección que entra al territorio agranda el total y baja el porcentaje. Se muestran por separado para que la caída de la barra sea explicable.',
+      'ses_cards_title': 'Tiempo por tarjeta',
+      'ses_history': 'Ciclos anteriores',
+      'ses_no_history': 'Todavía no hay ciclos anteriores medidos.',
+      'stat_section_campanas': 'CAMPAÑAS',
+      'stat_temp_movements': 'Movimientos en temporales',
+      'stat_temp_movements_desc': 'Total acumulado + movimientos registrados',
+      'stat_temp_in': 'Entradas',
+      'stat_temp_in_desc': 'Llegaron a temporales',
+      'stat_temp_out': 'Salidas',
+      'stat_temp_out_desc': 'Volvieron a su territorio',
+      'stat_temp_rest': 'Restantes',
+      'stat_temp_rest_desc': 'Hoy en temporales',
+      'stat_temp_by_territory': 'Por territorio',
+      'stat_temp_hint':
+          'Los movimientos se registran automáticamente a partir de hoy.',
+      'stat_temp_range': 'Período',
+      'stat_campana_activa': 'Activa',
+      'stat_campana_inactiva': 'Inactiva',
+      'stat_no_campanas': 'No hay campañas configuradas',
       'stat_section_by_territory': 'POR TERRITORIO',
       'stat_prediction_progress': 'Progreso de predicación',
       'stat_predicated_count': '%s predicadas',
@@ -474,10 +549,24 @@
       'stat_pdf_col_percent': '%',
       'stat_pdf_total_general': 'TOTAL GENERAL',
       'stat_pdf_page': 'Página %s',
-      'stat_pdf_footer_full': 'Congregación Española · Araucária Sur · Paraná, Brasil',
+      'stat_pdf_footer_full':
+          'Congregación Española · Araucária Sur · Paraná, Brasil',
       'stat_pdf_error': 'Error generando PDF: %s',
       'stat_pdf_predicated_count': '%s predicadas',
       'stat_pdf_pending_count': '%s pendientes',
+      'stat_dist_new': 'Nuevas',
+      'stat_section_movement': 'MOVIMIENTO DE DIRECCIONES',
+      'stat_movement_by_month':
+          'Direcciones por mes (nuevas / removidas / restauradas)',
+      'stat_new_addresses': 'Nuevas',
+      'stat_growth_period': 'Crecimiento del período',
+      'stat_net_growth': 'Crecimiento neto',
+      'stat_initial_floor': 'Piso inicial',
+      'stat_total_now': 'Total actual',
+      'stat_edit_floor': 'Editar piso inicial',
+      'stat_edit_floor_hint':
+          'Cantidad de direcciones que había al inicio del período. El crecimiento se calcula contra este valor.',
+      'stat_floor_saved': 'Piso inicial actualizado',
       // === ECOSISTEMA 2 — FAMILIAS ===
       'eco2_familias_titulo': 'Familias',
       'eco2_familias_descripcion': 'Gestión de núcleos familiares',
@@ -502,7 +591,8 @@
       'eco2_usuarios_rol_microfono': 'Micrófono',
       'eco2_usuarios_asignar_rol': 'Asignar Rol',
       'eco2_usuarios_asignar_roles': 'Asignar Funciones',
-      'eco2_usuarios_roles_hint': 'Todos son publicadores. Agregá funciones adicionales.',
+      'eco2_usuarios_roles_hint':
+          'Todos son publicadores. Agregá funciones adicionales.',
       'eco2_usuarios_asignar_familia': 'Asignar Familia',
       'eco2_usuarios_sin_familia': 'Sin familia',
       'eco2_usuarios_sin_resultados': 'No se encontraron usuarios',
@@ -515,7 +605,8 @@
       'eco2_gestion_titulo': 'Gestión',
       'eco2_gestion': 'Gestión',
       'eco2_reuniones_titulo': 'Reuniones',
-      'eco2_reuniones_descripcion': 'Calendario de reuniones de la congregación',
+      'eco2_reuniones_descripcion':
+          'Calendario de reuniones de la congregación',
       'eco2_sin_reuniones': 'No hay reuniones este mes',
       'eco2_mis_designaciones': 'Mis Designaciones',
       'eco2_mis_designaciones_desc': 'Tareas y partes asignadas para ti',
@@ -528,7 +619,8 @@
       'eco2_designacion_aceptada': 'Designación aceptada',
       'eco2_designacion_recusada': 'Designación recusada',
       'eco2_motivo_recusa': 'Motivo de recusa',
-      'eco2_motivo_recusa_hint': 'Explica por qué no puedes hacer esta asignación...',
+      'eco2_motivo_recusa_hint':
+          'Explica por qué no puedes hacer esta asignación...',
       'eco2_enviar_recusa': 'Enviar recusa',
       'eco2_recusa_titulo': 'Recusa de',
       // === GESTIÓN DE FUNCIONES ===
@@ -570,7 +662,8 @@
       'eco2_marcar_todas_leidas': 'Marcar todas leídas',
       // === GESTION PERSONAL ===
       'eco2_gestion_personal': 'Configurar personal',
-      'eco2_gestion_personal_desc': 'Libera usuarios con este rol para que puedan trabajar',
+      'eco2_gestion_personal_desc':
+          'Libera usuarios con este rol para que puedan trabajar',
       'eco2_liberado': 'Liberado',
       'eco2_pendiente': 'Pendiente',
       'eco2_usuarios_con_rol': 'Usuarios con este rol',
@@ -581,15 +674,18 @@
       'eco2_pendiente_hint': 'El admin debe liberarlo para trabajar',
       'eco2_funciones_you': 'Funciones disponibles',
       'eco2_pendiente_aprobacion': 'Pendiente de aprobación',
-      'eco2_pendiente_aprobacion_desc': 'Un administrador debe liberar tu acceso para trabajar',
+      'eco2_pendiente_aprobacion_desc':
+          'Un administrador debe liberar tu acceso para trabajar',
       // === GESTION DE ASIGNACIONES ===
       'eco2_asignaciones_titulo': 'Gestión de Asignaciones',
-      'eco2_asignaciones_desc': 'Panel de control para crear funciones y liberar personal',
+      'eco2_asignaciones_desc':
+          'Panel de control para crear funciones y liberar personal',
       'eco2_crear_funcion': 'Crear Nueva Función',
       'eco2_editar_funcion': 'Editar Función',
       'eco2_eliminar': 'Eliminar',
       'eco2_editar': 'Editar',
-      'eco2_sin_funciones': 'Aún no hay funciones. Crea la primera desde el botón superior.',
+      'eco2_sin_funciones':
+          'Aún no hay funciones. Crea la primera desde el botón superior.',
       'eco2_encargado_principal': 'Encargado Principal (Admin del Rol)',
       'eco2_usuarios_asignados': 'Usuarios / Auxiliares Asignados',
       'eco2_sin_auxiliares': 'Sin auxiliares asignados',
@@ -605,7 +701,6 @@
       'eco2_confirmar_eliminar': '¿Eliminar la función',
       // === ERRORES ===
       'eco2_error_cargar': 'Error al cargar',
-
     },
     'PT': {
       // === GENERAL ===
@@ -705,13 +800,15 @@
       'locator': 'Localizador',
       // === ENVIAR ENDEREÇO NOVO ===
       'enviar_dir_titulo': 'Enviar endereço novo',
-      'enviar_dir_desc': 'Verifica se um endereço já existe e, se não, envia-o para revisão.',
+      'enviar_dir_desc':
+          'Verifica se um endereço já existe e, se não, envia-o para revisão.',
       'enviar_dir_hint': 'Rua e número (ex: Rua das Flores 123)',
       'enviar_dir_complemento': 'Complemento (opcional)',
       'enviar_dir_detalles': 'Detalhes (opcional)',
       'enviar_dir_verificar': 'Verificar',
       'enviar_dir_existe': 'Este endereço já existe na base de dados',
-      'enviar_dir_noexiste': 'Não encontramos este endereço. Adicione informações adicionais e envie-o.',
+      'enviar_dir_noexiste':
+          'Não encontramos este endereço. Adicione informações adicionais e envie-o.',
       'enviar_dir_enviar': 'Enviar endereço',
       'enviar_dir_enviando': 'Enviando...',
       'enviar_dir_enviado': 'Endereço enviado ao administrador',
@@ -726,7 +823,8 @@
       'attendance_copy': 'Copiar texto',
       'attendance_share_whatsapp': 'Compartilhar no WhatsApp',
       'attendance_copied': 'Resultado copiado para a área de transferência!',
-      'attendance_share_error': 'Não foi possível abrir o WhatsApp. Tente novamente.',
+      'attendance_share_error':
+          'Não foi possível abrir o WhatsApp. Tente novamente.',
       'attendance_no_negative': 'O valor não pode ser menor que 0',
       'attendance_history': 'Histórico',
       'attendance_history_empty': 'Ainda não há registros no histórico.',
@@ -788,7 +886,8 @@
       'sugerencias_enviando': 'Enviando...',
       'sugerencias_vacio': 'Escreva sua sugestão antes de enviar.',
       'sugerencias_enviada': 'Sugestão enviada!',
-      'sugerencias_error': 'Não foi possível enviar a sugestão. Tente novamente.',
+      'sugerencias_error':
+          'Não foi possível enviar a sugestão. Tente novamente.',
       'sugerencias_recibidas': 'Sugestões recebidas',
       'sugerencias_sin_datos': 'Ainda não há sugestões.',
       'sugerencias_de': 'de',
@@ -813,7 +912,8 @@
           'O administrador revisará sua solicitação e aprovará sua conta.',
       'full_name': 'Nome completo',
       'create_password': 'Criar senha',
-      'request_sent': '✅ Solicitação enviada! O administrador revisará em breve.',
+      'request_sent':
+          '✅ Solicitação enviada! O administrador revisará em breve.',
       'complete_all_fields': 'Preencha todos os campos.',
       'user_not_found': 'Usuário não encontrado.',
       'incorrect_password': 'Senha incorreta.',
@@ -831,7 +931,8 @@
       'request_territory': 'Solicitar território',
       'my_cards': 'Meus cartões',
       'no_cards_assigned': 'Você não tem cartões atribuídos este mês.',
-      'no_cards_this_month': 'Você não tem cartões atribuídos este mês.\nToque em "Solicitar território" para começar.',
+      'no_cards_this_month':
+          'Você não tem cartões atribuídos este mês.\nToque em "Solicitar território" para começar.',
       'all_cards_completed': 'Todos os cartões foram concluídos!',
       'request_card': 'Solicitar um cartão',
       'card_details': 'Detalhes do cartão',
@@ -908,7 +1009,7 @@
       'user_management': 'Gestão de Usuários',
       'territory_management': 'Gestão de Territórios',
       'statistics': 'Estatísticas',
-    'territory_statistics_tab': 'Estatística',
+      'territory_statistics_tab': 'Estatística',
       'communications': 'Comunicações',
       'communication': 'Comunicação',
       'structure': 'Territórios',
@@ -1021,6 +1122,78 @@
       'stat_section_global_summary': 'RESUMO GLOBAL',
       'stat_section_monthly_progress': 'PROGRESSO MENSAL',
       'stat_section_distribution': 'DISTRIBUIÇÃO DE ENDEREÇOS',
+      'stat_section_temporales': 'TEMPORÁRIOS',
+      'ses_section_title': 'PROGRESSO DO TERRITÓRIO · CONCLUÍDO',
+      'ses_overall': 'Progresso geral dos territórios',
+      'ses_overall_pending': 'Faltam %s endereços para concluir.',
+      'ses_note':
+          'Seção independente. Conta apenas endereços marcados como contato feito. Não altera nenhuma estatística existente nem os dados dos endereços.',
+      'ses_loading': 'Calculando o progresso dos territórios...',
+      'ses_empty': 'Ainda não há territórios com endereços para medir.',
+      'ses_refresh': 'Recalcular',
+      'ses_predicated': '%s com contato feito',
+      'ses_complete_count': '%s completos',
+      'ses_total_count': '%s territórios',
+      'ses_predicated_of': '%s de %s com contato feito',
+      'ses_arrived': '%s chegaram',
+      'ses_in_temporal': '%s em temporais',
+      'ses_previous': '%s anteriores',
+      'ses_retired': '%s retiradas',
+      'ses_state_closed': 'COMPLETO',
+      'ses_state_running': 'Em andamento',
+      'ses_state_open': 'Sem começar',
+      'ses_state_no_measure': 'Já estava completo',
+      'ses_no_measure_hint': 'Este território já estava 100% com contato feito '
+          'quando foi medido pela primeira vez, então não há tempo de '
+          'trabalho para mostrar. A partir do próximo endereço pendente '
+          'começa a medir.',
+      'ses_cov_total': 'São medidos %s de %s endereços.%s',
+      'ses_cov_base': '%s estão em territórios agrupadores (Farmacias, '
+          'Mercados, Oficinas) e não contam em nenhum território.',
+      'ses_cov_sin_territorio': '%s não têm território atribuído.',
+      'ses_finished_in': 'Concluiu em %s · %s',
+      'ses_running_for': 'Há %s · %s por dia',
+      'ses_cycle': 'Ciclo %s',
+      'ses_time_title': 'TEMPO',
+      'ses_start': 'Início',
+      'ses_close': 'Fechamento',
+      'ses_duration': 'Duração',
+      'ses_elapsed': 'Decorrido',
+      'ses_pace': 'Ritmo',
+      'ses_projection': 'Previsão de fechamento',
+      'ses_reopenings': 'Reaberturas',
+      'ses_first_close': 'Primeiro fechamento',
+      'ses_waiting_first':
+          'Ainda não houve contato com nenhum endereço do ciclo. A sessão abre quando o primeiro for feito.',
+      'ses_anti_false':
+          'O escopo original terminou, mas %s endereços que chegaram continuam pendentes: o território NÃO está fechado.',
+      'ses_no_follow':
+          '%s endereços do escopo sumiram sem deixar rastro. Vale conferir.',
+      'ses_previous_note':
+          'Este território já tinha %s endereços com contato feito antes de começar o ciclo. Não entram na barra.',
+      'ses_arrived_title': 'Endereços que chegaram no ciclo (%s)',
+      'ses_arrived_pending': '%s pendentes',
+      'ses_arrived_note':
+          'Cada endereço que entra no território aumenta o total e derruba a porcentagem. São mostrados separados para que a queda da barra seja explicável.',
+      'ses_cards_title': 'Tempo por cartão',
+      'ses_history': 'Ciclos anteriores',
+      'ses_no_history': 'Ainda não há ciclos anteriores medidos.',
+      'stat_section_campanas': 'CAMPANHAS',
+      'stat_temp_movements': 'Movimentos em temporários',
+      'stat_temp_movements_desc': 'Total acumulado + movimentos registrados',
+      'stat_temp_in': 'Entradas',
+      'stat_temp_in_desc': 'Chegaram a temporários',
+      'stat_temp_out': 'Saídas',
+      'stat_temp_out_desc': 'Voltaram ao seu território',
+      'stat_temp_rest': 'Restantes',
+      'stat_temp_rest_desc': 'Hoje em temporários',
+      'stat_temp_by_territory': 'Por território',
+      'stat_temp_hint':
+          'Os movimentos são registrados automaticamente a partir de hoje.',
+      'stat_temp_range': 'Período',
+      'stat_campana_activa': 'Ativa',
+      'stat_campana_inactiva': 'Inativa',
+      'stat_no_campanas': 'Nenhuma campanha configurada',
       'stat_section_by_territory': 'POR TERRITÓRIO',
       'stat_prediction_progress': 'Progresso de pregação',
       'stat_predicated_count': '%s predicadas',
@@ -1082,10 +1255,24 @@
       'stat_pdf_col_percent': '%',
       'stat_pdf_total_general': 'TOTAL GERAL',
       'stat_pdf_page': 'Página %s',
-      'stat_pdf_footer_full': 'Congregação Espanhola · Araucária Sur · Paraná, Brasil',
+      'stat_pdf_footer_full':
+          'Congregação Espanhola · Araucária Sur · Paraná, Brasil',
       'stat_pdf_error': 'Erro ao gerar PDF: %s',
       'stat_pdf_predicated_count': '%s predicadas',
       'stat_pdf_pending_count': '%s pendentes',
+      'stat_dist_new': 'Novas',
+      'stat_section_movement': 'MOVIMENTO DE ENDEREÇOS',
+      'stat_movement_by_month':
+          'Endereços por mês (novas / removidas / restauradas)',
+      'stat_new_addresses': 'Novas',
+      'stat_growth_period': 'Crescimento do período',
+      'stat_net_growth': 'Crescimento líquido',
+      'stat_initial_floor': 'Piso inicial',
+      'stat_total_now': 'Total atual',
+      'stat_edit_floor': 'Editar piso inicial',
+      'stat_edit_floor_hint':
+          'Quantidade de endereços que havia no início do período. O crescimento é calculado contra esse valor.',
+      'stat_floor_saved': 'Piso inicial atualizado',
       // === ECOSISTEMA 2 — FAMILIAS ===
       'eco2_familias_titulo': 'Famílias',
       'eco2_familias_descripcion': 'Gestão de núcleos familiares',
@@ -1110,7 +1297,8 @@
       'eco2_usuarios_rol_microfono': 'Microfone',
       'eco2_usuarios_asignar_rol': 'Atribuir Função',
       'eco2_usuarios_asignar_roles': 'Atribuir Funções',
-      'eco2_usuarios_roles_hint': 'Todos são publicadores. Adicione funções adicionais.',
+      'eco2_usuarios_roles_hint':
+          'Todos são publicadores. Adicione funções adicionais.',
       'eco2_usuarios_asignar_familia': 'Atribuir Família',
       'eco2_usuarios_sin_familia': 'Sem família',
       'eco2_usuarios_sin_resultados': 'Nenhum usuário encontrado',
@@ -1136,7 +1324,8 @@
       'eco2_designacion_aceptada': 'Designação aceita',
       'eco2_designacion_recusada': 'Designação recusada',
       'eco2_motivo_recusa': 'Motivo da recusa',
-      'eco2_motivo_recusa_hint': 'Explique por que não pode fazer esta atribuição...',
+      'eco2_motivo_recusa_hint':
+          'Explique por que não pode fazer esta atribuição...',
       'eco2_enviar_recusa': 'Enviar recusa',
       'eco2_recusa_titulo': 'Recusa de',
       // === GESTIÓN DE FUNCIONES ===
@@ -1178,7 +1367,8 @@
       'eco2_marcar_todas_leidas': 'Marcar todas como lidas',
       // === GESTION PERSONAL ===
       'eco2_gestion_personal': 'Configurar pessoal',
-      'eco2_gestion_personal_desc': 'Libere usuários com este cargo para que possam trabalhar',
+      'eco2_gestion_personal_desc':
+          'Libere usuários com este cargo para que possam trabalhar',
       'eco2_liberado': 'Liberado',
       'eco2_pendiente': 'Pendente',
       'eco2_usuarios_con_rol': 'Usuários com este cargo',
@@ -1189,15 +1379,18 @@
       'eco2_pendiente_hint': 'O admin deve liberá-lo para trabalhar',
       'eco2_funciones_you': 'Funções disponíveis',
       'eco2_pendiente_aprobacion': 'Pendente de aprovação',
-      'eco2_pendiente_aprobacion_desc': 'Um administrador deve liberar seu acesso para trabalhar',
+      'eco2_pendiente_aprobacion_desc':
+          'Um administrador deve liberar seu acesso para trabalhar',
       // === GESTION DE ASIGNACIONES ===
       'eco2_asignaciones_titulo': 'Gestão de Atribuições',
-      'eco2_asignaciones_desc': 'Painel de controle para criar funções e liberar pessoal',
+      'eco2_asignaciones_desc':
+          'Painel de controle para criar funções e liberar pessoal',
       'eco2_crear_funcion': 'Criar Nova Função',
       'eco2_editar_funcion': 'Editar Função',
       'eco2_eliminar': 'Excluir',
       'eco2_editar': 'Editar',
-      'eco2_sin_funciones': 'Ainda não há funções. Crie a primeira pelo botão superior.',
+      'eco2_sin_funciones':
+          'Ainda não há funções. Crie a primeira pelo botão superior.',
       'eco2_encargado_principal': 'Responsável Principal (Admin do Cargo)',
       'eco2_usuarios_asignados': 'Usuários / Auxiliares Atribuídos',
       'eco2_sin_auxiliares': 'Sem auxiliares atribuídos',
@@ -1213,7 +1406,6 @@
       'eco2_confirmar_eliminar': 'Excluir a função',
       // === ERRORES ===
       'eco2_error_cargar': 'Erro ao carregar',
-
     },
   };
 

@@ -1,21 +1,34 @@
+// eslint-disable-next-line prefer-const
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import '../../../../../core/services/notificacion_service.dart';
+import '../../../../../core/utils/campanas_utils.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
+// Servicios
+import '../../../../../core/services/mapbox_service.dart';
+import '../../../../../core/services/ruta_orden_service.dart';
+import 'navegacion_screen.dart';
 
-// Servicios Core
-import 'package:araucaria_sur/core/services/notificacion_service.dart';
-import 'package:araucaria_sur/core/services/mapbox_service.dart';
-import 'package:araucaria_sur/core/services/auto_return_service.dart';
-import 'package:araucaria_sur/core/services/map_launcher_service.dart';
-
-// Temas y Traducciones
-import 'package:araucaria_sur/core/themes/theme_extensions.dart';
-import 'package:araucaria_sur/core/l10n/translation_service.dart';
-
-// Componentes locales
+import '../../../../../core/services/auto_return_service.dart';
+import '../../../../../core/services/offline_sync_service.dart';
+import '../../../../../core/services/historial_temporales_service.dart';
+// Traducciones
+import '../../../../../core/l10n/translation_service.dart';
 import 'enviar_direccion_card.dart';
+
+/// Parada resuelta para la ruta en Google Maps: el valor que va en la URL
+/// (coordenadas o dirección codificada) y su posición para ordenar por cercanía.
+class _PuntoRuta {
+  final String valor;
+  final double? lat;
+  final double? lng;
+  final bool prioridad;
+
+  const _PuntoRuta(this.valor, this.lat, this.lng, this.prioridad);
+}
 
 class PublicadorTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -24,7 +37,7 @@ class PublicadorTab extends StatefulWidget {
   final String nombreCampanaEspecial;
   final bool campanaGeneralActiva;
   final String anuncioGeneral;
-  final VoidCallback onSolicitarTerritorio;
+  final VoidCallback onSolicitarTerritorio; // ✅ nuevo
 
   const PublicadorTab({
     super.key,
@@ -34,7 +47,7 @@ class PublicadorTab extends StatefulWidget {
     required this.nombreCampanaEspecial,
     required this.campanaGeneralActiva,
     required this.anuncioGeneral,
-    required this.onSolicitarTerritorio,
+    required this.onSolicitarTerritorio, // ✅ nuevo
   });
 
   @override
@@ -60,6 +73,46 @@ class _PublicadorTabState extends State<PublicadorTab> {
   final Map<String, Map<String, bool>> _modificadosPorTarjeta = {};
   final Set<String> _tarjetasCompletadas = {};
 
+  /// Tarjetas con una confirmación en curso.
+  ///
+  /// La confirmación escribe sobre varias colecciones con dos `commit()`
+  /// separados, así que un doble toque lanzaba el guardado dos veces en
+  /// paralelo. Con la botón deshabilitado el segundo toque ya no llega, pero
+  /// el flag también protege al método: si la UI se reconstruye mientras la
+  /// escritura sigue viva, `onPressed` vuelve a quedar habilitado y otro toque
+  /// volvería a duplicar la operación.
+  final Map<String, bool> _guardandoPorTarjeta = {};
+
+  /// Direcciones con una confirmación individual en curso.
+  ///
+  /// Va por id de documento, no por tarjeta, porque con la confirmación
+  /// individual el publicador puede tener varias direcciones de la misma tarjeta
+  /// guardando a la vez. El flag es el mismo que en `_guardandoPorTarjeta`:
+  /// guarda de reentrada en el método, `onPressed: null` en la UI, y
+  /// `try/finally` para apagar el spinner.
+  final Map<String, bool> _guardandoPorDireccion = {};
+
+  /// Reconstrucción de cada tarjeta, guardada para poder apagar el botón
+  /// cuando termina la escritura (que es asíncrona y sobrevive al build que
+  /// la lanzó).
+  final Map<String, StateSetter> _setStatePorTarjeta = {};
+
+  Future<int?>? _completadasFuture;
+  String _completadasFutureKey = '';
+
+  /// Minutos sin tarjetas antes de enviar el mensaje motivacional.
+  static const int _minutosSinTarjetasParaMotivacional = 10;
+
+  Timer? _timerMotivacional;
+  bool _tieneTarjetasActivas = false;
+
+  /// Inicio del período que mide "Completadas este mes".
+  ///
+  /// Vive en `configuracion/progreso_mensual` para que sea el mismo para todos.
+  /// Si todavía no existe, se crea con la hora actual: así el contador arranca
+  /// en cero y solo suma las direcciones predicadas de ahí en adelante.
+  DateTime? _inicioProgreso;
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +126,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
             duration: const Duration(seconds: 8),
           ),
         );
+        // Guardar aviso en Firestore
+        NotificacionService.enviarAUser(
+          destinatarioNombre:
+              widget.usuarioData['nombre']?.toString() ?? widget.usuarioEmail,
+          titulo: '⏰ Aviso de devolución',
+          cuerpo: mensaje,
+          tipo: TipoNotificacion.avisoDevolucion,
+        );
       }
     };
     // Verificar tarjetas asignadas al iniciar
@@ -82,14 +143,43 @@ class _PublicadorTabState extends State<PublicadorTab> {
     }
 
     // Verificar si hay mensaje motivacional pendiente de enviar
-    Future.delayed(const Duration(seconds: 3), () => _verificarTareaPendiente());
+    Future.delayed(
+        const Duration(seconds: 3), () => _verificarTareaPendiente());
+
+    // Cargar el inicio del período de "Completadas este mes"
+    _cargarInicioProgreso();
+  }
+
+  Future<void> _cargarInicioProgreso() async {
+    try {
+      final ref = FirebaseFirestore.instance
+          .collection('configuracion')
+          .doc('progreso_mensual');
+      final doc = await ref.get();
+      final ts = doc.data()?['inicio'];
+      DateTime inicio;
+      if (ts is Timestamp) {
+        inicio = ts.toDate();
+      } else {
+        inicio = DateTime.now();
+        await ref.set({
+          'inicio': Timestamp.fromDate(inicio),
+          'creado_en': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      if (mounted) setState(() => _inicioProgreso = inicio);
+    } catch (_) {
+      // Si falla, el contador del mes queda en cero.
+    }
   }
 
   Future<void> _verificarTareaPendiente() async {
     try {
       final email = widget.usuarioEmail;
       final tareaDoc = await FirebaseFirestore.instance
-          .collection('tareas_motivacionales').doc(email).get();
+          .collection('tareas_motivacionales')
+          .doc(email)
+          .get();
       if (!tareaDoc.exists) return;
       final tarea = tareaDoc.data() as Map<String, dynamic>;
       if (tarea['enviado'] == true) return;
@@ -103,7 +193,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
       } else {
         // Programar para cuando corresponda
         final resta = enviarEn.difference(DateTime.now());
-        Future.delayed(resta, () => _enviarMensajeMotivacional());
+        _programarTimerMotivacional(resta);
         debugPrint('⏰ Mensaje motivacional en ${resta.inMinutes} min');
       }
     } catch (_) {}
@@ -111,13 +201,18 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
   @override
   void dispose() {
+    _timerMotivacional?.cancel();
     AutoReturnService().onMostrarAlerta = null;
     super.dispose();
   }
 
   // ───────────────────────────────────────────────────────────
-  // HELPERS & STREAMS
+  // HELPERS
   // ───────────────────────────────────────────────────────────
+
+  // ─────────────────────────────────────────────────────────
+  // STREAM DE TARJETAS — sin collectionGroup (no requiere indice)
+  // ─────────────────────────────────────────────────────────
 
   Stream<QuerySnapshot> _buildTarjetasStream() {
     final nombre = widget.usuarioData['nombre']?.toString() ?? '';
@@ -146,6 +241,35 @@ class _PublicadorTabState extends State<PublicadorTab> {
     } catch (_) {
       return {};
     }
+  }
+
+  /// Cuenta las direcciones completadas de las tarjetas asignadas.
+  ///
+  /// `whereIn` admite como máximo 30 valores, así que se consulta por lotes.
+  Future<int> _contarCompletadas(List<String> tarjetaIds) async {
+    var completadas = 0;
+    for (var i = 0; i < tarjetaIds.length; i += 30) {
+      final fin =
+          (i + 30) < tarjetaIds.length ? i + 30 : tarjetaIds.length;
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('tarjeta_id', whereIn: tarjetaIds.sublist(i, fin))
+          .get();
+      completadas += snap.docs.where((doc) {
+        final d = _safeData(doc);
+        if (d['estado'] == 'temporal') return false;
+        return _esDirPredicada(d);
+      }).length;
+    }
+    return completadas;
+  }
+
+  // Una dirección ya predicada: su resultado y su fecha ya están registrados
+  // (tarjeta recibida). Solo se permite completar la entrega de campañas que
+  // falten, sin reescribir el resultado de predicación.
+  bool _esDirPredicada(Map<String, dynamic> data) {
+    return data['predicado'] == true ||
+        (data['estado_predicacion'] as String?) == 'completada';
   }
 
   // ───────────────────────────────────────────────────────────
@@ -210,14 +334,16 @@ class _PublicadorTabState extends State<PublicadorTab> {
           const SizedBox(height: 4),
           Text(
             title,
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color),
+            style: TextStyle(
+                fontSize: 10, fontWeight: FontWeight.w600, color: color),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 2),
           Text(
             value.toString(),
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color),
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.bold, color: color),
           ),
         ],
       ),
@@ -264,37 +390,84 @@ class _PublicadorTabState extends State<PublicadorTab> {
   }
 
   // ───────────────────────────────────────────────────────────
-  // DEVOLVER TARJETA Y MOTIVACIONALES
+  // DEVOLVER TARJETA
   // ───────────────────────────────────────────────────────────
 
   Future<void> _devolverTarjeta(String territorioId, String tarjetaId) async {
-    final nombre = widget.usuarioData['nombre'] as String? ?? widget.usuarioEmail;
+    final nombre =
+        widget.usuarioData['nombre'] as String? ?? widget.usuarioEmail;
     try {
-      await FirebaseFirestore.instance
-          .collection('territorios')
-          .doc(territorioId)
-          .collection('tarjetas')
-          .doc(tarjetaId)
-          .update({
-        'asignado_a': null,
-        'asignado_en': null,
-        'enviado_a': null,
-        'enviado_nombre': null,
-        'publicador_email': null,
-        'estatus_envio': 'disponible',
-        'bloqueado': true,
-        'disponible_para_publicadores': false,
-        'devuelta_por': nombre,
-        'devuelta_en': FieldValue.serverTimestamp(),
-        'completada': false,
-      });
+      late final Future<void> write;
+      if (territorioId == 'temporales') {
+        // Tarjeta temporal → liberarla para que vuelva a estar disponible
+        write = FirebaseFirestore.instance
+            .collection('territorios')
+            .doc('temporales')
+            .collection('tarjetas')
+            .doc(tarjetaId)
+            .update({
+          'asignado_a': null,
+          'asignado_en': null,
+          'conductor_email': null,
+          'publicador_email': null,
+          'publicador_nombre': null,
+          'enviado_a': null,
+          'enviado_nombre': null,
+          'enviado_en': null,
+          'enviado_tipo': null,
+          'tomado_por': null,
+          'tomado_en': null,
+          'completada': false,
+          'bloqueado': false,
+          'disponible_para_publicadores': true,
+          'estatus_envio': 'devuelto',
+          'devuelto_por': nombre,
+          'devuelto_en': Timestamp.now(),
+        });
+      } else {
+        // Actualizar tarjeta con estado devuelta
+        write = FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(territorioId)
+            .collection('tarjetas')
+            .doc(tarjetaId)
+            .update({
+          'asignado_a': null,
+          'asignado_en': null,
+          'enviado_a': null,
+          'enviado_nombre': null,
+          'enviado_en': null,
+          'enviado_tipo': null,
+          'conductor_email': null,
+          'publicador_email': null,
+          'publicador_nombre': null,
+          'tomado_por': null,
+          'tomado_en': null,
+          'estatus_envio': 'disponible',
+          // Devolver NO bloquea la tarjeta: mientras tenga direcciones
+          // pendientes y la campaña siga activa, vuelve a estar disponible.
+          'bloqueado': false,
+          'disponible_para_publicadores': true,
+          'devuelta_por': nombre,
+          'devuelta_en': Timestamp.now(),
+          'completada': false,
+        });
+      }
 
-      await NotificacionService.enviarAAdminTerritorios(
+      // Las escrituras de Firestore se reflejan localmente y se sincronizan en
+      // segundo plano; no esperar la confirmación de red para cerrar la acción.
+      unawaited(write.catchError((Object error) {
+        debugPrint('Devolución pendiente/no confirmada: $error');
+      }));
+      // Notificar a admins es secundario y no bloquea la devolución.
+      unawaited(NotificacionService.enviarAAdminTerritorios(
         titulo: '↩️ Tarjeta devuelta',
         cuerpo: '$nombre devolvió la tarjeta "$tarjetaId"',
         tipo: TipoNotificacion.devolucionTarjeta,
         extra: {'territorio_id': territorioId, 'tarjeta_id': tarjetaId},
-      );
+      ).catchError((Object error) {
+        debugPrint('Notificación de devolución pendiente: $error');
+      }));
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -303,7 +476,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
           backgroundColor: Colors.orange,
         ),
       );
-      _programarMensajeMotivacional();
+      // Verificar si ya terminó todas → programar motivacional
+      unawaited(_programarMensajeMotivacional());
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -315,33 +489,86 @@ class _PublicadorTabState extends State<PublicadorTab> {
     }
   }
 
+  // Agenda el envío local para dentro de [espera].
+  void _programarTimerMotivacional(Duration espera) {
+    _timerMotivacional?.cancel();
+    if (espera <= Duration.zero) {
+      _enviarMensajeMotivacional();
+      return;
+    }
+    _timerMotivacional = Timer(espera, _enviarMensajeMotivacional);
+  }
+
+  /// El publicador tomó o recibió una tarjeta: el ciclo vuelve a empezar.
+  Future<void> _reiniciarCicloMotivacional() async {
+    _timerMotivacional?.cancel();
+    try {
+      await FirebaseFirestore.instance
+          .collection('tareas_motivacionales')
+          .doc(widget.usuarioEmail)
+          .set({
+        'enviado': false,
+        'enviar_en': FieldValue.delete(),
+        'actualizado_en': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('🔄 Ciclo motivacional reiniciado (tomó tarjeta)');
+    } catch (e) {
+      debugPrint('Error reiniciando motivacional: $e');
+    }
+  }
+
+  // Programa un mensaje motivacional en Firestore — se envía al verificar al iniciar
   Future<void> _programarMensajeMotivacional() async {
     try {
       final nombre = widget.usuarioData['nombre'] as String? ?? '';
       final email = widget.usuarioEmail;
       if (nombre.isEmpty) return;
 
+      // Verificar si aún tiene tarjetas activas
       final activas = await FirebaseFirestore.instance
           .collectionGroup('tarjetas')
           .where('asignado_a', isEqualTo: nombre)
           .where('completada', isEqualTo: false)
           .get();
 
-      if (activas.docs.isEmpty) {
+      // Si ya no tiene tarjetas, programar mensaje para dentro de 5 min
+      final activasReales = activas.docs
+          .where((d) =>
+              (d.data() as Map<String, dynamic>?)?['enviado_tipo'] !=
+              'conductor')
+          .toList();
+      if (activasReales.isEmpty) {
+        // Verificar si ya hay una tarea pendiente o enviada recientemente
         final tareaExistente = await FirebaseFirestore.instance
-            .collection('tareas_motivacionales').doc(email).get();
+            .collection('tareas_motivacionales')
+            .doc(email)
+            .get();
 
         if (tareaExistente.exists) {
           final t = tareaExistente.data() as Map<String, dynamic>;
-          if (t['enviado'] != true) return;
+          // Solo hay "tarea pendiente" si existe una programación vigente
+          // (`enviar_en` en el futuro y aún sin enviar). Un ciclo reiniciado
+          // deja `enviado:false` SIN `enviar_en`; antes eso bloqueaba la
+          // reprogramación para siempre y el mensaje no volvía a llegar.
+          final enviarEn = (t['enviar_en'] as Timestamp?)?.toDate();
+          if (t['enviado'] != true &&
+              enviarEn != null &&
+              enviarEn.isAfter(DateTime.now())) {
+            debugPrint(
+                '📅 Ya hay tarea motivacional programada — no crear otra');
+            return;
+          }
+          // Cooldown de 2h desde el último envío real.
           final ultimoEnvio = (t['ultimo_envio'] as Timestamp?)?.toDate();
           if (ultimoEnvio != null &&
               DateTime.now().difference(ultimoEnvio).inHours < 2) {
+            debugPrint('⏳ Cooldown activo — no programar nuevo mensaje');
             return;
           }
         }
 
-        final enviarEn = DateTime.now().add(const Duration(minutes: 5));
+        final enviarEn = DateTime.now()
+            .add(const Duration(minutes: _minutosSinTarjetasParaMotivacional));
         await FirebaseFirestore.instance
             .collection('tareas_motivacionales')
             .doc(email)
@@ -352,59 +579,117 @@ class _PublicadorTabState extends State<PublicadorTab> {
           'enviado': false,
           'created_at': FieldValue.serverTimestamp(),
         });
+        debugPrint(
+            '📅 Mensaje motivacional programado para $nombre en $_minutosSinTarjetasParaMotivacional min');
 
-        Future.delayed(const Duration(minutes: 5), () => _enviarMensajeMotivacional());
+        // Temporizador local (se cancela si vuelve a tomar una tarjeta)
+        _programarTimerMotivacional(DateTime.now()
+            .add(const Duration(minutes: _minutosSinTarjetasParaMotivacional))
+            .difference(DateTime.now()));
       }
     } catch (e) {
       debugPrint('Error programando motivacional: $e');
     }
   }
 
+  // Envía el mensaje motivacional si la tarea está pendiente
   Future<void> _enviarMensajeMotivacional() async {
     try {
       final nombre = widget.usuarioData['nombre'] as String? ?? '';
       final email = widget.usuarioEmail;
       if (nombre.isEmpty) return;
 
+      // Verificar que la tarea aún existe y no fue enviada
       final tareaDoc = await FirebaseFirestore.instance
-          .collection('tareas_motivacionales').doc(email).get();
+          .collection('tareas_motivacionales')
+          .doc(email)
+          .get();
       if (!tareaDoc.exists) return;
       final tarea = tareaDoc.data() as Map<String, dynamic>;
       if (tarea['enviado'] == true) return;
 
+      // Cooldown: no enviar si ya se envió uno en las últimas 2 horas
       final ultimoEnvio = (tarea['ultimo_envio'] as Timestamp?)?.toDate();
       if (ultimoEnvio != null &&
           DateTime.now().difference(ultimoEnvio).inHours < 2) {
+        debugPrint(
+            '⏳ Cooldown motivacional activo — último envío hace ${DateTime.now().difference(ultimoEnvio).inMinutes} min');
         return;
       }
 
+      // Verificar que sigue sin tarjetas
       final activas = await FirebaseFirestore.instance
           .collectionGroup('tarjetas')
           .where('asignado_a', isEqualTo: nombre)
           .where('completada', isEqualTo: false)
           .get();
-      if (activas.docs.isNotEmpty) {
-        await FirebaseFirestore.instance
-            .collection('tareas_motivacionales').doc(email).delete();
+      if (activas.docs
+          .where((d) =>
+              (d.data() as Map<String, dynamic>?)?['enviado_tipo'] !=
+              'conductor')
+          .isNotEmpty) {
+        // Volvió a tomar/recibir tarjeta → reiniciar el ciclo, NO borrar
+        await _reiniciarCicloMotivacional();
         return;
       }
 
+      // ── Verificar que se cumplieron los 10 min sin tarjetas ──
+      // (protege contra timers viejos que disparen antes de tiempo)
+      final enviarEn = (tarea['enviar_en'] as Timestamp?)?.toDate();
+      if (enviarEn != null && DateTime.now().isBefore(enviarEn)) {
+        debugPrint(
+            '⏰ Aún no cumplen 10 min — reprogramando en ${enviarEn.difference(DateTime.now()).inMinutes + 1} min');
+        _programarTimerMotivacional(enviarEn.difference(DateTime.now()));
+        return;
+      }
+
+      // Obtener mensaje aleatorio activo
       final msgsSnap = await FirebaseFirestore.instance
-          .collection('configuracion').doc('mensajes_motivacionales')
-          .collection('mensajes').where('activo', isEqualTo: true).get();
-      if (msgsSnap.docs.isEmpty) return;
+          .collection('configuracion')
+          .doc('mensajes_motivacionales')
+          .collection('mensajes')
+          .where('activo', isEqualTo: true)
+          .get();
+      if (msgsSnap.docs.isEmpty) {
+        // Sin mensajes configurados: cerrar la tarea para no reintentar en
+        // silencio en cada apertura (antes quedaba pendiente para siempre).
+        try {
+          await FirebaseFirestore.instance
+              .collection('tareas_motivacionales')
+              .doc(email)
+              .update({
+            'enviado': true,
+            'enviar_en': FieldValue.delete(),
+            'ultimo_envio': FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
+        debugPrint(
+            'ℹ️ Sin mensajes motivacionales configurados — tarea cerrada');
+        return;
+      }
 
       final idx = DateTime.now().millisecondsSinceEpoch % msgsSnap.docs.length;
       final msgData = msgsSnap.docs[idx].data();
-      final texto = (msgData['texto'] as String? ?? '').replaceAll('{nombre}', nombre);
+      final texto =
+          (msgData['texto'] as String? ?? '').replaceAll('{nombre}', nombre);
       if (texto.isEmpty) return;
 
+      // Enviar solo el mensaje configurado, sin título redundante
+      await NotificacionService.enviarAUser(
+        destinatarioNombre: nombre,
+        titulo: '🌟 Mensaje para ti',
+        cuerpo: texto,
+        tipo: TipoNotificacion.motivacional,
+      );
+
+      // Marcar tarea como enviada con timestamp para cooldown
       await FirebaseFirestore.instance
-          .collection('tareas_motivacionales').doc(email)
+          .collection('tareas_motivacionales')
+          .doc(email)
           .update({
-            'enviado': true,
-            'ultimo_envio': FieldValue.serverTimestamp(),
-          });
+        'enviado': true,
+        'ultimo_envio': FieldValue.serverTimestamp(),
+      });
 
       debugPrint('✅ Mensaje motivacional enviado a $nombre');
     } catch (e) {
@@ -417,7 +702,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // ───────────────────────────────────────────────────────────
 
   Widget _buildDireccionesTarjeta(
-      String tarjetaId, String territorioId, String tarjetaNombre) {
+      String tarjetaId, String territorioId, String tarjetaNombre,
+      [String tipoTarjeta = 'normal']) {
     return StatefulBuilder(
       builder: (context, setLocalState) {
         if (!_estadosPorTarjeta.containsKey(tarjetaId)) {
@@ -425,6 +711,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
           _textosPorTarjeta[tarjetaId] = {};
           _modificadosPorTarjeta[tarjetaId] = {};
         }
+
+        // La escritura de la confirmación es asíncrona y termina después de
+        // este build. Guardar el rebuilder es lo que permite apagar el botón
+        // al terminar, en lugar de dejarlo habilitado para siempre.
+        _setStatePorTarjeta[tarjetaId] = setLocalState;
+        final guardando = _guardandoPorTarjeta[tarjetaId] == true;
 
         return FutureBuilder<List<DocumentSnapshot>>(
           future: Future.wait([
@@ -445,13 +737,16 @@ class _PublicadorTabState extends State<PublicadorTab> {
             }).toList();
 
             return FutureBuilder<QuerySnapshot>(
+              // No se filtra `estado` en la query: `isNotEqualTo` descarta los
+              // documentos SIN el campo `estado` (los que crea una versión
+              // antigua de la app), y quedaban invisibles en la tarjeta aunque
+              // sí contaran en el total. Se filtra en memoria.
               future: FirebaseFirestore.instance
                   .collection('direcciones_globales')
                   .where('tarjeta_id', isEqualTo: tarjetaId)
-                  .where('estado', isNotEqualTo: 'removida')
                   .get(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                if (!snapshot.hasData) {
                   return const Padding(
                     padding: EdgeInsets.all(12),
                     child: Text('Sin direcciones pendientes.',
@@ -459,64 +754,231 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   );
                 }
 
-                final direcciones = snapshot.data!.docs;
+                final direcciones = snapshot.data!.docs
+                    .where((d) =>
+                        (_safeData(d)['estado'] as String?) != 'removida')
+                    .toList();
+                if (direcciones.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('Sin direcciones pendientes.',
+                        style: TextStyle(color: Colors.grey)),
+                  );
+                }
 
+                // Ordenar: prioridades del mes anterior primero
                 final dirs = [...direcciones];
                 dirs.sort((a, b) {
-                  final aP = (_safeData(a)['prioridad_mes_anterior'] as bool?) == true ? 0 : 1;
-                  final bP = (_safeData(b)['prioridad_mes_anterior'] as bool?) == true ? 0 : 1;
+                  final aP =
+                      (_safeData(a)['prioridad_mes_anterior'] as bool?) == true
+                          ? 0
+                          : 1;
+                  final bP =
+                      (_safeData(b)['prioridad_mes_anterior'] as bool?) == true
+                          ? 0
+                          : 1;
                   return aP.compareTo(bP);
                 });
 
-                final cantPrioridad = dirs.where((d) =>
-                    (_safeData(d)['prioridad_mes_anterior'] as bool?) == true).length;
+                final cantPrioridad = dirs
+                    .where((d) =>
+                        (_safeData(d)['prioridad_mes_anterior'] as bool?) ==
+                        true)
+                    .length;
+
+                // ── Avance de la tarjeta ──────────────────────────────
+                //
+                // Se deriva de las direcciones, no de un contador guardado. Es
+                // el invariante que ya declara `_camposResultadoNuevo`: no hay
+                // campo que resetear ni que se pueda desfasar del mes.
+                //
+                // "Pendientes" son las que siguen sin resultado. Cuando llega
+                // a cero, la tarjeta está lista para cerrarse: eso es el cierre
+                // automático de la Fase 4 (§5.5), que todavía no existe, así que
+                // por ahora la barra solo informa.
+                //
+                // Las direcciones confirmadas con resultado negativo se van de
+                // la tarjeta (`tarjeta_id: ''` y `estado: 'removida'`), así que
+                // la suma no es el total original: es lo que queda en la tarjeta
+                // ahora. Por eso el texto dice "en esta tarjeta" y no "de la
+                // tarjeta".
+                // Criterio único de "completada" (igual que el resto de la app):
+                // `predicado == true` o `estado_predicacion == 'completada'`.
+                // Antes esta barra solo miraba `estado_predicacion`, así que una
+                // dirección ya predicada con ese campo ausente seguía contando
+                // como pendiente e inflaba la lista de pendientes.
+                final cntCompletadas =
+                    dirs.where((d) => _esDirPredicada(_safeData(d))).length;
+                final cntPendientes = dirs.where((d) {
+                  final data = _safeData(d);
+                  if (_esDirPredicada(data)) return false;
+                  final e =
+                      (data['estado_predicacion'] as String?) ?? 'pendiente';
+                  return e == 'pendiente' || e == 'asignada';
+                }).length;
+                final cntEnJuego = cntCompletadas + cntPendientes;
+                final avance =
+                    cntEnJuego > 0 ? cntCompletadas / cntEnJuego : 0.0;
 
                 if (_estadosPorTarjeta[tarjetaId]!.isEmpty) {
                   for (final dir in dirs) {
                     final data = _safeData(dir);
                     _estadosPorTarjeta[tarjetaId]![dir.id] =
-                        (data['estado_predicacion'] as String?) ?? 'pendiente';
+                        _esDirPredicada(data)
+                            ? 'completada'
+                            : ((data['estado_predicacion'] as String?) ??
+                                'pendiente');
                     _textosPorTarjeta[tarjetaId]![dir.id] =
                         (data['motivo_temporal'] as String?) ?? '';
                     _modificadosPorTarjeta[tarjetaId]![dir.id] = false;
+                    for (final campDoc in campanasActivas) {
+                      final cd =
+                          (campDoc.data() as Map<String, dynamic>?) ?? {};
+                      final n = (cd['nombre'] as String?) ?? '';
+                      if (n.isEmpty) continue;
+                      final k = 'campana_inv_${n}_${dir.id}';
+                      final entregada = data['campana_invitacion_$n'] == true ||
+                          data['campana_estado'] == 'entregada';
+                      _estadosPorTarjeta[tarjetaId]![k] =
+                          entregada ? 'true' : 'false';
+                    }
                   }
                 }
 
                 return Column(
                   children: [
+                    // Banner de prioridades si hay pendientes del mes anterior
                     if (cantPrioridad > 0)
                       Container(
                         margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: Colors.orange.shade50,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: Colors.orange.shade300),
                         ),
                         child: Row(children: [
-                          const Icon(Icons.priority_high, color: Colors.orange, size: 16),
+                          const Icon(Icons.priority_high,
+                              color: Colors.orange, size: 16),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
                               '⚠️ $cantPrioridad dirección(es) pendiente(s) del mes anterior',
-                              style: const TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.w600),
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.orange,
+                                  fontWeight: FontWeight.w600),
                             ),
                           ),
                         ]),
                       ),
 
+                    // ── Barra de avance de la tarjeta ─────────
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B5E20).withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: const Color(0xFF1B5E20).withOpacity(0.18)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.donut_large,
+                                size: 15, color: Color(0xFF1B5E20)),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Avance de la tarjeta',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.grey[800],
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '$cntCompletadas / $cntEnJuego',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1B5E20),
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: LinearProgressIndicator(
+                              value: avance,
+                              minHeight: 7,
+                              backgroundColor: Colors.grey.shade300,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                cntPendientes == 0
+                                    ? const Color(0xFF2E7D32)
+                                    : const Color(0xFF1B5E20),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            cntPendientes == 0
+                                ? 'Sin pendientes en esta tarjeta.'
+                                : '$cntPendientes pendiente(s) por confirmar.',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // ── Lista de direcciones ──────────────────
                     ...dirs.map((dirDoc) {
                       final data = _safeData(dirDoc);
                       final estadoLocal =
                           _estadosPorTarjeta[tarjetaId]![dirDoc.id] ??
                               'pendiente';
+                      final esComercial = tipoTarjeta == 'zona';
                       final otroTexto =
                           _textosPorTarjeta[tarjetaId]![dirDoc.id] ?? '';
+                      final comentarioActivo = _estadosPorTarjeta[tarjetaId]![
+                              'comentario_${dirDoc.id}'] ==
+                          'true';
+                      // Una dirección que ya está predicada dentro de una
+                      // tarjeta recibida es de SOLO LECTURA: no se puede volver
+                      // a marcar ni reenviar, su resultado ya está registrado.
+                      final esPredicada = (data['predicado'] == true) ||
+                          (data['estado_predicacion'] as String?) ==
+                              'completada';
+                      // Campañas activas que todavía no se entregaron en esta
+                      // dirección. Para una dirección ya predicada (solo
+                      // lectura) es lo único que se puede completar.
+                      final campanasNoEntregadas = esComercial
+                          ? const <String>[]
+                          : campanasActivas
+                              .map((c) {
+                                final cd =
+                                    (c.data() as Map<String, dynamic>?) ?? {};
+                                return (cd['nombre'] as String?) ?? '';
+                              })
+                              .where((n) =>
+                                  n.isNotEmpty &&
+                                  data['campana_invitacion_$n'] != true &&
+                                  data['campana_estado'] != 'entregada')
+                              .toList();
+                      final hayCampanaMarcada = campanasNoEntregadas.any((n) =>
+                          _estadosPorTarjeta[tarjetaId]![
+                              'campana_inv_${n}_${dirDoc.id}'] ==
+                          'true');
                       final calle = (data['calle'] as String?) ?? '';
                       final complemento =
                           (data['complemento'] as String?) ?? '';
-                      final detalles =
-                          (data['detalles'] as String?) ?? '';
+                      final detalles = (data['detalles'] as String?) ?? '';
                       final esPrioridad =
                           (data['prioridad_mes_anterior'] as bool?) == true;
                       final direccionCompleta = calle;
@@ -529,6 +991,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       } else if (estadoLocal == 'no_predicado') {
                         accentColor = const Color(0xFFE65100);
                         estadoIcon = Icons.hourglass_empty;
+                      } else if (estadoLocal == 'comercio_cerrado') {
+                        accentColor = const Color(0xFFC62828);
+                        estadoIcon = Icons.store_mall_directory_outlined;
                       } else if (estadoLocal == 'no_hispano') {
                         accentColor = const Color(0xFF1565C0);
                         estadoIcon = Icons.public_off;
@@ -554,6 +1019,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         ),
                         child: Column(
                           children: [
+                            // Borde superior de color
                             Container(
                               height: 4,
                               decoration: BoxDecoration(
@@ -570,6 +1036,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // Cabecera
                                   Row(
                                     children: [
                                       Icon(Icons.location_on,
@@ -598,14 +1065,99 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                           child: Icon(estadoIcon,
                                               size: 16, color: accentColor),
                                         ),
+
+                                      // ── Enviar dirección (Fase 2) ──
+                                      //
+                                      // Confirma SOLO esta dirección. El botón
+                                      // de la tarjeta entera sigue abajo, para
+                                      // cuando el publicador prefiera working
+                                      // de una sentada.
+                                      //
+                                      // Se habilita solo con una opción de
+                                      // estado marcada: los mismos valores que
+                                      // valida `_confirmarProcesamientoTarjetaInterno`,
+                                      // porque una dirección de zona no admite
+                                      // "No vive hispano".
+                                      Builder(builder: (ctxFila) {
+                                        final guardandoDir =
+                                            _guardandoPorDireccion[dirDoc.id] ==
+                                                true;
+                                        final estadosOk = esComercial
+                                            ? const {
+                                                'completada',
+                                                'comercio_cerrado'
+                                              }
+                                            : const {
+                                                'completada',
+                                                'no_hispano'
+                                              };
+                                        return Padding(
+                                          padding:
+                                              const EdgeInsets.only(left: 8),
+                                          child: SizedBox(
+                                            height: 30,
+                                            child: ElevatedButton.icon(
+                                              onPressed: ((estadosOk.contains(
+                                                                  estadoLocal) &&
+                                                              (!esPredicada ||
+                                                                  estadoLocal ==
+                                                                      'no_hispano')) ||
+                                                          hayCampanaMarcada) &&
+                                                      !guardandoDir
+                                                  ? () => _confirmarDireccion(
+                                                        tarjetaId,
+                                                        territorioId,
+                                                        tarjetaNombre,
+                                                        dirDoc,
+                                                        ctxFila,
+                                                        tipoTarjeta,
+                                                      )
+                                                  : null,
+                                              icon: guardandoDir
+                                                  ? const SizedBox(
+                                                      width: 12,
+                                                      height: 12,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        color: Colors.white,
+                                                      ),
+                                                    )
+                                                  : const Icon(Icons.send,
+                                                      size: 13),
+                                              label: Text(
+                                                guardandoDir ? '…' : 'Enviar',
+                                                style: const TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight:
+                                                        FontWeight.bold),
+                                              ),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor:
+                                                    const Color(0xFF1B5E20),
+                                                foregroundColor: Colors.white,
+                                                disabledBackgroundColor:
+                                                    Colors.grey.shade300,
+                                                disabledForegroundColor:
+                                                    Colors.grey.shade600,
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 10),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }),
                                     ],
                                   ),
 
+                                  // Complemento
                                   if (complemento.isNotEmpty) ...[
                                     const SizedBox(height: 4),
                                     Row(children: [
                                       const SizedBox(width: 22),
-                                      const Icon(Icons.apartment, size: 13, color: Colors.blueGrey),
+                                      const Icon(Icons.apartment,
+                                          size: 13, color: Colors.blueGrey),
                                       const SizedBox(width: 4),
                                       Expanded(
                                         child: Text(
@@ -620,20 +1172,25 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     ]),
                                   ],
 
+                                  // Detalles / observaciones
                                   if (detalles.isNotEmpty) ...[
                                     const SizedBox(height: 4),
                                     Container(
                                       margin: const EdgeInsets.only(left: 22),
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 5),
                                       decoration: BoxDecoration(
                                         color: Colors.amber.shade50,
                                         borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.amber.shade200),
+                                        border: Border.all(
+                                            color: Colors.amber.shade200),
                                       ),
                                       child: Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          const Icon(Icons.info_outline, size: 13, color: Colors.amber),
+                                          const Icon(Icons.info_outline,
+                                              size: 13, color: Colors.amber),
                                           const SizedBox(width: 4),
                                           Expanded(
                                             child: Text(
@@ -649,92 +1206,179 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     ),
                                   ],
 
+                                  // Badge prioridad mes anterior
                                   if (esPrioridad) ...[
                                     const SizedBox(height: 4),
                                     Container(
                                       margin: const EdgeInsets.only(left: 22),
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
                                       decoration: BoxDecoration(
                                         color: Colors.orange.shade50,
                                         borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.orange.shade300),
+                                        border: Border.all(
+                                            color: Colors.orange.shade300),
                                       ),
                                       child: const Row(children: [
-                                        Icon(Icons.history, size: 12, color: Colors.orange),
+                                        Icon(Icons.history,
+                                            size: 12, color: Colors.orange),
                                         SizedBox(width: 4),
                                         Text('Pendiente del mes anterior',
-                                            style: TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.w600)),
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.orange,
+                                                fontWeight: FontWeight.w600)),
                                       ]),
                                     ),
                                   ],
 
                                   const SizedBox(height: 10),
-                                  Divider(height: 1, thickness: 1, color: Colors.grey.shade100),
+                                  Divider(
+                                      height: 1,
+                                      thickness: 1,
+                                      color: Colors.grey.shade100),
                                   const SizedBox(height: 8),
 
-                                  ...[
-                                    {
-                                      'label': 'Se predicó',
-                                      'value': 'completada',
-                                      'color': const Color(0xFF2E7D32),
-                                      'icon': Icons.check_circle_outline,
-                                    },
-                                    {
-                                      'label': 'No se predicó',
-                                      'value': 'no_predicado',
-                                      'color': const Color(0xFFE65100),
-                                      'icon': Icons.hourglass_empty,
-                                    },
-                                    {
-                                      'label': 'No vive hispanohablante',
-                                      'value': 'no_hispano',
-                                      'color': const Color(0xFF1565C0),
-                                      'icon': Icons.public_off,
-                                    },
-                                    {
-                                      'label': 'Otro (escribir nota)',
-                                      'value': 'otro',
-                                      'color': const Color(0xFF6A1B9A),
-                                      'icon': Icons.edit_note,
-                                    },
-                                  ].map((opcion) {
+                                  // Aviso de solo lectura para direcciones ya
+                                  // predicadas que vinieron dentro de la
+                                  // tarjeta recibida.
+                                  if (esPredicada) ...[
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2E7D32)
+                                            .withOpacity(0.06),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                            color: const Color(0xFF2E7D32)
+                                                .withOpacity(0.2)),
+                                      ),
+                                      child: const Row(children: [
+                                        Icon(Icons.lock_outline,
+                                            size: 13, color: Color(0xFF2E7D32)),
+                                        SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            'Ya predicada — no editable en esta tarjeta',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: Color(0xFF2E7D32),
+                                                fontWeight: FontWeight.w600),
+                                          ),
+                                        ),
+                                      ]),
+                                    ),
+                                  ],
+
+                                  // ── Opciones de predicación ──
+                                  ...(esComercial
+                                          ? [
+                                              {
+                                                'label':
+                                                    '✅ Sí visité el comercio',
+                                                'value': 'completada',
+                                                'color':
+                                                    const Color(0xFF2E7D32),
+                                                'icon':
+                                                    Icons.check_circle_outline,
+                                              },
+                                              {
+                                                'label':
+                                                    '🚫 El comercio ya no existe',
+                                                'value': 'comercio_cerrado',
+                                                'color':
+                                                    const Color(0xFFC62828),
+                                                'icon': Icons
+                                                    .store_mall_directory_outlined,
+                                              },
+                                            ]
+                                          : [
+                                              {
+                                                'label': 'Se predicó',
+                                                'value': 'completada',
+                                                'color':
+                                                    const Color(0xFF2E7D32),
+                                                'icon':
+                                                    Icons.check_circle_outline,
+                                              },
+                                              {
+                                                'label':
+                                                    'No vive hispanohablante',
+                                                'value': 'no_hispano',
+                                                'color':
+                                                    const Color(0xFF1565C0),
+                                                'icon': Icons.public_off,
+                                              },
+                                            ])
+                                      .map((opcion) {
                                     final val = opcion['value'] as String;
                                     final color = opcion['color'] as Color;
                                     final isSelected = estadoLocal == val;
 
+                                    // Una dirección ya predicada es de solo
+                                    // lectura, salvo "No vive hispanohablante":
+                                    // sacarla del listado sigue siendo una
+                                    // decisión válida y no reescribe la
+                                    // predicación. Sin esta excepción no había
+                                    // forma de remover una dirección predicada.
+                                    final bloqueada =
+                                        esPredicada && val != 'no_hispano';
                                     return InkWell(
-                                      onTap: () => setLocalState(() {
-                                        _estadosPorTarjeta[tarjetaId]![dirDoc.id] = val;
-                                        _modificadosPorTarjeta[tarjetaId]![dirDoc.id] = true;
-                                      }),
+                                      onTap: bloqueada
+                                          ? null
+                                          : () => setLocalState(() {
+                                                _estadosPorTarjeta[tarjetaId]![
+                                                    dirDoc.id] = val;
+                                                _modificadosPorTarjeta[
+                                                        tarjetaId]![dirDoc.id] =
+                                                    true;
+                                              }),
                                       borderRadius: BorderRadius.circular(8),
                                       child: Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 3),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 3),
                                         child: Row(
                                           children: [
                                             Radio<String>(
                                               value: val,
                                               groupValue: estadoLocal,
-                                              onChanged: (v) => setLocalState(() {
-                                                _estadosPorTarjeta[tarjetaId]![dirDoc.id] = v!;
-                                                _modificadosPorTarjeta[tarjetaId]![dirDoc.id] = true;
-                                              }),
+                                              onChanged: bloqueada
+                                                  ? null
+                                                  : (v) => setLocalState(() {
+                                                        _estadosPorTarjeta[
+                                                                tarjetaId]![
+                                                            dirDoc.id] = v!;
+                                                        _modificadosPorTarjeta[
+                                                                tarjetaId]![
+                                                            dirDoc.id] = true;
+                                                      }),
                                               activeColor: color,
-                                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                              visualDensity: VisualDensity.compact,
+                                              materialTapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                              visualDensity:
+                                                  VisualDensity.compact,
                                             ),
                                             Icon(
                                               opcion['icon'] as IconData,
                                               size: 16,
-                                              color: isSelected ? color : Colors.grey.shade400,
+                                              color: isSelected
+                                                  ? color
+                                                  : Colors.grey.shade400,
                                             ),
                                             const SizedBox(width: 6),
                                             Text(
                                               opcion['label'] as String,
                                               style: TextStyle(
                                                 fontSize: 13,
-                                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                                color: isSelected ? color : const Color(0xFF546E7A),
+                                                fontWeight: isSelected
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
+                                                color: isSelected
+                                                    ? color
+                                                    : const Color(0xFF546E7A),
                                               ),
                                             ),
                                           ],
@@ -743,19 +1387,88 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     );
                                   }).toList(),
 
-                                  if (estadoLocal == 'otro')
+                                  // ── Checkbox comentario en paralelo ──
+                                  InkWell(
+                                    onTap: esPredicada
+                                        ? null
+                                        : () => setLocalState(() {
+                                              final key =
+                                                  'comentario_${dirDoc.id}';
+                                              _estadosPorTarjeta[tarjetaId]![
+                                                      key] =
+                                                  (comentarioActivo)
+                                                      ? 'false'
+                                                      : 'true';
+                                              _modificadosPorTarjeta[
+                                                  tarjetaId]![dirDoc.id] = true;
+                                            }),
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 3),
+                                      child: Row(children: [
+                                        Checkbox(
+                                          value: comentarioActivo,
+                                          onChanged: esPredicada
+                                              ? null
+                                              : (v) => setLocalState(() {
+                                                    _estadosPorTarjeta[
+                                                                tarjetaId]![
+                                                            'comentario_${dirDoc.id}'] =
+                                                        (v ?? false)
+                                                            ? 'true'
+                                                            : 'false';
+                                                    _modificadosPorTarjeta[
+                                                            tarjetaId]![
+                                                        dirDoc.id] = true;
+                                                  }),
+                                          activeColor: const Color(0xFF6A1B9A),
+                                          materialTapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        const Icon(Icons.edit_note,
+                                            size: 16, color: Color(0xFF6A1B9A)),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '💬 Comentario',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: comentarioActivo
+                                                ? FontWeight.w600
+                                                : FontWeight.w400,
+                                            color: comentarioActivo
+                                                ? const Color(0xFF6A1B9A)
+                                                : const Color(0xFF546E7A),
+                                          ),
+                                        ),
+                                      ]),
+                                    ),
+                                  ),
+
+                                  // Campo texto del comentario
+                                  if (comentarioActivo)
                                     Padding(
-                                      padding: const EdgeInsets.only(left: 36, top: 6, bottom: 4),
+                                      padding: const EdgeInsets.only(
+                                          left: 36, top: 6, bottom: 4),
                                       child: TextField(
-                                        controller: TextEditingController(text: otroTexto)
-                                          ..selection = TextSelection.fromPosition(
-                                            TextPosition(offset: otroTexto.length),
+                                        readOnly: esPredicada,
+                                        controller: TextEditingController(
+                                            text: otroTexto)
+                                          ..selection =
+                                              TextSelection.fromPosition(
+                                            TextPosition(
+                                                offset: otroTexto.length),
                                           ),
                                         decoration: InputDecoration(
-                                          hintText: 'Escribe el motivo...',
+                                          hintText: esComercial
+                                              ? 'Escribe un comentario...'
+                                              : 'Escribe una nota...',
                                           border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(8),
-                                            borderSide: BorderSide(color: Colors.purple.shade200),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            borderSide: BorderSide(
+                                                color: Colors.purple.shade200),
                                           ),
                                           isDense: true,
                                           filled: true,
@@ -763,28 +1476,36 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         ),
                                         maxLines: 2,
                                         onChanged: (value) => setLocalState(() {
-                                          _textosPorTarjeta[tarjetaId]![dirDoc.id] = value;
+                                          _textosPorTarjeta[tarjetaId]![
+                                              dirDoc.id] = value;
                                         }),
                                       ),
                                     ),
 
-                                  if (campanasActivas.isNotEmpty) ...[
+                                  // ── Checkboxes de campaña ────
+                                  if (!esComercial &&
+                                      campanasActivas.isNotEmpty) ...[
                                     const SizedBox(height: 8),
                                     Container(
                                       padding: const EdgeInsets.all(10),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFE65100).withOpacity(0.05),
+                                        color: const Color(0xFFE65100)
+                                            .withOpacity(0.05),
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(
-                                          color: const Color(0xFFE65100).withOpacity(0.2),
+                                          color: const Color(0xFFE65100)
+                                              .withOpacity(0.2),
                                         ),
                                       ),
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Row(
                                             children: [
-                                              const Icon(Icons.campaign, color: Color(0xFFE65100), size: 14),
+                                              const Icon(Icons.campaign,
+                                                  color: Color(0xFFE65100),
+                                                  size: 14),
                                               const SizedBox(width: 4),
                                               const Text(
                                                 'Campaña especial',
@@ -796,36 +1517,83 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                               ),
                                               const Spacer(),
                                               InkWell(
-                                                onTap: () => setLocalState(() {
-                                                  _estadosPorTarjeta[tarjetaId]!['campana_oculta_${dirDoc.id}'] = 'true';
-                                                }),
-                                                child: const Icon(Icons.close, size: 16, color: Color(0xFFE65100)),
+                                                onTap: esPredicada
+                                                    ? null
+                                                    : () => setLocalState(() {
+                                                          _estadosPorTarjeta[
+                                                                      tarjetaId]![
+                                                                  'campana_oculta_${dirDoc.id}'] =
+                                                              'true';
+                                                        }),
+                                                child: const Icon(Icons.close,
+                                                    size: 16,
+                                                    color: Color(0xFFE65100)),
                                               ),
                                             ],
                                           ),
                                           const SizedBox(height: 6),
                                           ...campanasActivas.map((campDoc) {
-                                            final campData = (campDoc.data() as Map<String, dynamic>?) ?? {};
-                                            final campNombre = (campData['nombre'] as String?) ?? 'Campaña';
-                                            final campKey = 'campana_inv_${campNombre}_${dirDoc.id}';
-                                            final marcada = _estadosPorTarjeta[tarjetaId]![campKey] == 'true';
+                                            final campData = (campDoc.data()
+                                                    as Map<String, dynamic>?) ??
+                                                {};
+                                            final campNombre =
+                                                (campData['nombre']
+                                                        as String?) ??
+                                                    'Campaña';
+                                            final campKey =
+                                                'campana_inv_${campNombre}_${dirDoc.id}';
+                                            final marcada = _estadosPorTarjeta[
+                                                    tarjetaId]![campKey] ==
+                                                'true';
+                                            // Ya entregada en esta dirección:
+                                            // no se puede volver a marcar.
+                                            final entregada =
+                                                data['campana_invitacion_$campNombre'] ==
+                                                        true ||
+                                                    data['campana_estado'] ==
+                                                        'entregada';
+                                            // En una dirección ya predicada se
+                                            // permite marcar solo las campañas
+                                            // que todavía falten.
+                                            final puedeMarcar = !entregada;
 
                                             return InkWell(
-                                              onTap: () => setLocalState(() {
-                                                _estadosPorTarjeta[tarjetaId]![campKey] = marcada ? 'false' : 'true';
-                                              }),
+                                              onTap: puedeMarcar
+                                                  ? () => setLocalState(() {
+                                                        _estadosPorTarjeta[
+                                                                    tarjetaId]![
+                                                                campKey] =
+                                                            marcada
+                                                                ? 'false'
+                                                                : 'true';
+                                                      })
+                                                  : null,
                                               child: Padding(
-                                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        vertical: 2),
                                                 child: Row(
                                                   children: [
                                                     Checkbox(
                                                       value: marcada,
-                                                      onChanged: (v) => setLocalState(() {
-                                                        _estadosPorTarjeta[tarjetaId]![campKey] = v == true ? 'true' : 'false';
-                                                      }),
-                                                      activeColor: const Color(0xFFE65100),
-                                                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                      visualDensity: VisualDensity.compact,
+                                                      onChanged: puedeMarcar
+                                                          ? (v) =>
+                                                              setLocalState(() {
+                                                                _estadosPorTarjeta[
+                                                                        tarjetaId]![
+                                                                    campKey] = v ==
+                                                                        true
+                                                                    ? 'true'
+                                                                    : 'false';
+                                                              })
+                                                          : null,
+                                                      activeColor: const Color(
+                                                          0xFFE65100),
+                                                      materialTapTargetSize:
+                                                          MaterialTapTargetSize
+                                                              .shrinkWrap,
+                                                      visualDensity:
+                                                          VisualDensity.compact,
                                                     ),
                                                     const SizedBox(width: 4),
                                                     Expanded(
@@ -833,8 +1601,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                                         'Invitación entregada — $campNombre',
                                                         style: TextStyle(
                                                           fontSize: 12,
-                                                          color: marcada ? const Color(0xFFE65100) : Colors.grey[600],
-                                                          fontWeight: marcada ? FontWeight.w600 : FontWeight.normal,
+                                                          color: marcada
+                                                              ? const Color(
+                                                                  0xFFE65100)
+                                                              : Colors
+                                                                  .grey[600],
+                                                          fontWeight: marcada
+                                                              ? FontWeight.w600
+                                                              : FontWeight
+                                                                  .normal,
                                                         ),
                                                       ),
                                                     ),
@@ -855,21 +1630,46 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       );
                     }).toList(),
 
+                    // ── Botones ──────────────────────────────
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                       child: Column(
                         children: [
+                          // Botón Ver Ruta
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
-                              onPressed: () => _abrirRutaGoogleMaps(direcciones),
+                              onPressed: () =>
+                                  _abrirRutaGoogleMapsConPestana(direcciones),
                               icon: const Icon(Icons.map_outlined, size: 18),
                               label: const Text('Ver ruta en Google Maps',
-                                  style: TextStyle(fontWeight: FontWeight.bold)),
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.blue.shade700,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          // Botón Navegar en la app
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => _abrirNavegacionInterna(
+                                  direcciones, tarjetaNombre),
+                              icon: const Icon(Icons.navigation_outlined,
+                                  size: 18),
+                              label: const Text('Navegar en la app',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1565C0),
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
                               ),
                             ),
                           ),
@@ -881,15 +1681,28 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                   onPressed: () => setLocalState(() {
                                     for (final dir in direcciones) {
                                       final data = _safeData(dir);
-                                      _estadosPorTarjeta[tarjetaId]![dir.id] = (data['estado_predicacion'] as String?) ?? 'pendiente';
-                                      _textosPorTarjeta[tarjetaId]![dir.id] = (data['motivo_temporal'] as String?) ?? '';
-                                      _modificadosPorTarjeta[tarjetaId]![dir.id] = false;
+                                      _estadosPorTarjeta[tarjetaId]![dir.id] =
+                                          _esDirPredicada(data)
+                                              ? 'completada'
+                                              : ((data['estado_predicacion']
+                                                      as String?) ??
+                                                  'pendiente');
+                                      _estadosPorTarjeta[tarjetaId]![
+                                          'comentario_${dir.id}'] = 'false';
+                                      _textosPorTarjeta[tarjetaId]![dir.id] =
+                                          (data['motivo_temporal']
+                                                  as String?) ??
+                                              '';
+                                      _modificadosPorTarjeta[tarjetaId]![
+                                          dir.id] = false;
                                     }
                                   }),
                                   style: OutlinedButton.styleFrom(
                                     foregroundColor: Colors.black54,
-                                    side: const BorderSide(color: Colors.black26),
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    side:
+                                        const BorderSide(color: Colors.black26),
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
                                   ),
                                   child: const Text('Cancelar'),
                                 ),
@@ -898,19 +1711,39 @@ class _PublicadorTabState extends State<PublicadorTab> {
                               Expanded(
                                 flex: 2,
                                 child: ElevatedButton.icon(
-                                  onPressed: () async => _confirmarProcesamientoTarjeta(
-                                    tarjetaId,
-                                    territorioId,
-                                    tarjetaNombre,
-                                    direcciones,
-                                    context,
-                                  ),
-                                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                                  label: const Text('Confirmar', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  onPressed: guardando
+                                      ? null
+                                      : () async =>
+                                          _confirmarProcesamientoTarjeta(
+                                            tarjetaId,
+                                            territorioId,
+                                            tarjetaNombre,
+                                            direcciones,
+                                            context,
+                                            tipoTarjeta,
+                                          ),
+                                  icon: guardando
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Icon(Icons.check_circle_outline,
+                                          size: 18),
+                                  label: Text(
+                                      guardando ? 'Guardando…' : 'Confirmar',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF1B5E20),
                                     foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    disabledBackgroundColor:
+                                        Colors.green.shade900,
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 14),
                                   ),
                                 ),
                               ),
@@ -933,7 +1766,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // RUTA GOOGLE MAPS
   // ───────────────────────────────────────────────────────────
 
-  Future<void> _abrirRutaGoogleMaps(List<QueryDocumentSnapshot> direcciones) async {
+  Future<void> _abrirRutaGoogleMapsConPestana(
+      List<QueryDocumentSnapshot> direcciones) async {
     if (direcciones.isEmpty) return;
 
     if (mounted) {
@@ -945,78 +1779,124 @@ class _PublicadorTabState extends State<PublicadorTab> {
       );
     }
 
-    String? origenCoords;
+    // 1. Ubicación del usuario (origen y referencia para ordenar).
+    double? origenLat;
+    double? origenLng;
     try {
       final permiso = await Geolocator.requestPermission();
-      if (permiso == LocationPermission.always || permiso == LocationPermission.whileInUse) {
+      if (permiso == LocationPermission.always ||
+          permiso == LocationPermission.whileInUse) {
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.high,
             timeLimit: Duration(seconds: 8),
           ),
         );
-        origenCoords = '${pos.latitude},${pos.longitude}';
+        origenLat = pos.latitude;
+        origenLng = pos.longitude;
       }
     } catch (_) {}
 
-    final List<String> coordsDirecciones = [];
-
+    // 2. Resolver coordenadas (Firestore o Mapbox). Se conserva lat/lng para
+    //    ordenar por cercanía; si no se pudo geocodificar, se deja el texto
+    //    como último recurso para Google Maps.
+    final puntos = <_PuntoRuta>[];
     for (final doc in direcciones) {
       final data = doc.data() as Map<String, dynamic>;
-      final lat = data['lat'];
-      final lng = data['lng'];
+      final prioridad = data['prioridad_mes_anterior'] == true;
 
-      if (lat != null && lng != null && lat.toString() != '0' && lng.toString() != '0') {
-        coordsDirecciones.add('$lat,$lng');
+      final la = double.tryParse('${data['lat']}');
+      final lo = double.tryParse('${data['lng']}');
+      if (la != null && lo != null && !(la == 0 && lo == 0)) {
+        puntos.add(_PuntoRuta('$la,$lo', la, lo, prioridad));
+        continue;
+      }
+
+      final calle = (data['calle'] as String? ?? '').trim();
+      final comp = (data['complemento'] as String? ?? '').trim();
+      final texto = comp.isNotEmpty ? '$calle, $comp' : calle;
+
+      final coords = await MapboxService.geocodificar(texto);
+      if (coords != null) {
+        FirebaseFirestore.instance
+            .collection('direcciones_globales')
+            .doc(doc.id)
+            .update({'lat': coords[0], 'lng': coords[1]});
+        puntos.add(_PuntoRuta(
+            '${coords[0]},${coords[1]}', coords[0], coords[1], prioridad));
       } else {
-        final calle = (data['calle'] as String? ?? '').trim();
-        final comp = (data['complemento'] as String? ?? '').trim();
-        final texto = comp.isNotEmpty ? '$calle, $comp' : calle;
-
-        final coords = await MapboxService.geocodificar(texto);
-        if (coords != null) {
-          FirebaseFirestore.instance
-              .collection('direcciones_globales')
-              .doc(doc.id)
-              .update({'lat': coords[0], 'lng': coords[1]});
-          coordsDirecciones.add('${coords[0]},${coords[1]}');
-        } else {
-          final full = comp.isNotEmpty ? '$calle, $comp, Araucária, PR' : '$calle, Araucária, PR';
-          coordsDirecciones.add(Uri.encodeQueryComponent(full).replaceAll('+', '%20'));
-        }
+        final full = comp.isNotEmpty
+            ? '$calle, $comp, Araucária, PR'
+            : '$calle, Araucária, PR';
+        puntos.add(_PuntoRuta(
+            Uri.encodeQueryComponent(full).replaceAll('+', '%20'),
+            null,
+            null,
+            prioridad));
       }
     }
 
     if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
-    if (coordsDirecciones.isEmpty) return;
+    if (puntos.isEmpty) return;
+
+    // 3. Ordenar por cercanía (prioridades primero) desde la ubicación actual.
+    final coordsDirecciones = _ordenarPorCercania(puntos, origenLat, origenLng)
+        .map((p) => p.valor)
+        .toList();
+
+    // 4. URL de Google Maps iniciando la navegación directamente.
+    final origen = (origenLat != null && origenLng != null)
+        ? '&origin=$origenLat,$origenLng'
+        : '';
+    const extras = '&travelmode=walking&dir_action=navigate';
 
     String urlString;
-    final origen = origenCoords != null ? '&origin=$origenCoords' : '';
-
     if (coordsDirecciones.length == 1) {
       urlString = 'https://www.google.com/maps/dir/?api=1$origen'
-          '&destination=${coordsDirecciones.first}'
-          '&travelmode=walking';
+          '&destination=${coordsDirecciones.first}$extras';
     } else {
       final destino = coordsDirecciones.last;
-      final waypoints = coordsDirecciones
-          .sublist(0, coordsDirecciones.length - 1)
-          .join('|');
+      // Waypoints = todas menos la última, separadas por | LITERAL
+      final waypoints =
+          coordsDirecciones.sublist(0, coordsDirecciones.length - 1).join('|');
 
       urlString = 'https://www.google.com/maps/dir/?api=1$origen'
           '&destination=$destino'
-          '&waypoints=$waypoints'
-          '&travelmode=walking';
+          '&waypoints=$waypoints$extras';
     }
 
-    final uri = Uri.parse(urlString);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
+    // En iOS, con un solo destino se prefiere Apple Maps; el resto usa Google Maps
+    // y se fuerza una pestaña nueva. Usamos la pestaña ya abierta.
+    if (defaultTargetPlatform == TargetPlatform.iOS &&
+        coordsDirecciones.length == 1) {
+      final latLng = coordsDirecciones.first;
+      final appleUri = Uri.parse('https://maps.apple.com/?q=$latLng');
+      try {
+        final ok = await launchUrl(appleUri,
+            mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+        if (ok) return;
+      } catch (_) {}
+    }
+
+    // Abrir Google Maps en la pestaña ya existente (solución para iOS)
+    try {
+      // Google Maps URL para todas las plataformas
+      final String urlGoogleMaps = urlString;
+      final ok = await launchUrl(Uri.parse(urlGoogleMaps),
+          mode: LaunchMode.externalApplication, webOnlyWindowName: '_blank');
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir el mapa'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No se pudo abrir Google Maps'),
+            content: Text('No se pudo abrir el mapa'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1025,33 +1905,329 @@ class _PublicadorTabState extends State<PublicadorTab> {
   }
 
   // ───────────────────────────────────────────────────────────
+  // NAVEGACIÓN CONTINUA DENTRO DE LA APP
+  // ───────────────────────────────────────────────────────────
+
+  /// Abre la navegación continua: el mapa avanza solo al llegar a cada parada.
+  Future<void> _abrirNavegacionInterna(
+      List<QueryDocumentSnapshot> direcciones, String tarjetaNombre) async {
+    if (direcciones.isEmpty) return;
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('📍 Preparando navegación...'),
+          duration: Duration(seconds: 10),
+        ),
+      );
+    }
+
+    // Ubicación actual para ordenar por cercanía (si el permiso lo permite).
+    double? origenLat;
+    double? origenLng;
+    try {
+      final permiso = await Geolocator.checkPermission();
+      if (permiso == LocationPermission.always ||
+          permiso == LocationPermission.whileInUse) {
+        final pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 8),
+          ),
+        );
+        origenLat = pos.latitude;
+        origenLng = pos.longitude;
+      }
+    } catch (_) {}
+
+    final destinos = await RutaOrdenService.preparar(
+      direcciones,
+      origenLat: origenLat,
+      origenLng: origenLng,
+    );
+
+    if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
+    if (!mounted) return;
+
+    if (destinos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudieron ubicar las direcciones en el mapa'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // `_RutaNavegacionTransparente` no absorbe toques (sin barrera modal):
+    // al minimizar el mapa, la app de abajo sigue siendo usable.
+    await Navigator.of(context).push(
+      RutaNavegacionTransparente<Object?>(
+        pageBuilder: (_, __, ___) => NavegacionScreen(
+          titulo: tarjetaNombre,
+          destinos: destinos,
+        ),
+      ),
+    );
+  }
+
+  /// Ordena las paradas por vecino más cercano desde (lat,lng), dejando las
+  /// prioridades del mes anterior primero y las sin coordenadas al final.
+  List<_PuntoRuta> _ordenarPorCercania(
+      List<_PuntoRuta> puntos, double? lat, double? lng) {
+    if (lat == null || lng == null || puntos.length < 2) return puntos;
+
+    final conCoord =
+        puntos.where((p) => p.lat != null && p.lng != null).toList();
+    final sinCoord =
+        puntos.where((p) => p.lat == null || p.lng == null).toList();
+
+    final prioridades = conCoord.where((p) => p.prioridad).toList();
+    final resto = conCoord.where((p) => !p.prioridad).toList();
+
+    final ordenados = <_PuntoRuta>[];
+    var cLat = lat;
+    var cLng = lng;
+
+    for (final grupo in [prioridades, resto]) {
+      final pendientes = [...grupo];
+      while (pendientes.isNotEmpty) {
+        var mejor = 0;
+        var mejorDist = double.infinity;
+        for (var i = 0; i < pendientes.length; i++) {
+          final d = Geolocator.distanceBetween(
+              cLat, cLng, pendientes[i].lat!, pendientes[i].lng!);
+          if (d < mejorDist) {
+            mejorDist = d;
+            mejor = i;
+          }
+        }
+        final elegido = pendientes.removeAt(mejor);
+        ordenados.add(elegido);
+        cLat = elegido.lat!;
+        cLng = elegido.lng!;
+      }
+    }
+
+    return [...ordenados, ...sinCoord];
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // REINTENTAR ENVIO RUTA
+  // ───────────────────────────────────────────────────────────
+
+  void reintentarEnvioRuta(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No se puede abrir la URL'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al reintentar: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // CONFIRMAR PROCESAMIENTO
   // ───────────────────────────────────────────────────────────
 
+  /// Campos del modelo nuevo, escritos junto a los campos viejos.
+  ///
+  /// Esto es un puente, no un reemplazo. La pantalla actual sigue leyendo
+  /// `predicado` y `estado_predicacion`, y las pantallas de estadísticas los leen
+  /// directo de Firestore: quitar los campos viejos ahora haría que las
+  /// estadísticas dejaran de cuadrar sin que nadie lo note. Escribiendo los dos,
+  /// el modelo nuevo queda poblado y coherente desde el primer día, y los campos
+  /// viejos se pueden retirar en un paso aparte y con las estadísticas a la vista.
+  ///
+  /// El avance NO se escribe acá a propósito. No hay ningún contador que
+  /// resetear ni que se pueda desfasar: `trabajada` se deriva de que esta
+  /// dirección tenga o no resultado, así que la verdad vive en un solo lugar.
+  ///
+  /// No incluye `campana_estado`: la invitación se resuelve en su propio bloque
+  /// del bucle, más abajo.
+  Map<String, dynamic> _camposResultadoNuevo(String resultado, String usuario) {
+    final ahora = Timestamp.now();
+    return {
+      'resultado_predicacion': resultado,
+      'avance_direccion': 'trabajada',
+      'fecha_confirmacion': ahora,
+      'resultado_por': usuario,
+      'fecha_actualizacion': ahora,
+    };
+  }
+
+  /// Confirmar una tarjeta completa.
+  ///
+  /// Envuelve a [._confirmarProcesamientoTarjetaInterno] solo para apagar el
+  /// botón en tiempo seguro. Va aparte en lugar de un `try/finally` en el
+  /// cuerpo porque ese método tiene varios `return` de validación y muchos
+  /// cientos de líneas: envolverlo obligaría a reindentar todo y el diff
+  ///Tapaba las partes que importan.
   Future<void> _confirmarProcesamientoTarjeta(
       String tarjetaId,
       String territorioId,
       String tarjetaNombre,
       List<QueryDocumentSnapshot> direcciones,
-      BuildContext context) async {
+      BuildContext context,
+      [String tipoTarjeta = 'normal',
+      bool cerrarTarjeta = true]) async {
+    if (_guardandoPorTarjeta[tarjetaId] == true) return;
+
+    // Una confirmación individual en curso ya está escribiendo en direcciones de
+    // esta misma tarjeta. Confirmar la entera ahora leería el estado local antes
+    // de que el otro guardado termine y cerraría la tarjeta con direcciones sin
+    // resultado. Se espera a que termine en lugar de solaparse.
+    if (_guardandoPorDireccion.values.any((v) => v)) return;
+
+    _guardandoPorTarjeta[tarjetaId] = true;
+    _reconstruirTarjeta(tarjetaId);
+    try {
+      await _confirmarProcesamientoTarjetaInterno(
+        tarjetaId,
+        territorioId,
+        tarjetaNombre,
+        direcciones,
+        context,
+        tipoTarjeta,
+        cerrarTarjeta,
+      );
+    } finally {
+      _guardandoPorTarjeta[tarjetaId] = false;
+      _reconstruirTarjeta(tarjetaId);
+    }
+  }
+
+  /// Confirmar UNA dirección (Fase 2 del plan, §5.2).
+  ///
+  /// Reutiliza el mismo camino de escritura que la confirmación de tarjeta
+  /// entera, y por eso no duplica ninguna de las reglas: los mismos cinco
+  /// destinos (`completada`, `no_predicado`, `comercio_cerrado`, `no_hispano`,
+  /// `otro`), la misma escritura doble de campos viejos y nuevos, el mismo
+  /// registro de movimientos temporales y el mismo aviso a administración.
+  ///
+  /// Lo que cambia es el alcance: se pasa una lista de una sola dirección, así
+  /// que la validación "todas o nada" de la línea 1599 pasa a validar solo esa,
+  /// y `cerrarTarjeta: false` evita que una sola dirección cierre la tarjeta
+  /// entera.
+  ///
+  /// El cierre automático cuando ya no queda ninguna pendiente es la Fase 4
+  /// (§5.5). Acá la tarjeta se queda abierta a propósito.
+  Future<void> _confirmarDireccion(
+    String tarjetaId,
+    String territorioId,
+    String tarjetaNombre,
+    QueryDocumentSnapshot direccion,
+    BuildContext context,
+    String tipoTarjeta,
+  ) async {
+    if (_guardandoPorDireccion[direccion.id] == true) return;
+
+    // Mismo motivo que en `_confirmarProcesamientoTarjeta`: mientras se guarda
+    // la tarjeta entera, esta dirección se está tocando en el otro guardado.
+    if (_guardandoPorTarjeta[tarjetaId] == true) return;
+
+    _guardandoPorDireccion[direccion.id] = true;
+    _reconstruirTarjeta(tarjetaId);
+    try {
+      await _confirmarProcesamientoTarjetaInterno(
+        tarjetaId,
+        territorioId,
+        tarjetaNombre,
+        [direccion],
+        context,
+        tipoTarjeta,
+        false,
+      );
+    } finally {
+      _guardandoPorDireccion[direccion.id] = false;
+      _reconstruirTarjeta(tarjetaId);
+    }
+  }
+
+  /// Reconstruye una tarjeta sin contexto.
+  ///
+  /// El rebuilder guardado puede quedar viejo si la tarjeta se colapsó mientras
+  /// se guardaba. Refreshar la UI nunca vale una excepción, y sin esto un error
+  /// de eso aparecería dentro del `finally` y ocultaría el resultado real del
+  /// guardado.
+  void _reconstruirTarjeta(String tarjetaId) {
+    final rebuild = _setStatePorTarjeta[tarjetaId];
+    if (rebuild == null || !mounted) return;
+    try {
+      rebuild(() {});
+    } catch (_) {
+      // La tarjeta ya no está en el árbol. No hay nada que refrescar.
+    }
+  }
+
+  Future<void> _confirmarProcesamientoTarjetaInterno(
+      String tarjetaId,
+      String territorioId,
+      String tarjetaNombre,
+      List<QueryDocumentSnapshot> direcciones,
+      BuildContext context,
+      [String tipoTarjeta = 'normal',
+      bool cerrarTarjeta = true]) async {
     final estados = _estadosPorTarjeta[tarjetaId] ?? {};
     final textos = _textosPorTarjeta[tarjetaId] ?? {};
+    final esComercial = tipoTarjeta == 'zona';
+    final estadosValidos = esComercial
+        ? {'completada', 'comercio_cerrado'}
+        : {'completada', 'no_hispano'};
 
+    // Con la confirmación individual la lista trae una sola dirección, así que
+    // este mensaje de "todas las direcciones" ya no corresponde.
+    final esIndividual = !cerrarTarjeta;
+    final calleIndividual = esIndividual
+        ? ((_safeData(direcciones.first)['calle'] as String?) ?? '').trim()
+        : '';
+
+    // Validar que todas tengan estado obligatorio (el comentario es
+    // opcional y NO cuenta como estado para confirmar).
     for (final dir in direcciones) {
+      // Dirección ya predicada: no requiere estado (solo se le puede guardar
+      // la campaña), así que no se valida como una dirección nueva.
+      if (_esDirPredicada(_safeData(dir))) continue;
       final estado = estados[dir.id];
-      if (estado == null || estado == 'pendiente' || estado.isEmpty) {
+      if (estado == null ||
+          estado == 'pendiente' ||
+          estado.isEmpty ||
+          !estadosValidos.contains(estado)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Debes seleccionar un estado para todas las direcciones'),
+          SnackBar(
+            content: Text(esIndividual
+                ? 'Debes marcar una opción de estado en esta dirección '
+                    '(el comentario es opcional y no confirma por sí solo)'
+                : 'Debes marcar una opción de estado en todas las direcciones '
+                    '(el comentario es opcional y no confirma por sí solo)'),
             backgroundColor: Colors.orange,
           ),
         );
         return;
       }
-      if (estado == 'otro' && (textos[dir.id]?.trim().isEmpty ?? true)) {
+      if (estados['comentario_${dir.id}'] == 'true' &&
+          (textos[dir.id]?.trim().isEmpty ?? true)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Para "Otro" debes escribir un motivo'),
+          SnackBar(
+            content: Text(esComercial
+                ? 'Para "Comentario" debes escribir algo'
+                : 'Para el comentario debes escribir algo'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -1059,12 +2235,67 @@ class _PublicadorTabState extends State<PublicadorTab> {
       }
     }
 
+    // ── Contar el destino de cada dirección ─────────────────────────────
+    // El publicador ya no ve este desglose (solo confirma), pero el conteo se
+    // usa al final para el resumen de "tarjeta completada", y cada dirección
+    // guarda su propio motivo para que el admin pueda revisarla.
+    final Map<String, int> conteoDestinos = {};
+
+    for (final dir in direcciones) {
+      final estadoDir = estados[dir.id] ?? 'pendiente';
+      final data = _safeData(dir);
+      // Las direcciones ya predicadas no se cuentan: solo se les guardó la
+      // campaña y su destino de predicación no cambió.
+      if (_esDirPredicada(data)) continue;
+      final tarjetaActual = (data['tarjeta_id'] as String?) ?? tarjetaId;
+      final origenEnData =
+          (data['tarjeta_id_origen'] as String?)?.isNotEmpty == true;
+      String destinoKey;
+
+      if (estadoDir == 'completada') {
+        // Mismo criterio que la escritura: vuelve a su origen solo si hay una
+        // tarjeta de origen real (no temporal) distinta de la actual. Si no,
+        // se queda marcada como predicha en la tarjeta donde está.
+        final origenReal = origenEnData
+            ? (data['tarjeta_id_origen'] as String).trim()
+            : tarjetaActual.trim();
+        final esTemporalCard = (String c) =>
+            c.isNotEmpty &&
+            (c.startsWith('T-') || c.toLowerCase() == 'temporales');
+        if (origenReal.isNotEmpty &&
+            !esTemporalCard(origenReal) &&
+            origenReal != tarjetaActual) {
+          destinoKey = 'origen';
+        } else {
+          destinoKey = 'queda';
+        }
+      } else if (estadoDir == 'comercio_cerrado') {
+        destinoKey = 'cerrado';
+      } else if (estadoDir == 'no_hispano') {
+        destinoKey = 'removidas';
+      } else {
+        destinoKey = 'temporal';
+      }
+
+      conteoDestinos[destinoKey] = (conteoDestinos[destinoKey] ?? 0) + 1;
+    }
+
     final confirmar = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Confirmar procesamiento'),
-        content: Text('¿Procesar las ${direcciones.length} direcciones de "$tarjetaNombre"?'),
+        title: Text(
+            esIndividual ? 'Confirmar dirección' : 'Confirmar procesamiento'),
+        // Solo confirmación. El publicador no necesita un desglose de a dónde
+        // va cada dirección: ese detalle ya queda guardado por dirección en
+        // `motivo` / `motivo_temporal` / `estado` / `reportado_por`, y es el
+        // admin quien lo revisa desde su pestaña. Mostrarlo acá solo retrasaba
+        // el trabajo de campo y arrastraba los caracteres que la fuente del
+        // navegador no tenía.
+        content: Text(esIndividual
+            ? '¿Confirmar esta dirección?'
+                '${calleIndividual.isEmpty ? '' : '\n\n$calleIndividual'}'
+            : '¿Procesar las ${direcciones.length} direcciones de "$tarjetaNombre"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
@@ -1072,7 +2303,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(c, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B5E20)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20)),
             child: const Text('Confirmar'),
           ),
         ],
@@ -1083,121 +2315,236 @@ class _PublicadorTabState extends State<PublicadorTab> {
     try {
       final db = FirebaseFirestore.instance;
       final ahora = DateTime.now();
-      final mesActual = '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+      final marcaLocal = Timestamp.fromDate(ahora);
+      final mesActual =
+          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
 
       final batch = db.batch();
 
-      final terDoc = await db.collection('territorios').doc(territorioId).get();
-      final territorioNombreGlobal = (terDoc.data()?['nombre'] as String?)?.isNotEmpty == true
-          ? terDoc.data()!['nombre'] as String
-          : territorioId;
+      // Nombre de territorio desde caché: el id sirve de fallback offline.
+      String territorioNombreGlobal = territorioId;
+      try {
+        final terDoc = await db
+            .collection('territorios')
+            .doc(territorioId)
+            .get(const GetOptions(source: Source.cache));
+        final nombreCache = terDoc.data()?['nombre'] as String?;
+        if (nombreCache != null && nombreCache.isNotEmpty) {
+          territorioNombreGlobal = nombreCache;
+        }
+      } catch (_) {}
 
+      // Mapa de folders ya verificados: nombre_territorio → {id, existe}
       final Map<String, String> folderIdPorTerritorio = {};
 
-      final foldersExistentes = await db
-          .collection('territorios')
-          .doc('temporales')
-          .collection('tarjetas')
-          .get();
-      for (final f in foldersExistentes.docs) {
-        final fData = f.data();
-        final nombre = (fData['nombre_grupo'] as String?) ?? '';
-        final terId = (fData['territorio_id'] as String?) ?? '';
-        if (nombre.isNotEmpty) folderIdPorTerritorio[nombre] = f.id;
-        if (terId.isNotEmpty) folderIdPorTerritorio[terId] = f.id;
+      // Reutilizar IDs conocidos de la caché; si el query aún no se había
+      // almacenado, se usa el ID determinista del territorio y se escribe con
+      // merge para crear/actualizar el folder sin una lectura de servidor.
+      try {
+        final qFolders = db
+            .collection('territorios')
+            .doc('temporales')
+            .collection('tarjetas');
+        final foldersExistentes = OfflineSyncService.instance.isOffline
+            ? await qFolders.get(const GetOptions(source: Source.cache))
+            : await qFolders.get();
+        for (final f in foldersExistentes.docs) {
+          final fData = f.data();
+          final nombre = (fData['nombre_grupo'] as String?) ?? '';
+          final terId = (fData['territorio_id'] as String?) ?? '';
+          if (nombre.isNotEmpty) folderIdPorTerritorio[nombre] = f.id;
+          if (terId.isNotEmpty) folderIdPorTerritorio[terId] = f.id;
+        }
+      } catch (_) {
+        // La creación con merge abajo no requiere esta consulta.
       }
-
-      final Map<String, bool> foldersVerificados = {};
+      final Set<String> foldersEscritosEnEsteBatch = {};
 
       for (final dir in direcciones) {
+        final data = _safeData(dir);
+        // Dirección ya predicada dentro de la tarjeta recibida: no se reescribe
+        // su resultado ni su fecha (ya quedaron registrados al predicarla). Se
+        // permite guardar la entrega de campañas que falten; el procesamiento
+        // salta el resto para esas direcciones más abajo.
+        final esPredicadaDir = _esDirPredicada(data);
         final estado = estados[dir.id] ?? 'pendiente';
         final motivo = textos[dir.id]?.trim() ?? '';
-        final data = _safeData(dir);
+        final comentarioTexto =
+            estados['comentario_${dir.id}'] == 'true' ? motivo : '';
         final calle = (data['calle'] as String?) ?? '';
         final complemento = (data['complemento'] as String?) ?? '';
         final territorioNombre = territorioNombreGlobal;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
+        // Si la dirección ya es temporal, preservar el origen original
+        String origenReal =
+            (data['tarjeta_id_origen'] as String?)?.trim().isNotEmpty == true
+                ? (data['tarjeta_id_origen'] as String).trim()
+                : tarjetaIdOriginal.trim();
 
-        final origenReal = (data['tarjeta_id_origen'] as String?)?.isNotEmpty == true
-            ? data['tarjeta_id_origen'] as String
-            : tarjetaIdOriginal;
+        // El origen NO se descarta cuando la tarjeta actual es temporal. Si una
+        // dirección se movió de una temporal a otra, `origenReal` queda con la
+        // temporal de la que vino: ese es el rastro de la cadena y hay que
+        // conservarlo. Vaciarlo acá terminaba escribiendo
+        // `tarjeta_id_origen: null` más abajo y rompía el encadenado, que es
+        // justamente lo que hay que poder reconstruir después.
+        //
+        // Lo que sí se evita, más abajo, es tratar una temporal como destino de
+        // restauración: eso lo decide `_origenEsTarjetaReal`, no este bloque.
+        final _esTemporalCard = (String c) =>
+            c.isNotEmpty &&
+            (c.startsWith('T-') || c.toLowerCase() == 'temporales');
 
-        String territorioOrigenId = (data['territorio_origen_id'] as String?) ?? '';
-        String territorioOrigenNombre = (data['territorio_origen_nombre'] as String?) ?? '';
+        // Territorio de origen REAL — el al que pertenece de verdad.
+        //
+        // Antes, si la dirección venía de una tarjeta temporal y no traía
+        // `territorio_origen_id`, el valor se quedaba en 'temporales' (o
+        // quedaba vacío y se usaba el id de la tarjeta, que tampoco servía).
+        // Como el folder del temporal se crea con este id como nombre de
+        // documento, el resultado era una carpeta fantasma llamada
+        // "temporales" con direcciones que sí pertenencen a un territorio
+        // real, y la dirección no aparecía bajo su territorio.
+        //
+        // Ahora se recorren los candidatos en orden de confianza y se toma el
+        // PRIMERO que sea un territorio de verdad. 'temporales' no es un
+        // territorio: es la bandeja, así que nunca puede ser el destino.
+        String territorioOrigenId = _primerTerritorioReal([
+          (data['territorio_origen_id'] as String?) ?? '',
+          (data['territorio_id'] as String?) ?? '',
+          territorioId,
+        ]);
+        String territorioOrigenNombre = _primerTerritorioReal([
+          (data['territorio_origen_nombre'] as String?) ?? '',
+          (data['territorio_nombre'] as String?) ?? '',
+          territorioNombre,
+        ]);
 
-        if (territorioOrigenId.isEmpty || territorioOrigenId == 'temporales') {
-          territorioOrigenId = territorioId == 'temporales'
-              ? (data['territorio_id'] as String? ?? territorioId)
-              : territorioId;
+        // Si de verdad no se conoce el territorio de origen (direcciones viejas
+        // sin ningún dato), se agrupan bajo "Sin territorio" en vez de crear
+        // una carpeta con un id que no corresponde a ningún territorio.
+        if (territorioOrigenId.isEmpty) {
+          territorioOrigenId = _SIN_TERRITORIO;
         }
-        if (territorioOrigenNombre.isEmpty || territorioOrigenNombre == 'temporales') {
-          territorioOrigenNombre = territorioId == 'temporales'
-              ? (data['territorio_nombre'] as String? ?? territorioNombre)
-              : territorioNombre;
+        if (territorioOrigenNombre.isEmpty) {
+          territorioOrigenNombre = _SIN_TERRITORIO;
         }
 
-        String folderDocId = folderIdPorTerritorio[territorioOrigenId]
-            ?? folderIdPorTerritorio[territorioOrigenNombre]
-            ?? territorioOrigenId;
+        // Buscar si ya existe un folder para este territorio
+        // Primero por ID, luego por nombre — evita duplicados
+        String folderDocId = folderIdPorTerritorio[territorioOrigenId] ??
+            folderIdPorTerritorio[territorioOrigenNombre] ??
+            territorioOrigenId;
 
+        // El folder siempre usa el ID del territorio de origen como documento
         final folderRef = db
             .collection('territorios')
             .doc('temporales')
             .collection('tarjetas')
             .doc(folderDocId);
 
-        if (!foldersVerificados.containsKey(folderDocId)) {
-          final existe = (await folderRef.get()).exists;
-          foldersVerificados[folderDocId] = existe;
-          if (existe) {
-            folderIdPorTerritorio[territorioOrigenNombre] = folderDocId;
-            folderIdPorTerritorio[territorioOrigenId] = folderDocId;
+        // ── Verificar campañas activas (no aplican a comercios) ──
+        List<QueryDocumentSnapshot<Map<String, dynamic>>> campanasActivas = [];
+        if (!esComercial) {
+          final queryCampanas =
+              db.collection('configuracion').where('activa', isEqualTo: true);
+          try {
+            final campSnap = OfflineSyncService.instance.isOffline
+                ? await queryCampanas.get(
+                    const GetOptions(source: Source.cache),
+                  )
+                : await queryCampanas.get();
+            campanasActivas = campSnap.docs;
+          } catch (_) {
+            try {
+              campanasActivas = (await queryCampanas.get(
+                const GetOptions(source: Source.cache),
+              ))
+                  .docs;
+            } catch (_) {
+              // Si no hay una copia local de la configuración, no hay una
+              // lectura de servidor disponible. El resto del procesamiento
+              // sigue usando los resultados y decisiones capturados en UI.
+            }
           }
         }
-        bool folderYaExiste = foldersVerificados[folderDocId]!;
 
-        final campSnap = await FirebaseFirestore.instance
-            .collection('configuracion')
-            .where('activa', isEqualTo: true)
-            .get();
-
-        for (final campDoc in campSnap.docs) {
+        for (final campDoc in campanasActivas) {
           final campData = campDoc.data();
           final campNombre = (campData['nombre'] as String?) ?? '';
           if (campNombre.isEmpty) continue;
-          final mensajePendiente = (campData['mensaje_pendiente'] as String?) ?? 'Falta entregar invitación';
+          // El nombre de la campaña se usa como ID de colección. Si trae
+          // caracteres que Firestore no admite en un path (por ejemplo "/"),
+          // armar el batch revienta con "A collection path must point to a
+          // valid collection" y NO se guarda nada de toda la tarjeta. Por eso
+          // se convierte a un ID válido; los tabs de admin usan el mismo
+          // helper, así que leen exactamente la misma carpeta.
+          final campId = CampanasUtils.idColeccionCampana(campNombre);
+          if (campId.isEmpty) continue;
+          final mensajePendiente = (campData['mensaje_pendiente'] as String?) ??
+              'Falta entregar invitación';
           final campKey = 'campana_inv_${campNombre}_${dir.id}';
           final invitacionMarcada = estados[campKey] == 'true';
 
-          if (!invitacionMarcada && estado != 'no_hispano') {
+          if (!invitacionMarcada && estado != 'no_hispano' && !esPredicadaDir) {
+            // ❌ No marcó — va a carpeta de campaña
             batch.set(
               db
                   .collection('territorios')
                   .doc('campanas')
-                  .collection(campNombre)
+                  .collection(campId)
                   .doc(dir.id),
               {
                 'calle': calle,
                 'complemento': complemento,
-                'direccion_normalizada': _normalizarDireccion('$calle $complemento'),
+                'direccion_normalizada':
+                    _normalizarDireccion('$calle $complemento'),
                 'territorio_origen': territorioNombre,
                 'territorio_origen_id': territorioId,
                 'tarjeta_origen': tarjetaIdOriginal,
                 'estado_campana': 'pendiente',
                 'mensaje': mensajePendiente,
-                'created_at': FieldValue.serverTimestamp(),
+                'created_at': marcaLocal,
               },
             );
           } else if (invitacionMarcada) {
+            // ✅ Marcó invitación — guardar en dirección
             batch.update(dir.reference, {
               'campana_invitacion_$campNombre': true,
-              'campana_invitacion_fecha': FieldValue.serverTimestamp(),
+              'campana_invitacion_fecha': marcaLocal,
+              // El modelo nuevo lleva un estado de campaña por dirección, con
+              // clave fija. El campo de arriba es el que renombra la
+              // campaña y rompe: si el nombre cambia, el `true` anterior queda
+              // en un campo que ya nadie lee y la campaña parece no
+              // entregada. Este no depende del nombre.
+              'campana_estado': 'entregada',
+              'campana_nombre': campNombre,
+              'fecha_campana': marcaLocal,
+              'campana_por': widget.usuarioData['nombre'] ?? '',
             });
           }
         }
 
+        // Dirección ya predicada: solo se registró la campaña (arriba). No se
+        // reescribe el resultado de predicación ni se registran movimientos.
+        //
+        // Excepción: "no vive hispanohablante" SÍ debe procesarse aunque la
+        // dirección ya esté predicada. Es una decisión que la saca del listado
+        // (va a `direcciones_removidas`) y no un cambio de resultado. Antes
+        // este `continue` la ignoraba en silencio: marcar una dirección
+        // predicada como no hispana no hacía nada.
+        if (esPredicadaDir && estado != 'no_hispano') continue;
+
+        // ── Procesar estado de predicación ─────────────────
         if (estado == 'completada') {
-          if (origenReal != tarjetaIdOriginal && origenReal.isNotEmpty) {
+          // Volver a la tarjeta de origen SOLO si hay un origen real
+          // (tarjeta_id_origen no vacío y no temporal). Antes esta condición
+          // era solo `origenReal != tarjetaIdOriginal`, lo que dejaba fijas
+          // direcciones que ya estaban en la temporal sin origen real: nunca
+          // se restauraban y quedaban con territorio/tarjeta inválidos.
+          final _origenEsTarjetaReal = origenReal.isNotEmpty &&
+              !_esTemporalCard(origenReal) &&
+              origenReal != tarjetaIdOriginal;
+          if (_origenEsTarjetaReal) {
+            // Mover de vuelta a la tarjeta de origen
             batch.update(dir.reference, {
               'tarjeta_id': origenReal,
               'tarjeta_id_origen': null,
@@ -1208,27 +2555,59 @@ class _PublicadorTabState extends State<PublicadorTab> {
               'estado': 'activa',
               'estado_predicacion': 'completada',
               'predicado': true,
-              'fecha_predicacion': FieldValue.serverTimestamp(),
+              'fecha_predicacion': marcaLocal,
               'mes_predicacion': mesActual,
+              ..._camposResultadoNuevo(
+                  'predicado', widget.usuarioData['nombre'] ?? ''),
+              if (comentarioTexto.isNotEmpty) 'comentario': comentarioTexto,
             });
           } else {
+            // Sin tarjeta de origen real.
+            //
+            // Si la dirección estaba en una temporal, no puede quedarse
+            // apuntando a esa temporal: ya no es una dirección en curso de la
+            // bandeja. Si además se conoce el territorio de verdad, se lo
+            // devuelve y suelta la tarjeta para que el admin la ubique. Si el
+            // territorio tampoco se conoce, se la suelta igual: una dirección
+            // sin tarjeta es visible y el admin la puede asignar, mientras
+            // que colgada de una temporal no aparece en ningún conteo.
+            //
+            // Cuando la tarjeta es REAL no se toca el vínculo: es el caso
+            // normal de una dirección que se predica donde ya estaba.
+            final veniaDeTemporal = _esTemporalCard(tarjetaIdOriginal.trim());
             batch.update(dir.reference, {
               'estado': 'activa',
               'estado_predicacion': 'completada',
               'predicado': true,
-              'fecha_predicacion': FieldValue.serverTimestamp(),
+              'fecha_predicacion': marcaLocal,
               'mes_predicacion': mesActual,
+              ..._camposResultadoNuevo(
+                  'predicado', widget.usuarioData['nombre'] ?? ''),
+              if (veniaDeTemporal) ...{
+                'tarjeta_id': '',
+                'territorio_id': territorioOrigenId,
+                'territorio_nombre': territorioOrigenNombre,
+                'tarjeta_id_origen': null,
+                'territorio_origen_id': null,
+                'territorio_origen_nombre': null,
+                'motivo_temporal': null,
+                'fecha_temporal': null,
+              },
+              if (comentarioTexto.isNotEmpty) 'comentario': comentarioTexto,
             });
           }
         } else if (estado == 'no_predicado' || estado == 'otro') {
-          if (!folderYaExiste) {
-            batch.set(folderRef, {
-              'nombre_grupo': territorioOrigenNombre,
-              'territorio_id': territorioOrigenId,
-              'tipo': 'folder_temporal',
-              'created_at': FieldValue.serverTimestamp(),
-            });
-            foldersVerificados[folderDocId] = true;
+          if (foldersEscritosEnEsteBatch.add(folderDocId)) {
+            batch.set(
+                folderRef,
+                {
+                  'nombre_grupo': territorioOrigenNombre,
+                  'territorio_id': territorioOrigenId,
+                  'tipo': 'folder_temporal',
+                  'created_at': marcaLocal,
+                },
+                SetOptions(merge: true));
+            // Registrar para que otras dirs del mismo territorio lo encuentren
             folderIdPorTerritorio[territorioOrigenNombre] = folderDocId;
             folderIdPorTerritorio[territorioOrigenId] = folderDocId;
           }
@@ -1236,23 +2615,80 @@ class _PublicadorTabState extends State<PublicadorTab> {
           batch.set(folderRef.collection('direcciones').doc(dir.id), {
             'calle': calle,
             'complemento': complemento,
-            'direccion_normalizada': _normalizarDireccion('$calle $complemento'),
+            'direccion_normalizada':
+                _normalizarDireccion('$calle $complemento'),
             'territorio_id': territorioOrigenId,
             'territorio_nombre': territorioOrigenNombre,
-            'tarjeta_id_origen': origenReal,
-            'motivo': estado == 'otro' ? motivo : 'no_predicado',
-            'created_at': FieldValue.serverTimestamp(),
+            'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
+            'motivo': !comentarioTexto.isEmpty
+                ? comentarioTexto
+                : (estado == 'otro' ? motivo : 'no_predicado'),
+            'created_at': marcaLocal,
           });
 
           batch.update(dir.reference, {
             'estado': 'temporal',
             'estado_predicacion': 'temporal',
-            if (estado == 'otro') 'tarjeta_id': '',
-            'tarjeta_id_origen': origenReal,
+            'tarjeta_id': '',
+            'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
             'territorio_origen_id': territorioOrigenId,
             'territorio_origen_nombre': territorioOrigenNombre,
-            'motivo_temporal': estado == 'otro' ? motivo : 'no_predicado',
-            'fecha_temporal': FieldValue.serverTimestamp(),
+            // La dirección sí se trabajó: alguien estuvo ahí y no la predicó.
+            // Por eso el avance queda en `trabajada` aunque el resultado sea
+            // negativo. Lo que la saca de la tarjeta es `tarjeta_id: ''`, no el
+            // avance.
+            ..._camposResultadoNuevo(
+                'no_predicado', widget.usuarioData['nombre'] ?? ''),
+            'motivo_temporal': !comentarioTexto.isEmpty
+                ? comentarioTexto
+                : (estado == 'otro' ? motivo : 'no_predicado'),
+            'fecha_temporal': marcaLocal,
+            // Quién la reportó: el publicador que la marcó como no predicada.
+            // Se muestra en la pestaña "Temporales > Direcciones" del admin.
+            'reportado_por': widget.usuarioData['nombre'] ?? '',
+            'reportado_por_email': widget.usuarioData['email'] ?? '',
+          });
+        } else if (estado == 'comercio_cerrado') {
+          // 🚫 El comercio ya no existe — NO va a temporales. Se registra
+          // en una carpeta de "cerrados" para que el admin lo confirme.
+          batch.set(
+            db
+                .collection('territorios')
+                .doc('temporales')
+                .collection('tarjetas')
+                .doc('comercios_cerrados')
+                .collection('direcciones')
+                .doc(dir.id),
+            {
+              'calle': calle,
+              'complemento': complemento,
+              'direccion_normalizada':
+                  _normalizarDireccion('$calle $complemento'),
+              'territorio_id': territorioOrigenId,
+              'territorio_nombre': territorioOrigenNombre,
+              'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
+              'motivo': 'comercio_cerrado',
+              'comentario': comentarioTexto,
+              'confirmed': false,
+              'reportado_por': widget.usuarioData['nombre'] ?? '',
+              'reportado_por_email': widget.usuarioData['email'] ?? '',
+              'created_at': marcaLocal,
+            },
+          );
+          batch.update(dir.reference, {
+            'estado': 'comercio_cerrado',
+            'estado_predicacion': 'comercio_cerrado',
+            'tarjeta_id': '',
+            'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
+            'territorio_origen_id': territorioOrigenId,
+            'territorio_origen_nombre': territorioOrigenNombre,
+            ..._camposResultadoNuevo(
+                'comercio_cerrado', widget.usuarioData['nombre'] ?? ''),
+            if (comentarioTexto.isNotEmpty)
+              'comentario_cierre': comentarioTexto,
+            'fecha_cierre': marcaLocal,
+            'reportado_por': widget.usuarioData['nombre'] ?? '',
+            'reportado_por_email': widget.usuarioData['email'] ?? '',
           });
         } else if (estado == 'no_hispano') {
           batch.set(
@@ -1260,40 +2696,145 @@ class _PublicadorTabState extends State<PublicadorTab> {
             {
               'calle': calle,
               'complemento': complemento,
-              'direccion_normalizada': _normalizarDireccion('$calle $complemento'),
+              'direccion_normalizada':
+                  _normalizarDireccion('$calle $complemento'),
               'territorio_id': territorioOrigenId,
               'territorio_nombre': territorioOrigenNombre,
-              'tarjeta_id_origen': origenReal,
+              'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
               'motivo': 'no_hispano',
               'removida_por': widget.usuarioData['nombre'] ?? '',
-              'removida_en': FieldValue.serverTimestamp(),
+              'removida_en': marcaLocal,
               'doc_id_original': dir.id,
               'alerta_30_enviada': false,
               'alerta_60_enviada': false,
+              if (comentarioTexto.isNotEmpty) 'comentario': comentarioTexto,
             },
           );
+          // La copia completa queda en `direcciones_removidas` (arriba) y el
+          // documento original se BORRA de `direcciones_globales`.
+          //
+          // Antes se marcaba `estado: 'removida'` en lugar de borrar, para no
+          // perder el historial. El problema: el documento seguía existiendo en
+          // `direcciones_globales` y los conteos que no filtran por `estado`
+          // (el total de "Existentes" del home, por ejemplo) lo seguían
+          // contando. Una dirección removida inflaba el total real.
+          //
+          // La rama equivalente del admin (`temporales_tab` → "Mover a
+          // devueltas") ya borra el documento, así que esto también la deja
+          // consistente. No se pierde nada: `direcciones_removidas` guarda
+          // todos los campos necesarios y el botón "Restaurar" del panel
+          // recrea la dirección en `direcciones_globales` con `doc_id_original`.
           batch.delete(dir.reference);
         }
       }
 
-      batch.update(
-        db
-            .collection('territorios')
-            .doc(territorioId)
-            .collection('tarjetas')
-            .doc(tarjetaId),
-        {
-          'completada': true,
-          'fecha_completada': FieldValue.serverTimestamp(),
-        },
-      );
+      // Marcar tarjeta como completada.
+      //
+      // Solo con la confirmación de tarjeta entera. Con la individual, una
+      // dirección no puede cerrar la tarjeta: el publicador sigue trabajando el
+      // resto. El cierre cuando ya no queda ninguna pendiente es la Fase 4 del
+      // plan (§5.5), y sale de contar las direcciones, no de este `batch`.
+      if (cerrarTarjeta) {
+        batch.update(
+          db
+              .collection('territorios')
+              .doc(territorioId)
+              .collection('tarjetas')
+              .doc(tarjetaId),
+          {
+            'completada': true,
+            'fecha_completada': marcaLocal,
+          },
+        );
+      }
 
-      await batch.commit();
+      unawaited(batch.commit().catchError((Object error) {
+        debugPrint('Confirmación pendiente/no confirmada: $error');
+      }));
+
+      // Registrar entradas a temporales para el histórico de estadísticas
+      for (final dir in direcciones) {
+        final estadoDir = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? 'pendiente';
+        final d = dir.data() as Map<String, dynamic>;
+        // Las direcciones ya predicadas no registran movimientos de temporales:
+        // su entrada/salida ya quedó registrada cuando se predicaron.
+        if (_esDirPredicada(d)) continue;
+        final origenDir = (d['tarjeta_id_origen'] as String?) ?? '';
+        // ¿Esta dirección estaba en la bandeja de temporales?
+        //
+        // Antes bastaba con `origenDir.isNotEmpty && origenDir != destinoDir`,
+        // y por eso "Salidas" no quadraba: si `tarjeta_id_origen` venía vacío
+        // (direcciones viejas, o movidas por la reparación o por la
+        // restauración mensual, que no lo graban) la dirección igual salía de
+        // la bandeja pero NO se registraba la salida. El contador de salidas
+        // perdía esos casos.
+        //
+        // Ahora basta con que la dirección tenga CUALQUIER marca de haber sido
+        // traída de otro lado (tarjeta de origen o territorio de origen), sin
+        // exigir que difieran entre sí: la salida es un hecho de la bandeja,
+        // no una comparación de nombres.
+        //
+        // `territorio_id` NO sirve como señal: está presente en todas las
+        // direcciones (es el territorio donde vive), así que usarlo como
+        // fallback hacía que TODA dirección normal contara como temporal y
+        // registrara una salida falsa en cuanto el publicador la completaba.
+        //
+        // La señal fiable es `estado`, que además es la MISMA definición que
+        // usa `estadisticas_tab` para contar las temporales, de modo que
+        // entradas y salidas se miden sobre el mismo conjunto.
+        //
+        // `d` es el snapshot leído ANTES del batch de este mismo método, así
+        // que `estado` conserva el valor previo al procesamiento.
+        final estadoDoc = d['estado']?.toString() ?? '';
+        final territorioIdDoc = (d['territorio_id']?.toString() ?? '').trim();
+        final eraTemporal = estadoDoc == 'temporal' ||
+            estadoDoc == 'temporal_asignada' ||
+            origenDir.trim().isNotEmpty ||
+            territorioIdDoc == 'temporales';
+        if (estadoDir == 'no_predicado' || estadoDir == 'otro') {
+          final origenId =
+              (d['territorio_id'] ?? d['territorio_origen_id'])?.toString() ??
+                  '';
+          final origenNombre =
+              (d['territorio_nombre'] ?? d['territorio_origen_nombre'])
+                      ?.toString() ??
+                  '';
+          unawaited(registrarMovimientoTemporal(
+            tipo: 'entrada',
+            direccionId: dir.id,
+            territorioOrigenId: origenId,
+            territorioOrigenNombre: origenNombre,
+            calle: d['calle']?.toString(),
+            motivo: estadoDir,
+            por: widget.usuarioData['nombre']?.toString(),
+          ));
+        } else if (estadoDir == 'completada' && eraTemporal) {
+          // Dirección temporal que se predicó y volvió a su tarjeta de
+          // origen → cuenta como salida de la bandeja de temporales.
+          final origenId = (d['territorio_origen_id'] as String?) ?? '';
+          final origenNombre = (d['territorio_origen_nombre'] as String?) ?? '';
+          unawaited(registrarMovimientoTemporal(
+            tipo: 'salida',
+            direccionId: dir.id,
+            territorioOrigenId: origenId,
+            territorioOrigenNombre: origenNombre,
+            calle: d['calle']?.toString(),
+            motivo: estadoDir,
+            por: widget.usuarioData['nombre']?.toString(),
+          ));
+        }
+      }
+
+      // Cancelar timer de devolución automática
       AutoReturnService().cancelarTimer(tarjetaId);
 
+      // Notificar al admin de territorios si hay "no_predicado", "no_hispano" o
+      // "comercio_cerrado"
       final dirNoPredicadas = direcciones.where((dir) {
         final estado = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? 'pendiente';
-        return estado == 'no_predicado' || estado == 'no_hispano';
+        return estado == 'no_predicado' ||
+            estado == 'no_hispano' ||
+            estado == 'comercio_cerrado';
       }).toList();
 
       if (dirNoPredicadas.isNotEmpty) {
@@ -1302,71 +2843,145 @@ class _PublicadorTabState extends State<PublicadorTab> {
           final data = dir.data() as Map<String, dynamic>;
           final estado = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? '';
           final calle = data['calle']?.toString() ?? '';
-          final motivo = estado == 'no_hispano' ? 'No vive hispanohablante' : 'No se predicó';
+          final motivo = estado == 'no_hispano'
+              ? 'No vive hispanohablante'
+              : estado == 'comercio_cerrado'
+                  ? 'Comercio ya no existe'
+                  : 'No se predicó';
           return '$calle — $motivo';
         }).join('\n');
 
-        await NotificacionService.enviarAAdminTerritorios(
+        // Notificar a admins de territorios
+        unawaited(NotificacionService.enviarAAdminTerritorios(
           titulo: '⚠️ Atención requerida',
-          cuerpo: '$nombre reportó ${dirNoPredicadas.length} dirección(es) en "$tarjetaId":\n$resumen',
+          cuerpo:
+              '$nombre reportó ${dirNoPredicadas.length} dirección(es) en "$tarjetaId":\n$resumen',
           tipo: TipoNotificacion.alertaPredicacion,
           extra: {'tarjeta_id': tarjetaId, 'territorio_id': territorioId},
-        );
+        ).catchError((Object error) {
+          debugPrint('Notificación de resultado pendiente: $error');
+        }));
       }
-
-      final esTemporal = territorioId == 'temporales' ||
-          (await db.collection('territorios')
+      // Las direcciones temporales no deben persistir en la BD.
+      //
+      // Solo con la confirmación de tarjeta entera. Este bloque reescribe TODAS
+      // las direcciones de la tarjeta y borra el documento de la tarjeta, así
+      // que con la confirmación individual no puede correr: tocaría direcciones
+      // que el publicador todavía no confirmó. El `&&` va primero a propósito,
+      // para no gastar la lectura del doc de la tarjeta cuando no hace falta.
+      bool esTemporal = cerrarTarjeta && territorioId == 'temporales';
+      if (cerrarTarjeta && !esTemporal) {
+        try {
+          final tarjetaCache = await db
+              .collection('territorios')
               .doc(territorioId)
               .collection('tarjetas')
               .doc(tarjetaId)
-              .get())
-              .data()?['es_temporal'] == true;
+              .get(const GetOptions(source: Source.cache));
+          esTemporal = tarjetaCache.data()?['es_temporal'] == true;
+        } catch (_) {}
+      }
 
       if (esTemporal) {
-        final dirsTemporales = await db
-            .collection('direcciones_globales')
-            .where('tarjeta_id', isEqualTo: tarjetaId)
-            .get();
-        if (dirsTemporales.docs.isNotEmpty) {
+        QuerySnapshot<Map<String, dynamic>>? dirsTemporales;
+        try {
+          dirsTemporales = await db
+              .collection('direcciones_globales')
+              .where('tarjeta_id', isEqualTo: tarjetaId)
+              .get(const GetOptions(source: Source.cache));
+        } catch (_) {}
+        if (dirsTemporales != null && dirsTemporales.docs.isNotEmpty) {
           final batchClean = db.batch();
           for (final d in dirsTemporales.docs) {
-            final dData = d.data() as Map<String, dynamic>;
+            final dData = d.data();
             final estadoDir = dData['estado_predicacion'] as String? ?? '';
             final origenId = dData['tarjeta_id_origen'] as String? ?? '';
             final terOrigenId = dData['territorio_origen_id'] as String? ?? '';
-            final terOrigenNombre = dData['territorio_origen_nombre'] as String? ?? '';
+            final terOrigenNombre =
+                dData['territorio_origen_nombre'] as String? ?? '';
 
             if (estadoDir == 'completada' && origenId.isNotEmpty) {
+              // Restaurar completamente a tarjeta y territorio de origen
               batchClean.update(d.reference, {
                 'tarjeta_id': origenId,
                 'tarjeta_id_origen': null,
-                'territorio_id': terOrigenId.isNotEmpty ? terOrigenId : dData['territorio_id'],
-                'territorio_nombre': terOrigenNombre.isNotEmpty ? terOrigenNombre : dData['territorio_nombre'],
+                'territorio_id': terOrigenId.isNotEmpty
+                    ? terOrigenId
+                    : dData['territorio_id'],
+                'territorio_nombre': terOrigenNombre.isNotEmpty
+                    ? terOrigenNombre
+                    : dData['territorio_nombre'],
                 'territorio_origen_id': null,
                 'territorio_origen_nombre': null,
                 'estado': 'activa',
                 'estado_predicacion': 'completada',
               });
             } else if (estadoDir == 'completada') {
-              batchClean.delete(d.reference);
+              // Completada y sin origen. Antes se eliminaba el documento.
+              //
+              // Es el mismo problema que tenía la rama de `no_hispano`: una
+              // operación de la pantalla destruía un dato del que no hay otra
+              // copia enlazada. Y acá el caso es más fácil de llegar sin
+              // querer, porque la tarjeta es temporal: por definición se
+              // borra al terminar, así que cualquier dirección que haya
+              // quedado sin origen se perdía en silencio.
+              //
+              // Se suelta en vez de borrarse: `tarjeta_id` vacío la deja
+              // visible y el admin la puede asignar. Colgada de una temporal no
+              // aparece en ningún conteo, y borrada no existe.
+              batchClean.update(d.reference, {
+                'tarjeta_id': '',
+                'tarjeta_id_origen': null,
+                'territorio_origen_id': null,
+                'territorio_origen_nombre': null,
+                'estado': 'activa',
+                'estado_predicacion': 'completada',
+                'soltada_por_sin_origen': true,
+                'fecha_soltada': marcaLocal,
+              });
             }
+            // Las que van a temporal/removidas ya tienen su destino — no tocar
           }
-          await batchClean.commit();
+          unawaited(batchClean.commit().catchError((Object error) {
+            debugPrint('Limpieza de temporal pendiente: $error');
+          }));
         }
-        await db
+        unawaited(db
             .collection('territorios')
             .doc(territorioId)
             .collection('tarjetas')
             .doc(tarjetaId)
-            .delete();
+            .delete()
+            .catchError((Object error) {
+          debugPrint('Eliminación de tarjeta temporal pendiente: $error');
+        }));
       }
 
       if (mounted) {
-        setState(() {
-          _tarjetasCompletadas.add(tarjetaId);
-        });
+        // `_tarjetasCompletadas` saca la tarjeta del listado. Con la
+        // confirmación individual la tarjeta sigue abierta: se workea de a una.
+        if (cerrarTarjeta) {
+          setState(() {
+            _tarjetasCompletadas.add(tarjetaId);
+          });
+        }
 
-        _programarMensajeMotivacional();
+        // Programar mensaje motivacional en Firestore (persiste aunque se cierre la app)
+        unawaited(_programarMensajeMotivacional());
+
+        // Resumen final del destino de las direcciones procesadas
+        final volvieron = conteoDestinos['origen'] ?? 0;
+        final temporal = conteoDestinos['temporal'] ?? 0;
+        final cerrados = conteoDestinos['cerrado'] ?? 0;
+        final removidas = conteoDestinos['removidas'] ?? 0;
+        final partesResumen = <String>[
+          if (volvieron > 0) '✔ $volvieron volvieron a su tarjeta',
+          if (temporal > 0)
+            '⏳ $temporal quedaron en la carpeta temporal del territorio',
+          if (cerrados > 0) '🏬 $cerrados quedaron en comercios cerrados',
+          if (removidas > 0) '🗑️ $removidas se removieron',
+        ];
+        final textoResumen = partesResumen.join(' · ');
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1376,7 +2991,13 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '¡Tarjeta "$tarjetaNombre" completada!',
+                    esIndividual
+                        ? (OfflineSyncService.instance.isOffline
+                            ? '¡Dirección guardada en este dispositivo! Se sincronizará al recuperar conexión.'
+                            : '¡Dirección guardada!')
+                        : (OfflineSyncService.instance.isOffline
+                            ? '¡Tarjeta "$tarjetaNombre" guardada! Se sincronizará al recuperar conexión.'
+                            : '¡Tarjeta "$tarjetaNombre" completada!'),
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -1385,9 +3006,27 @@ class _PublicadorTabState extends State<PublicadorTab> {
             backgroundColor: const Color(0xFF1B5E20),
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
+
+        // ✔ Resumen con el destino de cada dirección
+        if (textoResumen.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                textoResumen,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              backgroundColor: const Color(0xFF004D40),
+              duration: const Duration(seconds: 5),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -1399,22 +3038,45 @@ class _PublicadorTabState extends State<PublicadorTab> {
         );
       }
     }
-  }
+  } // ✅ cierra _confirmarProcesamientoTarjeta
 
   // ─────────────────────────────────────────────────
   // BUILD
   // ─────────────────────────────────────────────────
 
+  /// Id/nombre usado para agrupar direcciones cuyo territorio real se
+  /// desconocía, para no inventar un territorio ni usar 'temporales'.
+  static const String _SIN_TERRITORIO = 'Sin territorio';
+
+  /// Devuelve el primer candidato que sea un territorio de verdad.
+  ///
+  /// Se descartan los vacíos y también 'temporales', porque 'temporales' es el
+  /// nombre de la BANDEJA, no un territorio: usarlo como destino metía
+  /// direcciones reales dentro de una carpeta llamada "temporales".
+  static String _primerTerritorioReal(List<String> candidatos) {
+    for (final c in candidatos) {
+      final v = c.trim();
+      if (v.isEmpty) continue;
+      if (v.toLowerCase() == 'temporales') continue;
+      if (v.toLowerCase() == _SIN_TERRITORIO.toLowerCase()) continue;
+      return v;
+    }
+    return '';
+  }
+
   @override
   Widget build(BuildContext context) {
     final nombrePublicador = widget.usuarioData['nombre'] ?? 'Publicador';
-    final iniciales = nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
+    debugPrint('=== NOMBRE: ${widget.usuarioData['nombre']}');
+    debugPrint('=== EMAIL: ${widget.usuarioEmail}');
+    final iniciales =
+        nombrePublicador.isNotEmpty ? nombrePublicador[0].toUpperCase() : 'U';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       body: CustomScrollView(
         slivers: [
-          // Header
+          // ── HEADER ─────────────────────────────────────
           SliverToBoxAdapter(
             child: Container(
               decoration: const BoxDecoration(
@@ -1469,20 +3131,24 @@ class _PublicadorTabState extends State<PublicadorTab> {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  // ✅ Botón solicitar integrado al header
                   GestureDetector(
                     onTap: widget.onSolicitarTerritorio,
                     child: Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.5), width: 1.5),
+                        border: Border.all(
+                            color: Colors.white.withOpacity(0.5), width: 1.5),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.map_outlined, color: Colors.white, size: 18),
+                          const Icon(Icons.map_outlined,
+                              color: Colors.white, size: 18),
                           const SizedBox(width: 8),
                           Text(
                             context.t('request_territory'),
@@ -1502,8 +3168,10 @@ class _PublicadorTabState extends State<PublicadorTab> {
             ),
           ),
 
-          // Alertas
-          if (widget.campanaEspecialActiva || (widget.campanaGeneralActiva && widget.anuncioGeneral.trim().isNotEmpty))
+          // ── ALERTAS ────────────────────────────────────
+          if (widget.campanaEspecialActiva ||
+              (widget.campanaGeneralActiva &&
+                  widget.anuncioGeneral.trim().isNotEmpty))
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               sliver: SliverList(
@@ -1516,7 +3184,8 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       title: 'Campaña especial activa',
                       body: widget.nombreCampanaEspecial,
                     ),
-                  if (widget.campanaGeneralActiva && widget.anuncioGeneral.trim().isNotEmpty) ...[
+                  if (widget.campanaGeneralActiva &&
+                      widget.anuncioGeneral.trim().isNotEmpty) ...[
                     const SizedBox(height: 10),
                     _alertaBanner(
                       icon: Icons.info_outline,
@@ -1530,7 +3199,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
               ),
             ),
 
-          // Anuncio General
+          // ── ANUNCIO GENERAL ──────────────────────────────
           SliverToBoxAdapter(
             child: StreamBuilder<DocumentSnapshot>(
               stream: FirebaseFirestore.instance
@@ -1541,8 +3210,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
                 final data = (snap.data?.data() as Map<String, dynamic>?) ?? {};
                 final idioma = context.currentLanguage;
                 final texto = idioma == 'PT'
-                    ? ((data['texto_pt'] as String?)?.isNotEmpty == true ? data['texto_pt'] as String : data['texto'] as String? ?? '')
-                    : (data['texto'] as String? ?? data['mensaje'] as String? ?? '');
+                    ? ((data['texto_pt'] as String?)?.isNotEmpty == true
+                        ? data['texto_pt'] as String
+                        : data['texto'] as String? ?? '')
+                    : (data['texto'] as String? ??
+                        data['mensaje'] as String? ??
+                        '');
                 if (texto.isEmpty) return const SizedBox.shrink();
                 return Container(
                   margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -1550,16 +3223,19 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1565C0).withOpacity(0.08),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF1565C0).withOpacity(0.3)),
+                    border: Border.all(
+                        color: const Color(0xFF1565C0).withOpacity(0.3)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.campaign, color: Color(0xFF1565C0), size: 20),
+                      const Icon(Icons.campaign,
+                          color: Color(0xFF1565C0), size: 20),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           texto,
-                          style: const TextStyle(fontSize: 13, color: Color(0xFF1565C0)),
+                          style: const TextStyle(
+                              fontSize: 13, color: Color(0xFF1565C0)),
                         ),
                       ),
                     ],
@@ -1569,14 +3245,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
             ),
           ),
 
-          // Stats
+          // ── STATS ──────────────────────────────────────
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             sliver: SliverToBoxAdapter(
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collectionGroup('tarjetas')
-                    .where('asignado_a', isEqualTo: widget.usuarioData['nombre'] ?? '')
+                    .where('asignado_a',
+                        isEqualTo: widget.usuarioData['nombre'] ?? '')
                     .snapshots(),
                 builder: (context, tarjetasSnap) {
                   int totalDirAsignadas = 0;
@@ -1586,38 +3263,43 @@ class _PublicadorTabState extends State<PublicadorTab> {
                     for (final t in tarjetasSnap.data!.docs) {
                       final d = _safeData(t);
                       if (d['completada'] == true) continue;
-                      totalDirAsignadas += ((d['cantidad_direcciones'] ?? 0) as int);
+                      if (d['enviado_tipo'] == 'conductor') continue;
+                      totalDirAsignadas +=
+                          (d['cantidad_direcciones'] as num?)?.toInt() ?? 0;
                       tarjetaIds.add(t.id);
                     }
                   }
 
-                  return FutureBuilder<QuerySnapshot?>(
-                    future: tarjetaIds.isEmpty
-                        ? Future.value(null)
-                        : FirebaseFirestore.instance
-                            .collection('direcciones_globales')
-                            .where('tarjeta_id', whereIn: tarjetaIds.take(10).toList())
-                            .get(),
-                    builder: (context, dirsSnap) {
-                      final completadas = dirsSnap.data?.docs.where((doc) {
-                            final d = _safeData(doc);
-                            return d['predicado'] == true || d['estado_predicacion'] == 'completada';
-                          }).length ?? 0;
+                  final idsOrdenados = [...tarjetaIds]..sort();
+                  final keyFuturo = idsOrdenados.join(',');
+                  if (keyFuturo != _completadasFutureKey) {
+                    _completadasFutureKey = keyFuturo;
+                    _completadasFuture = _contarCompletadas(idsOrdenados);
+                  }
 
+                  return FutureBuilder<int?>(
+                    future: _completadasFuture,
+                    builder: (context, dirsSnap) {
+                      final completadas = dirsSnap.data ?? 0;
                       final pendientes = totalDirAsignadas - completadas;
 
                       return Row(
                         children: [
                           Expanded(
-                            child: _statCard('Asignadas', totalDirAsignadas, Icons.home_work_outlined),
+                            child: _statCard('Asignadas', totalDirAsignadas,
+                                Icons.home_work_outlined),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: _statCard('Completadas', completadas, Icons.check_circle_outline),
+                            child: _statCard('Completadas', completadas,
+                                Icons.check_circle_outline),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: _statCard('Pendientes', pendientes < 0 ? 0 : pendientes, Icons.schedule_outlined),
+                            child: _statCard(
+                                'Pendientes',
+                                pendientes < 0 ? 0 : pendientes,
+                                Icons.schedule_outlined),
                           ),
                         ],
                       );
@@ -1628,7 +3310,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
             ),
           ),
 
-          // Progreso
+          // ── PROGRESO ───────────────────────────────────
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
             sliver: SliverToBoxAdapter(
@@ -1637,13 +3319,85 @@ class _PublicadorTabState extends State<PublicadorTab> {
                     .collection('direcciones_globales')
                     .snapshots(),
                 builder: (context, snapTotal) {
-                  final totalExistentes = snapTotal.data?.docs.length ?? 0;
-                  final completadasGlobal = snapTotal.data?.docs.where((doc) {
-                        final d = _safeData(doc);
-                        return d['predicado'] == true;
-                      }).length ?? 0;
+                  // Las direcciones ya removidas (estado == 'removida') NO
+                  // cuentan como existentes. Antes inflaban el total: una
+                  // dirección marcada como "no vive hispanohablante" seguía
+                  // sumando en "Existentes" aunque ya estuviera en removidas.
+                  // Se filtra en memoria y no en la query para no excluir por
+                  // error documentos sin el campo `estado`.
+                  //
+                  // Las copias "temporal" (bandeja de temporales: direcciones
+                  // devueltas/liberadas que se reasignan) TAMPOCO son
+                  // direcciones nuevas: son copias de una dirección que ya
+                  // existe como 'activa'. Si se contaban, inflaban el total de
+                  // "Existentes" (p. ej. 214 en vez de 202).
+                  final todos = snapTotal.data?.docs ?? [];
+                  bool esRemovida(QueryDocumentSnapshot doc) =>
+                      (_safeData(doc)['estado'] as String?) == 'removida';
+                  bool esTemporal(QueryDocumentSnapshot doc) =>
+                      (_safeData(doc)['estado'] as String?) == 'temporal';
+                  final totalExistentes = todos
+                      .where((doc) => !esRemovida(doc) && !esTemporal(doc))
+                      .length;
+                  // Criterio único de "completada": `predicado == true` o
+                  // `estado_predicacion == 'completada'`. Antes solo se miraba
+                  // `predicado`, por lo que las direcciones completadas por
+                  // otras vías quedaban contadas como pendientes.
+                  final completadasGlobal = todos.where((doc) {
+                    if (esRemovida(doc) || esTemporal(doc)) return false;
+                    final d = _safeData(doc);
+                    return d['predicado'] == true ||
+                        d['estado_predicacion'] == 'completada';
+                  }).length;
                   final pendientesGlobal = totalExistentes - completadasGlobal;
-                  final avance = totalExistentes > 0 ? completadasGlobal / totalExistentes : 0.0;
+                  final avance = totalExistentes > 0
+                      ? completadasGlobal / totalExistentes
+                      : 0.0;
+
+                  final pctPendientes = totalExistentes > 0
+                      ? (pendientesGlobal / totalExistentes * 100)
+                          .toStringAsFixed(0)
+                      : '0';
+
+                  final inicioProg = _inicioProgreso;
+                  final ahora = DateTime.now();
+                  final mesActualClave =
+                      '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
+
+                  // "Este mes": predicadas cuyo `mes_predicacion` es el mes
+                  // actual. Ese campo SIEMPRE se escribe al predicar; en cambio
+                  // `fecha_predicacion` solo existe en registros antiguos, por
+                  // eso se usa únicamente como respaldo.
+                  final predActualGlobal = snapTotal.data?.docs.where((doc) {
+                        if (esRemovida(doc) || esTemporal(doc)) return false;
+                        final d = _safeData(doc);
+                        if (d['predicado'] != true &&
+                            d['estado_predicacion'] != 'completada') {
+                          return false;
+                        }
+                        final m = d['mes_predicacion']?.toString();
+                        if (m != null && m.isNotEmpty) {
+                          return m == mesActualClave;
+                        }
+                        final fp = d['fecha_predicacion'];
+                        if (inicioProg == null || fp is! Timestamp) {
+                          return false;
+                        }
+                        return !fp.toDate().isBefore(inicioProg);
+                      }).length ??
+                      0;
+                  final pctCompletadasMes = totalExistentes > 0
+                      ? (predActualGlobal / totalExistentes * 100)
+                          .toStringAsFixed(0)
+                      : '0';
+                  // "mes pasado": completadas antes del inicio del período actual.
+                  final completadasMesPasado =
+                      (completadasGlobal - predActualGlobal)
+                          .clamp(0, completadasGlobal);
+                  final pctCompletadasMesPasado = totalExistentes > 0
+                      ? (completadasMesPasado / totalExistentes * 100)
+                          .toStringAsFixed(0)
+                      : '0';
 
                   return Container(
                     padding: const EdgeInsets.all(20),
@@ -1664,14 +3418,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Builder(builder: (ctx) => Text(
-                              ctx.t('monthly_progress'),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                                color: Color(0xFF263238),
-                              ),
-                            )),
+                            Builder(
+                                builder: (ctx) => Text(
+                                      ctx.t('monthly_progress'),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                        color: Color(0xFF263238),
+                                      ),
+                                    )),
                             Text(
                               '${(avance * 100).toStringAsFixed(0)}%',
                               style: const TextStyle(
@@ -1689,22 +3444,40 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             value: avance,
                             minHeight: 10,
                             backgroundColor: const Color(0xFFE8F5E9),
-                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF1B5E20)),
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                Color(0xFF1B5E20)),
                           ),
                         ),
                         const SizedBox(height: 16),
+                        if (totalExistentes > 0) ...[
+                          Text(
+                            'Mes pasado: $completadasMesPasado ($pctCompletadasMesPasado%) · Este mes: $predActualGlobal ($pctCompletadasMes%) · Pendientes: $pendientesGlobal ($pctPendientes%)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         Row(
                           children: [
                             Expanded(
-                              child: _miniStat('Existentes', totalExistentes, Icons.home_work_outlined, Colors.blue),
+                              child: _miniStat('Existentes', totalExistentes,
+                                  Icons.home_work_outlined, Colors.blue),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: _miniStat('Completadas', completadasGlobal, Icons.check_circle_outline, const Color(0xFF1B5E20)),
+                              child: _miniStat(
+                                  'Completadas',
+                                  completadasGlobal,
+                                  Icons.check_circle_outline,
+                                  const Color(0xFF1B5E20)),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: _miniStat('Pendientes', pendientesGlobal, Icons.schedule_outlined, Colors.orange),
+                              child: _miniStat('Pendientes', pendientesGlobal,
+                                  Icons.schedule_outlined, Colors.orange),
                             ),
                           ],
                         ),
@@ -1716,23 +3489,16 @@ class _PublicadorTabState extends State<PublicadorTab> {
             ),
           ),
 
-          // Tarjeta para Enviar Direcciones a Auditoría
+          // ── ENVIAR DIRECCIÓN NUEVA ──
           SliverToBoxAdapter(
-            child: Column(
-              children: [
-                EnviarDireccionCard(
-                  usuarioNombre: widget.usuarioData['nombre']?.toString() ?? widget.usuarioEmail,
-                  usuarioEmail: widget.usuarioEmail,
-                  onEnviado: () {
-                    setState(() {});
-                  },
-                ),
-                const SizedBox(height: 16),
-              ],
+            child: EnviarDireccionCard(
+              usuarioEmail: widget.usuarioEmail,
+              usuarioNombre:
+                  widget.usuarioData['nombre'] ?? widget.usuarioEmail,
             ),
           ),
 
-          // Mis Tarjetas
+          // ── MIS TARJETAS ───────────────────────────────
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             sliver: SliverToBoxAdapter(
@@ -1763,10 +3529,31 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         if (_tarjetasCompletadas.contains(doc.id)) return false;
                         final d = (doc.data() as Map<String, dynamic>?) ?? {};
                         if (d['completada'] == true) return false;
+                        // Una tarjeta en manos de un conductor NO se muestra en
+                        // el modo publicador, aunque quien la tenga sea también
+                        // publicador.
+                        if (d['enviado_tipo'] == 'conductor') return false;
                         return true;
                       }).toList();
 
+                      // ── Ciclo del mensaje motivacional ──
+                      // Tiene tarjetas → reinicia el ciclo.
+                      // Sin tarjetas → programa 10 min y luego envía.
+                      final ahoraTieneTarjetas = tarjetasVisibles.isNotEmpty;
+                      if (ahoraTieneTarjetas != _tieneTarjetasActivas) {
+                        _tieneTarjetasActivas = ahoraTieneTarjetas;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted) return;
+                          if (ahoraTieneTarjetas) {
+                            _reiniciarCicloMotivacional();
+                          } else {
+                            _programarMensajeMotivacional();
+                          }
+                        });
+                      }
+
                       if (tarjetasVisibles.isEmpty) {
+                        // Verificar si hay tarjetas completadas o simplemente no hay tarjetas
                         final hayCompletadas = snapshot.data!.docs.any((doc) {
                           final d = (doc.data() as Map<String, dynamic>?) ?? {};
                           return d['completada'] == true;
@@ -1774,7 +3561,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
                         return Container(
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            color: hayCompletadas ? const Color(0xFFE8F5E9) : Colors.grey.shade50,
+                            color: hayCompletadas
+                                ? const Color(0xFFE8F5E9)
+                                : Colors.grey.shade50,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                                 color: hayCompletadas
@@ -1785,8 +3574,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                hayCompletadas ? Icons.check_circle : Icons.inbox_outlined,
-                                color: hayCompletadas ? const Color(0xFF1B5E20) : Colors.grey,
+                                hayCompletadas
+                                    ? Icons.check_circle
+                                    : Icons.inbox_outlined,
+                                color: hayCompletadas
+                                    ? const Color(0xFF1B5E20)
+                                    : Colors.grey,
                                 size: 20,
                               ),
                               const SizedBox(width: 8),
@@ -1796,7 +3589,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                       ? context.t('all_cards_completed')
                                       : context.t('no_cards_this_month'),
                                   style: TextStyle(
-                                    color: hayCompletadas ? const Color(0xFF1B5E20) : Colors.grey,
+                                    color: hayCompletadas
+                                        ? const Color(0xFF1B5E20)
+                                        : Colors.grey,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13,
                                   ),
@@ -1809,21 +3604,31 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       }
 
                       return Column(
-                        children: List.generate(tarjetasVisibles.length, (index) {
+                        children:
+                            List.generate(tarjetasVisibles.length, (index) {
                           final tarjetaDoc = tarjetasVisibles[index];
-                          final data = (tarjetaDoc.data() as Map<String, dynamic>?) ?? {};
-                          final nombre = (data['nombre'] as String?) ?? tarjetaDoc.id;
-                          final territorioId = tarjetaDoc.reference.parent.parent?.id ?? '';
+                          final data =
+                              (tarjetaDoc.data() as Map<String, dynamic>?) ??
+                                  {};
+                          final nombre =
+                              (data['nombre'] as String?) ?? tarjetaDoc.id;
+                          final territorioId =
+                              tarjetaDoc.reference.parent.parent?.id ?? '';
                           final tarjetaId = tarjetaDoc.id;
-
-                          final color = _tarjetaColores[index % _tarjetaColores.length];
+                          final esComercial =
+                              (data['tipo'] as String?) == 'zona';
+                          final tarjetaColor = esComercial
+                              ? const Color(0xFF4A148C)
+                              : _tarjetaColores[index % _tarjetaColores.length];
+                          final color = tarjetaColor;
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 14),
                             decoration: BoxDecoration(
                               color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: color.withOpacity(0.2), width: 1),
+                              border: Border.all(
+                                  color: color.withOpacity(0.2), width: 1),
                               boxShadow: [
                                 BoxShadow(
                                   color: color.withOpacity(0.12),
@@ -1850,25 +3655,75 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                         color: color.withOpacity(0.12),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
-                                      child: Icon(Icons.credit_card, color: color, size: 20),
+                                      child: Icon(
+                                          esComercial
+                                              ? Icons.storefront
+                                              : Icons.credit_card,
+                                          color: color,
+                                          size: 20),
                                     ),
-                                    title: Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    title: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Flexible(
+                                          child: Text(nombre,
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.bold)),
+                                        ),
+                                        if (esComercial) ...[
+                                          const SizedBox(width: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF4A148C)
+                                                  .withOpacity(0.12),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: const Text('COMERCIAL',
+                                                style: TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.bold,
+                                                    letterSpacing: 0.5,
+                                                    color: Color(0xFF4A148C))),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
                                     subtitle: FutureBuilder<QuerySnapshot>(
                                       future: FirebaseFirestore.instance
                                           .collection('direcciones_globales')
-                                          .where('tarjeta_id', isEqualTo: tarjetaId)
-                                          .where('estado', isNotEqualTo: 'removida')
+                                          .where('tarjeta_id',
+                                              isEqualTo: tarjetaId)
                                           .get(),
                                       builder: (context, dirSnap) {
-                                        final cantReal = dirSnap.data?.docs.length ?? 0;
-                                        final enviadoNombre = (data['enviado_nombre'] as String?) ?? '';
-                                        final enviadoEn = data['enviado_en'] as Timestamp?;
+                                        // Filtrado en memoria: `isNotEqualTo`
+                                        // excluye docs sin el campo `estado`.
+                                        final cantReal = dirSnap.data?.docs
+                                                .where((d) =>
+                                                    (_safeData(d)['estado']
+                                                        as String?) !=
+                                                    'removida')
+                                                .length ??
+                                            0;
+                                        final enviadoNombre =
+                                            (data['enviado_nombre']
+                                                    as String?) ??
+                                                '';
+                                        final enviadoEn =
+                                            data['enviado_en'] as Timestamp?;
                                         String fechaHora = '';
                                         if (enviadoEn != null) {
                                           final dt = enviadoEn.toDate();
-                                          final h = dt.hour.toString().padLeft(2, '0');
-                                          final m = dt.minute.toString().padLeft(2, '0');
-                                          fechaHora = '${dt.day}/${dt.month}/${dt.year} $h:$m';
+                                          final h = dt.hour
+                                              .toString()
+                                              .padLeft(2, '0');
+                                          final m = dt.minute
+                                              .toString()
+                                              .padLeft(2, '0');
+                                          fechaHora =
+                                              '${dt.day}/${dt.month}/${dt.year} $h:$m';
                                         }
                                         return Text(
                                           '$cantReal dir${enviadoNombre.isNotEmpty ? ' · $enviadoNombre' : ''}${fechaHora.isNotEmpty ? ' · $fechaHora' : ''}',
@@ -1878,32 +3733,48 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                     ),
                                     trailing: TextButton(
                                       onPressed: () async {
-                                        final confirmar = await showDialog<bool>(
+                                        final confirmar =
+                                            await showDialog<bool>(
                                           context: context,
                                           builder: (c) => AlertDialog(
-                                            title: Text(context.t('return_card')),
-                                            content: Text('¿Devolver "$nombre"? Quedará disponible para otros.'),
+                                            title:
+                                                const Text('Devolver tarjeta'),
+                                            content: Text(
+                                              '¿Devolver "$nombre"? Quedará disponible para otros.',
+                                            ),
                                             actions: [
                                               TextButton(
-                                                onPressed: () => Navigator.pop(c, false),
-                                                child: Text(context.t('cancel')),
+                                                onPressed: () =>
+                                                    Navigator.pop(c, false),
+                                                child: const Text('Cancelar'),
                                               ),
                                               ElevatedButton(
-                                                onPressed: () => Navigator.pop(c, true),
-                                                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                                                child: Text(context.t('return')),
+                                                onPressed: () =>
+                                                    Navigator.pop(c, true),
+                                                style: ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        Colors.orange),
+                                                child: const Text('Devolver'),
                                               ),
                                             ],
                                           ),
                                         );
                                         if (confirmar == true) {
-                                          await _devolverTarjeta(territorioId, tarjetaId);
+                                          await _devolverTarjeta(
+                                              territorioId, tarjetaId);
                                         }
                                       },
-                                      child: const Text('Devolver', style: TextStyle(color: Colors.orange)),
+                                      child: const Text('Devolver',
+                                          style:
+                                              TextStyle(color: Colors.orange)),
                                     ),
                                     children: [
-                                      _buildDireccionesTarjeta(tarjetaId, territorioId, nombre),
+                                      _buildDireccionesTarjeta(
+                                          tarjetaId,
+                                          territorioId,
+                                          nombre,
+                                          (data['tipo'] as String?) ??
+                                              'normal'),
                                     ],
                                   ),
                                 ),
@@ -1934,6 +3805,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
             ),
           ),
 
+          // Padding para que el FAB no tape el contenido inferior
           const SliverPadding(
             padding: EdgeInsets.only(bottom: 140),
           ),

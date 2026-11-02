@@ -1,8 +1,8 @@
-name: araucaria_sur
-description: Gestión Territorial Congregación Araucaria Sur
+﻿name: araucaria_sur
+description: GestiÃ³n Territorial CongregaciÃ³n Araucaria Sur
 
 publish_to: 'none'
-version: 1.0.3+80
+version: 1.0.3+96
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -23,11 +23,7 @@ dependencies:
   # Auth
   shared_preferences: ^2.2.0
   local_auth: ^2.3.0
-  flutter_secure_storage: ^9.2.2
-  
-  # Estado
-  flutter_bloc: ^8.1.0
-  equatable: ^2.0.5
+  flutter_secure_storage: ^10.3.4
   
   # Utils
   intl: ^0.19.0
@@ -37,11 +33,10 @@ dependencies:
   google_maps_flutter: ^2.5.0
   
   # CSV
-  file_picker: ^8.0.0
+  file_picker: ^12.1.3
+  connectivity_plus: ^6.1.4
+  web: ^1.1.1
   url_launcher: ^6.3.2
-  
-  # Image caching y submuestreo automático (evita OutOfMemoryError)
-  cached_network_image: ^3.3.0
   
   # PDF
   pdf: ^3.11.0
@@ -50,6 +45,9 @@ dependencies:
   # Actualizaciones forzadas
   in_app_update: ^4.2.3
   algolia_client_search: ^1.49.2
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:
@@ -58,3 +56,22 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Fuentes empaquetadas para cubrir los caracteres que Roboto no trae.
+  #
+  # CanvasKit solo incluye Roboto. Para cualquier otro carÃ¡cter (emoji, â± âš  â†© â—€)
+  # intenta descargar Noto de Google Fonts en runtime y, cuando no logra armar
+  # un set completo, avisa en consola:
+  #   "Could not find a set of Noto fonts to display all missing characters"
+  # y deja los caracteres en blanco o como cajitas.
+  #
+  # Se empaquetan para que no dependan de la red. Son complementarias:
+  # NotoEmoji cubre los simbolos de BMP (âœ… âŒ â­ â± âš  â†© â—€ âœ”) y NotoSansSymbols2
+  # cubre los emoji astrales (ðŸ  ðŸ“ ðŸ“Œ ðŸ‘¤ ðŸ• ðŸ—‘ ðŸ—‚ ðŸ¬ ðŸŽš).
+  fonts:
+    - family: NotoEmoji
+      fonts:
+        - asset: assets/fonts/NotoEmoji-Regular.ttf
+    - family: NotoSansSymbols2
+      fonts:
+        - asset: assets/fonts/NotoSansSymbols2-Regular.ttf

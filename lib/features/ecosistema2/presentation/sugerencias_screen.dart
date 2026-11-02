@@ -62,7 +62,7 @@ class _SugerenciasScreenState extends State<SugerenciasScreen> {
       await NotificacionService.enviarAAdminTerritorios(
         titulo: '💡 Nueva sugerencia',
         cuerpo: '${widget.usuarioNombre} envió una sugerencia: "$texto"',
-        tipo: TipoNotificacion.motivacional,
+        tipo: TipoNotificacion.sugerencia,
         extra: {'sugerencia': texto, 'usuario': widget.usuarioEmail},
       );
 

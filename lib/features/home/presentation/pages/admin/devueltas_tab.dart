@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../../../../core/services/notificacion_service.dart';
+import '../../../../../core/utils/campanas_utils.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/utils/direccion_utils.dart';
+import '../../../../../core/services/historial_temporales_service.dart';
 
 class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -74,10 +76,15 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
 
     try {
       // 1. Obtener direcciones de la carpeta de campaña
+      // Mismo helper que usa el publicador al guardar: si el nombre no es un
+      // ID de colección válido, se lee la carpeta correcta y no una que no
+      // existe.
+      final campId = CampanasUtils.idColeccionCampana(nombre);
+      if (campId.isEmpty) return;
       final carpetaSnap = await db
           .collection('territorios')
           .doc('campanas')
-          .collection(nombre)
+          .collection(campId)
           .get();
 
       int totalDejadas = 0;
@@ -96,7 +103,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         } else {
           totalFaltantes++;
           // Mover a temporales con mensaje de campaña
-          await db.collection('direcciones_globales').add({
+          final ref = await db.collection('direcciones_globales').add({
             'calle': data['calle'] ?? '',
             'complemento': data['complemento'] ?? '',
             'direccion_normalizada': data['direccion_normalizada'] ?? '',
@@ -109,7 +116,18 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             'motivo_temporal': mensajePendiente,
             'fecha_temporal': FieldValue.serverTimestamp(),
             'origen_campana': nombre,
+            'reportado_por': widget.usuarioData['nombre'] ?? '',
+            'reportado_por_email': widget.usuarioData['email'] ?? '',
           });
+          await registrarMovimientoTemporal(
+            tipo: 'entrada',
+            direccionId: ref.id,
+            territorioOrigenId: data['territorio_origen_id']?.toString() ?? '',
+            territorioOrigenNombre: territorioOrigen,
+            calle: data['calle']?.toString(),
+            motivo: 'campana_cierre',
+            por: widget.usuarioData['nombre']?.toString(),
+          );
         }
 
         // Contar por territorio
@@ -375,7 +393,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           destinatarioNombre: nombre,
           titulo: '📢 Anuncio de la congregación',
           cuerpo: texto,
-          tipo: TipoNotificacion.motivacional,
+          tipo: TipoNotificacion.anuncio,
         );
       }
 

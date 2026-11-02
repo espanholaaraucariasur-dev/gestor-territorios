@@ -14,6 +14,14 @@ class UsuariosTab extends StatefulWidget {
 }
 
 class _UsuariosTabState extends State<UsuariosTab> {
+  final TextEditingController _busquedaController = TextEditingController();
+
+  @override
+  void dispose() {
+    _busquedaController.dispose();
+    super.dispose();
+  }
+
   // ─────────────────────────────────────────────────────────
   // APROBAR / DESAPROBAR
   // ─────────────────────────────────────────────────────────
@@ -94,13 +102,20 @@ class _UsuariosTabState extends State<UsuariosTab> {
         }
 
         // Separar pendientes de aprobados
+        final filtro = _busquedaController.text.trim().toLowerCase();
         final pendientes = usuarios.where((u) {
           final d = u.data() as Map<String, dynamic>;
+          if (filtro.isNotEmpty && !_coincideBusqueda(d, filtro)) {
+            return false;
+          }
           return (d['estado'] ?? 'pendiente') != 'aprobado';
         }).toList();
 
         final aprobados = usuarios.where((u) {
           final d = u.data() as Map<String, dynamic>;
+          if (filtro.isNotEmpty && !_coincideBusqueda(d, filtro)) {
+            return false;
+          }
           return (d['estado'] ?? 'pendiente') == 'aprobado';
         }).toList();
 
@@ -109,6 +124,43 @@ class _UsuariosTabState extends State<UsuariosTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ── Búsqueda por nombre o email ───────────────
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: TextField(
+                  controller: _busquedaController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'Buscar por nombre o email...',
+                    prefixIcon: const Icon(Icons.search,
+                        color: Color(0xFF1B5E20), size: 20),
+                    suffixIcon: _busquedaController.text.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _busquedaController.clear();
+                              setState(() {});
+                            },
+                          ),
+                    isDense: true,
+                    border: InputBorder.none,
+                  ),
+                ),
+              ),
+
               // ── Pendientes de aprobación ──────────────────
               if (pendientes.isNotEmpty) ...[
                 Row(
@@ -175,6 +227,12 @@ class _UsuariosTabState extends State<UsuariosTab> {
         );
       },
     );
+  }
+
+  bool _coincideBusqueda(Map<String, dynamic> d, String filtro) {
+    final nombre = (d['nombre'] ?? '').toString().toLowerCase();
+    final email = (d['email'] ?? '').toString().toLowerCase();
+    return nombre.contains(filtro) || email.contains(filtro);
   }
 
   // ─────────────────────────────────────────────────────────

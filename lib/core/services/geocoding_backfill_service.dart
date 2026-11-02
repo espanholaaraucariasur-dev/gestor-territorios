@@ -37,24 +37,54 @@ class GeocodingBackfillService {
   /// margen seguro.
   static const int _concurrenciaMapbox = 5;
 
+  /// Versión del formato de `calle` que produce [ensamblarDireccionFinal].
+  /// Se guarda en el doc ('calleFormato') para poder reprocesar UNA sola vez
+  /// las direcciones viejas cuando el formato cambia, sin quedar en loop.
+  static const int _versionFormatoCalle = 2;
+
   /// Ejecuta el backfill completo.
+  ///
+  /// [coleccion] permite reutilizar la misma lógica tanto para direcciones
+  /// ya confirmadas ('direcciones_globales', default) como para la bandeja
+  /// de sugerencias pendientes ('sugerencias') — mismo motor, mismo
+  /// batching, mismo reintento con partición.
   ///
   /// [onProgreso] se invoca después de cada dirección procesada con
   /// (procesadas, total, actualizadas, fallidas), para que la UI pueda
   /// mostrar una barra de progreso en vivo.
   static Future<BackfillResultado> ejecutarBackfillCoordenadas({
+    String coleccion = _coleccion,
     void Function(int procesadas, int total, int actualizadas, int fallidas)?
         onProgreso,
+    // Cuando es true (bandeja "Nuevas Direcciones"), una sugerencia que ya
+    // tiene coords, texto normalizado y CEP igual se reprocesa si el CEP no
+    // quedó pegado en la dirección visible ('calle'), para que se muestre.
+    bool reprocesarSinCepVisible = false,
   }) async {
     final firestore = FirebaseFirestore.instance;
 
-    // 1. Traer todas las direcciones y filtrar localmente las que no tienen
-    // lat/lng (evita depender de que el campo exista para poder filtrarlo
-    // por query, ya que documentos viejos pueden no tenerlo en absoluto).
-    final snapshot = await firestore.collection(_coleccion).get();
+    // 1. Traer todos los documentos y filtrar localmente los que necesitan
+    // procesarse. IMPORTANTE: se chequean TRES señales independientes, no
+    // solo lat/lng. Una dirección puede tener coordenadas de otro camino
+    // (ej. la validación de Mapbox del auto-asignador) sin haber pasado
+    // nunca por Groq para limpiar el texto — si solo miráramos lat/lng,
+    // quedaría marcada como "ya lista" para siempre con el texto crudo.
+    // Y puede tener coords+texto pero sin CEP (o con el CEP sin pegar en la
+    // dirección), que es justo lo que el auditor espera completar al
+    // "Normalizar bandeja".
+    final snapshot = await firestore.collection(coleccion).get();
     final docsSinCoordenadas = snapshot.docs.where((doc) {
       final data = doc.data();
-      return data['lat'] == null || data['lng'] == null;
+      final sinCoords = data['lat'] == null || data['lng'] == null;
+      final sinNormalizar = (data['direccionNormalizada'] ?? '').toString().isEmpty;
+      final cep = (data['cep'] ?? '').toString().trim();
+      final cepPendiente = reprocesarSinCepVisible &&
+          (cep.isEmpty ||
+              !(data['calle'] ?? '').toString().contains(cep));
+      final formatoViejo = reprocesarSinCepVisible &&
+          (((data['calleFormato'] as num?)?.toInt()) ?? 0) <
+              _versionFormatoCalle;
+      return sinCoords || sinNormalizar || cepPendiente || formatoViejo;
     }).toList();
 
     final total = docsSinCoordenadas.length;
@@ -83,7 +113,10 @@ class GeocodingBackfillService {
       final crudas = lote
           .map((doc) => {
                 'id': doc.id,
-                'calle': doc.data()['calle'] ?? doc.data()['direccion'] ?? '',
+                'calle': doc.data()['calle'] ??
+                    doc.data()['direccion'] ??
+                    doc.data()['texto_direccion'] ??
+                    '',
                 'numero': doc.data()['numero'] ?? '',
                 'complemento': doc.data()['complemento'] ?? '',
                 'barrio': doc.data()['barrio'] ?? '',
@@ -143,16 +176,27 @@ class GeocodingBackfillService {
               return;
             }
 
-            // 4. Guardar: lat/lng para uso interno del sistema (rutas,
-            // distancias), CEP visible/útil para Google Maps.
-            await firestore.collection(_coleccion).doc(id).update({
+            // 4. Guardar: 'calle' con el texto normalizado + barrio y CEP
+            // reales de Mapbox ensamblados (para que el CEP se vea en la
+            // dirección en todas partes, no solo en el diálogo que lo generó),
+            // lat/lng para uso interno del sistema, CEP y barrio en campos
+            // propios para poder filtrarlos/buscarlos.
+            final calleFinal = MapboxGeocodingService.ensamblarDireccionFinal(
+              direccionNormalizada,
+              geo,
+            );
+            final barrioGeo = (geo['barrio'] as String?)?.trim() ?? '';
+            await firestore.collection(coleccion).doc(id).update({
+              'calle': calleFinal,
               'lat': geo['lat'],
               'lng': geo['lng'],
               'cep': geo['cep'],
               'direccionNormalizada': direccionNormalizada,
+              if (barrioGeo.isNotEmpty) 'barrio': barrioGeo,
               'geocodingConfianza': item['confianza'] ?? '',
               'geocodedAt': FieldValue.serverTimestamp(),
               'geocodingSource': 'groq+mapbox',
+              'calleFormato': _versionFormatoCalle,
             });
 
             actualizadas++;
@@ -173,6 +217,64 @@ class GeocodingBackfillService {
       fallidas: fallidas,
       errores: errores,
     );
+  }
+
+  /// Punto de entrada ÚNICO para normalizar y geocodificar UNA dirección
+  /// recién llegada, sin importar de dónde venga (admin, WhatsApp,
+  /// auto-asignación, asignación manual del auditor). Groq limpia/completa
+  /// el texto (agrega ciudad/estado, corrige abreviaturas) y Mapbox la
+  /// geocodifica. Todos los caminos de ingreso deben llamar a este método
+  /// ANTES de guardar la dirección por primera vez, en vez de mostrarla
+  /// cruda y normalizarla recién cuando alguien la abre.
+  ///
+  /// Retorna null si Groq o Mapbox fallan (sin conexión, error de API,
+  /// etc.) — en ese caso el llamador debe guardar el texto original tal
+  /// cual, sin bloquear el flujo por un problema de red puntual.
+  ///
+  /// [direccionCruda] debe tener al menos "calle" (o "direccion"); "numero",
+  /// "complemento" y "barrio" son opcionales.
+  static Future<Map<String, dynamic>?> normalizarYGeocodificarUna(
+    Map<String, dynamic> direccionCruda,
+  ) async {
+    try {
+      final normalizadas =
+          await GroqTerritoryService.normalizarDireccionesParaGeocoding([
+        {
+          'id': 'temp',
+          'calle': direccionCruda['calle'] ?? direccionCruda['direccion'] ?? '',
+          'numero': direccionCruda['numero'] ?? '',
+          'complemento': direccionCruda['complemento'] ?? '',
+          'barrio': direccionCruda['barrio'] ?? '',
+        }
+      ]);
+      final direccionNormalizada = normalizadas.isNotEmpty
+          ? (normalizadas.first['direccion_normalizada']?.toString() ?? '')
+          : '';
+      if (direccionNormalizada.isEmpty) return null;
+
+      final geo = await _geocodificarConReintento(direccionNormalizada);
+      if (geo == null) {
+        // Mapbox no encontró coincidencias, pero el texto sí se normalizó:
+        // vale la pena devolver al menos la calle limpia sin coordenadas.
+        return {
+          'calle': direccionNormalizada,
+          'direccionNormalizada': direccionNormalizada,
+          'cep': '',
+          'lat': null,
+          'lng': null,
+        };
+      }
+
+      return {
+        'calle': direccionNormalizada,
+        'direccionNormalizada': direccionNormalizada,
+        'cep': geo['cep'] ?? '',
+        'lat': geo['lat'],
+        'lng': geo['lng'],
+      };
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Reintenta una vez con backoff si Mapbox responde 429 (rate limit).

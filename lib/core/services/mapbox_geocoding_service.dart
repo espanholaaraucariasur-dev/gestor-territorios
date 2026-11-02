@@ -85,13 +85,19 @@ class MapboxGeocodingService {
     final lat = (geometry[1] as num).toDouble();
 
     // El CEP viene en "context" como { id: "postcode.xxxx", text: "83700-000" }.
+    // El barrio viene igual, con { id: "neighborhood.xxxx", text: "..." }.
+    // Estos dos son la única fuente de verdad real para barrio+CEP: Groq no
+    // puede saber el barrio real de una dirección (solo repite lo que se le
+    // haya dado como dato) y nunca tiene el CEP.
     String? cep;
+    String? barrio;
     final context = (f['context'] as List?) ?? [];
     for (final c in context.cast<Map<String, dynamic>>()) {
       final id = (c['id'] as String?) ?? '';
       if (id.startsWith('postcode')) {
         cep = c['text'] as String?;
-        break;
+      } else if (id.startsWith('neighborhood')) {
+        barrio = c['text'] as String?;
       }
     }
 
@@ -99,8 +105,92 @@ class MapboxGeocodingService {
       'lat': lat,
       'lng': lng,
       'cep': cep ?? '',
+      'barrio': barrio ?? '',
       'placeName': (f['place_name'] as String?) ?? '',
       'relevancia': (f['relevance'] as num?)?.toDouble() ?? 0.0,
     };
   }
+
+  /// Ensambla el texto final de una dirección combinando el texto base
+  /// (ya corregido/normalizado por Groq o tipeado por el usuario) con el
+  /// barrio y CEP reales devueltos por Mapbox al geocodificar. Solo agrega
+  /// lo que falte — no duplica si el texto ya lo incluye.
+  ///
+  /// Pensado como punto único de ensamblado para que todos los caminos de
+  /// entrada de direcciones (publicador, admin manual, auto-asignador IA,
+  /// asignación manual del auditor) arme el texto final de la misma forma.
+  static String ensamblarDireccionFinal(
+    String texto,
+    Map<String, dynamic>? geo,
+  ) {
+    if (geo == null) return texto.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    final barrio = (geo['barrio'] as String?)?.trim() ?? '';
+    final cep = (geo['cep'] as String?)?.trim() ?? '';
+
+    // 1. Quedarnos solo con "calle + número", descartando ciudad/estado, país,
+    // CEP y barrio si el texto ya los traía, para no duplicar al reensamblar.
+    var base = texto.trim();
+    final idxCiudad = base.toLowerCase().indexOf('arauc');
+    if (idxCiudad != -1) {
+      base = base.substring(0, idxCiudad);
+    }
+    base = base
+        .replaceAll(RegExp(r'[,;]?\s*brasil\s*$', caseSensitive: false), '')
+        .replaceAll(RegExp(r'[,\-]+\s*$'), '')
+        .trim();
+    if (cep.isNotEmpty) {
+      base = base
+          .replaceAll(RegExp(r'[,\s]*' + RegExp.escape(cep) + r'\s*$'), '')
+          .trim();
+    }
+    if (barrio.isNotEmpty) {
+      base = base
+          .replaceAll(
+              RegExp(r'[,\-]?\s*' + RegExp.escape(barrio) + r'\s*$',
+                  caseSensitive: false),
+              '')
+          .replaceAll(RegExp(r'[,\-]+\s*$'), '')
+          .trim();
+    }
+
+    // 2. Separar calle y número (el número puede venir con o sin coma:
+    // "Rua X, 101" o "Rua X 101") y descartar un barrio suelto si el texto
+    // crudo ya lo traía (ej. "Rua X 854, Iguaçu" -> queda "Rua X, 854").
+    final segs =
+        base.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    while (segs.length > 1 && !RegExp(r'\d').hasMatch(segs.last)) {
+      segs.removeLast();
+    }
+    var numero = '';
+    if (segs.isNotEmpty) {
+      final ultimo = segs.last;
+      final mNum =
+          RegExp(r'^(.*?\S)\s+(\d{1,6}\s*[A-Za-z]?)$').firstMatch(ultimo);
+      if (mNum != null) {
+        numero = mNum.group(2)!.trim();
+        segs[segs.length - 1] = mNum.group(1)!.trim();
+      } else if (RegExp(r'^\d{1,6}\s*[A-Za-z]?$').hasMatch(ultimo)) {
+        numero = ultimo;
+        segs.removeLast();
+      }
+    }
+
+    // 3. Formato canónico: Calle, número - Barrio, Araucária - PR, CEP, Brasil.
+    final buffer = StringBuffer(_titulo(segs.join(', ')));
+    if (numero.isNotEmpty) buffer.write(', $numero');
+    if (barrio.isNotEmpty) buffer.write(' - ${_titulo(barrio)}');
+    buffer.write(', Araucária - PR');
+    if (cep.isNotEmpty) buffer.write(', $cep');
+    buffer.write(', Brasil');
+
+    return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// Pone en Mayúscula La Primera Letra De Cada Palabra.
+  static String _titulo(String s) => s
+      .split(' ')
+      .where((p) => p.trim().isNotEmpty)
+      .map((p) => p[0].toUpperCase() + p.substring(1).toLowerCase())
+      .join(' ');
 }

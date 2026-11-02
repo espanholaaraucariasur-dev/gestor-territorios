@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'comunicacion_tab.dart';
+import 'comercial_tab.dart';
 import 'usuarios_tab.dart';
 import 'auditor_panel_page.dart';
 import 'mantenimiento_tab.dart';
@@ -9,7 +10,6 @@ import '../../../../../core/services/algolia_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 import '../../../../../core/utils/direccion_utils.dart';
-import 'package:araucaria_sur/features/home/presentation/pages/admin/auditor_panel_page.dart'; // Ajusta la ruta si está en otra carpeta
 class AdminTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
   final TabController tabController;
@@ -229,6 +229,34 @@ class _AdminTabState extends State<AdminTab> {
     );
   }
 
+  /// Direcciones ya presentes en una tarjeta, normalizadas, para no volver a
+  /// crearlas al importar. El set se usa como filtro: `add` devuelve `false` si
+  /// el valor ya estaba, lo que además detecta duplicados dentro del mismo
+  /// archivo importado.
+  Future<Set<String>> _direccionesNormalizadasDeTarjeta(
+    String tarjetaId,
+    String territorioId,
+  ) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('tarjeta_id', isEqualTo: tarjetaId)
+          .get();
+      final out = <String>{};
+      for (final d in snap.docs) {
+        final data = d.data();
+        if ((data['territorio_id'] ?? '').toString() != territorioId) continue;
+        final n = (data['direccion_normalizada'] ?? '').toString().trim();
+        if (n.isNotEmpty) out.add(n);
+      }
+      return out;
+    } catch (_) {
+      // Si no se puede leer, se importan todas: es preferible un duplicado
+      // occasional a perder direcciones por un fallo de red.
+      return <String>{};
+    }
+  }
+
   Future<void> _procesarCSVEnTerritorio(
     String territorioId,
     Map<String, List<Map<String, String>>> tarjetasMap,
@@ -247,6 +275,7 @@ class _AdminTabState extends State<AdminTab> {
     try {
       int totalTarjetas = 0;
       int totalDirecciones = 0;
+      int duplicadasOmitidas = 0;
       final Map<String, Map<String, dynamic>> direccionesParaAlgolia = {};
       for (final entry in tarjetasMap.entries) {
         final nombreTarjeta = entry.key;
@@ -269,9 +298,27 @@ class _AdminTabState extends State<AdminTab> {
           'asignado_en': null,
         }, SetOptions(merge: true));
         final batch = FirebaseFirestore.instance.batch();
+
+        // El id del documento lleva un timestamp, así que el mismo `batch.set`
+        // NUNCA colisiona: cargar dos veces el mismo archivo crea un documento
+        // duplicado por dirección y eso infla el conteo de temporales. Se
+        // comprueba antes qué direcciones ya existen en esta tarjeta para
+        // saltarlas en vez de duplicarlas.
+        final yaExistentes = await _direccionesNormalizadasDeTarjeta(
+          nombreTarjeta,
+          territorioId,
+        );
+        var duplicadas = 0;
+
         for (final dir in direcciones) {
           final calle = dir['calle'] ?? '';
           final complemento = dir['complemento'] ?? '';
+          final normalizada =
+              _normalizarDireccion('$calle $complemento').trim();
+          if (normalizada.isNotEmpty && !yaExistentes.add(normalizada)) {
+            duplicadas++;
+            continue;
+          }
           final timestamp = DateTime.now().millisecondsSinceEpoch;
           final complementoSlug = complemento.isNotEmpty
               ? '_${complemento.replaceAll(' ', '_')}'
@@ -311,6 +358,7 @@ class _AdminTabState extends State<AdminTab> {
           direccionesParaAlgolia[docId] = data;
           totalDirecciones++;
         }
+        duplicadasOmitidas += duplicadas;
         await batch.commit();
 
         for (final entry in direccionesParaAlgolia.entries) {
@@ -326,7 +374,9 @@ class _AdminTabState extends State<AdminTab> {
           builder: (context) => AlertDialog(
             title: const Text('✅ CSV importado'),
             content: Text(
-                '$totalTarjetas tarjetas creadas\n$totalDirecciones direcciones agregadas\n\nTerritorio: $territorioId'),
+                '$totalTarjetas tarjetas creadas\n$totalDirecciones direcciones agregadas'
+                '${duplicadasOmitidas > 0 ? '\n$duplicadasOmitidas omitidas por ya existir' : ''}'
+                '\n\nTerritorio: $territorioId'),
             actions: [
               TextButton(
                   onPressed: () => Navigator.pop(context),
@@ -346,32 +396,53 @@ class _AdminTabState extends State<AdminTab> {
   }
 
   void _verDirectorioGlobal() {
+    final ctrl = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Container(
-          width: double.maxFinite,
-          constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.85),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Directorio Global',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1B5E20))),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDlgState) => Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            width: double.maxFinite,
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.85),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Directorio Global',
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1B5E20))),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const Divider(),
+                TextField(
+                  controller: ctrl,
+                  autofocus: false,
+                  decoration: InputDecoration(
+                    hintText: 'Buscar dirección... (ej: Rua Ivai, Rua Itopoa)',
+                    prefixIcon: const Icon(Icons.search),
+                    filled: true,
+                    fillColor: Colors.grey.shade100,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
-                ],
-              ),
-              const Divider(),
+                  onChanged: (_) => setDlgState(() {}),
+                ),
+              const SizedBox(height: 12),
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
@@ -388,23 +459,49 @@ class _AdminTabState extends State<AdminTab> {
                           child: Text('No hay direcciones.',
                               style: TextStyle(color: Colors.grey)));
                     }
+
+                    final textoBusqueda = ctrl.text.trim().toLowerCase();
+                    final docsFiltrados = textoBusqueda.isEmpty
+                        ? docs
+                        : docs.where((doc) {
+                            final d =
+                                (doc.data() as Map<String, dynamic>?) ?? {};
+                            final calle = (d['calle'] as String?) ?? '';
+                            final complemento =
+                                (d['complemento'] as String?) ?? '';
+                            final tarjetaId =
+                                (d['tarjeta_id'] as String?) ?? '';
+                            final texto =
+                                _normalizarDireccion('$calle $complemento $tarjetaId')
+                                    .toLowerCase();
+                            return texto.contains(textoBusqueda);
+                          }).toList();
+
+                    if (docsFiltrados.isEmpty) {
+                      return Center(
+                          child: Text('Sin resultados para "$textoBusqueda".',
+                              style: const TextStyle(color: Colors.grey)));
+                    }
+
                     return Column(
                       children: [
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: Text(
-                            '${docs.length} direcciones en total',
+                            docsFiltrados.length == docs.length
+                                ? '${docs.length} direcciones en total'
+                                : '${docsFiltrados.length} de ${docs.length} direcciones',
                             style: const TextStyle(
                                 color: Colors.grey, fontSize: 12),
                           ),
                         ),
                         Expanded(
                           child: ListView.builder(
-                            itemCount: docs.length,
+                            itemCount: docsFiltrados.length,
                             itemBuilder: (context, i) {
-                              final d =
-                                  (docs[i].data() as Map<String, dynamic>?) ??
-                                      {};
+                              final d = (docsFiltrados[i].data()
+                                  as Map<String, dynamic>?) ??
+                                  {};
                               final calle = (d['calle'] as String?) ?? '';
                               final complemento =
                                   (d['complemento'] as String?) ?? '';
@@ -415,12 +512,44 @@ class _AdminTabState extends State<AdminTab> {
                                       'pendiente';
                               final predicado =
                                   (d['predicado'] as bool?) ?? false;
+                              final territorioId =
+                                  (d['territorio_id'] as String?) ?? '';
+                              final territorioNombreDir =
+                                  (d['territorio_nombre'] as String?) ?? '';
 
                               return ListTile(
                                 dense: true,
+                                onTap: () {
+                                  if (territorioId.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Esta dirección aún no está asignada a ningún territorio.'),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  Navigator.pop(context);
+                                  WidgetsBinding.instance
+                                      .addPostFrameCallback((_) {
+                                    _abrirTerritorio(
+                                      territorioId,
+                                      territorioNombreDir.isNotEmpty
+                                          ? territorioNombreDir
+                                          : territorioId,
+                                      tarjetaParaExpandir:
+                                          tarjetaId != '-' ? tarjetaId : null,
+                                      direccionParaResaltar:
+                                          docsFiltrados[i].id,
+                                    );
+                                  });
+                                },
                                 leading: Icon(
                                   Icons.location_on,
-                                  color: predicado ? Colors.green : Colors.grey,
+                                  color: predicado
+                                      ? Colors.green
+                                      : Colors.grey,
                                   size: 18,
                                 ),
                                 title: Text(
@@ -462,79 +591,180 @@ class _AdminTabState extends State<AdminTab> {
             ],
           ),
         ),
+        ),
       ),
-    );
+    ).whenComplete(ctrl.dispose);
   }
 
-  void _mostrarDialogoCrearTerritorio() {
+Future<void> _mostrarDialogoCrearTerritorio() async {
     final ctrl = TextEditingController();
+    String tipoSeleccionado = 'normal';
+    final Set<String> fuentesSeleccionadas = {};
+
+    final territoriosSnap = await FirebaseFirestore.instance
+        .collection('territorios')
+        .get();
+    if (!mounted) return;
+
     showDialog(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Row(children: [
-          Icon(Icons.create_new_folder, color: Color(0xFF1B5E20)),
-          SizedBox(width: 8),
-          Text('Crear Nuevo Territorio'),
-        ]),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: InputDecoration(
-            labelText: 'Nombre del territorio',
-            hintText: 'Ej: Norte, Centro, Barrio Sur',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF1B5E20), width: 2),
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (dialogCtx, setDlgState) => AlertDialog(
+          title: const Row(children: [
+            Icon(Icons.create_new_folder, color: Color(0xFF1B5E20)),
+            SizedBox(width: 8),
+            Text('Crear Nuevo Territorio'),
+          ]),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      labelText: 'Nombre del territorio',
+                      hintText: 'Ej: Norte, Centro, Barrio Sur',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                            color: Color(0xFF1B5E20), width: 2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Tipo de territorio',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 4),
+                  ...['normal', 'comercial', 'base'].map((tipo) {
+                    final labels = {
+                      'normal': 'Normal (residencial)',
+                      'comercial': 'Comercial (genera tarjetas ZONA-N)',
+                      'base': 'Base (solo almacena direcciones)',
+                    };
+                    return RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(labels[tipo]!,
+                          style: const TextStyle(fontSize: 13)),
+                      value: tipo,
+                      groupValue: tipoSeleccionado,
+                      activeColor: const Color(0xFF1B5E20),
+                      onChanged: (v) => setDlgState(() {
+                        tipoSeleccionado = v!;
+                      }),
+                    );
+                  }),
+                  if (tipoSeleccionado == 'comercial') ...[
+                    const SizedBox(height: 8),
+                    const Text('Usar direcciones de (bases):',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 4),
+                    if (territoriosSnap.docs
+                        .where((d) => d.data()['tipo'] == 'base')
+                        .isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Text(
+                          'Aún no hay territorios base. Crea uno y conviértelo a base o usa "Convertir en Base".',
+                          style: TextStyle(
+                              color: Colors.grey, fontSize: 12),
+                        ),
+                      )
+                    else
+                      ...territoriosSnap.docs
+                          .where((d) => d.data()['tipo'] == 'base')
+                          .map((doc) {
+                        final nombre =
+                            doc.data()['nombre'] ?? doc.id;
+                        return CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(nombre.toString(),
+                              style: const TextStyle(fontSize: 13)),
+                          value: fuentesSeleccionadas.contains(doc.id),
+                          activeColor: const Color(0xFF1B5E20),
+                          onChanged: (v) => setDlgState(() {
+                            if (v == true) {
+                              fuentesSeleccionadas.add(doc.id);
+                            } else {
+                              fuentesSeleccionadas.remove(doc.id);
+                            }
+                          }),
+                        );
+                      }),
+                  ],
+                ],
+              ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5E20),
-                foregroundColor: Colors.white),
-            onPressed: () async {
-              final nombre = ctrl.text.trim();
-              if (nombre.isEmpty) return;
-              Navigator.pop(dialogCtx);
-              try {
-                await FirebaseFirestore.instance
-                    .collection('territorios')
-                    .doc(nombre.toUpperCase().replaceAll(' ', '_'))
-                    .set({
-                  'nombre': nombre,
-                  'created_at': FieldValue.serverTimestamp(),
-                }, SetOptions(merge: true));
-                if (mounted) {
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                  foregroundColor: Colors.white),
+              child: const Text('Crear'),
+              onPressed: () async {
+                final nombre = ctrl.text.trim();
+                if (nombre.isEmpty) return;
+                if (tipoSeleccionado == 'comercial' &&
+                    fuentesSeleccionadas.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('✅ Territorio "$nombre" creado'),
-                      backgroundColor: Colors.green,
-                    ),
+                    const SnackBar(
+                        content: Text('Selecciona al menos una base.'),
+                        backgroundColor: Colors.orange),
                   );
+                  return;
                 }
-              } catch (e) {
-                debugPrint('❌ Error creando territorio: $e');
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
+                Navigator.pop(dialogCtx);
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('territorios')
+                      .doc(nombre.toUpperCase().replaceAll(' ', '_'))
+                      .set({
+                    'nombre': nombre,
+                    'tipo': tipoSeleccionado,
+                    if (tipoSeleccionado == 'comercial')
+                      'fuentes_base': fuentesSeleccionadas.toList(),
+                    'created_at': FieldValue.serverTimestamp(),
+                  }, SetOptions(merge: true));
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('✅ Territorio "$nombre" creado'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  debugPrint('❌ Error creando territorio: $e');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
                         content: Text('❌ Error: $e'),
-                        backgroundColor: Colors.red),
-                  );
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
                 }
-              }
-            },
-            child: const Text('Crear'),
-          ),
-        ],
+              },
+            ),
+          ],
+        ),
       ),
-    );
+);
   }
 
   Widget _buildTarjetaCupo(int count) {
@@ -587,11 +817,13 @@ class _AdminTabState extends State<AdminTab> {
   }
 
   void _abrirTerritorio(String territorioId, String nombre,
-      {bool readOnly = false}) {
+      {bool readOnly = false, String? tarjetaParaExpandir, String? direccionParaResaltar}) {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
+        final tarjetaKey = GlobalKey();
+        bool scrollHecho = false;
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return Dialog(
@@ -672,11 +904,33 @@ class _AdminTabState extends State<AdminTab> {
                               final tarjetaNombre =
                                   tarjetaMap['nombre'] as String? ??
                                       'Sin nombre';
+                              final esTarjetaObjetivo =
+                                  tarjetaId == tarjetaParaExpandir;
+                              if (esTarjetaObjetivo && !scrollHecho) {
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  if (!scrollHecho &&
+                                      tarjetaKey.currentContext != null) {
+                                    scrollHecho = true;
+                                    Scrollable.ensureVisible(
+                                      tarjetaKey.currentContext!,
+                                      alignment: 0.05,
+                                      duration:
+                                          const Duration(milliseconds: 400),
+                                      curve: Curves.easeInOut,
+                                    );
+                                  }
+                                });
+                              }
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 10),
-                                color: Colors.blue.shade50,
-                                elevation: 2,
+                                color: esTarjetaObjetivo
+                                    ? Colors.orange.shade100
+                                    : Colors.blue.shade50,
+                                elevation: esTarjetaObjetivo ? 4 : 2,
                                 child: ExpansionTile(
+                                  key: esTarjetaObjetivo ? tarjetaKey : null,
+                                  initiallyExpanded: esTarjetaObjetivo,
                                   leading: const Icon(Icons.folder,
                                       color: Colors.blue),
                                   title: Text(tarjetaNombre,
@@ -805,6 +1059,8 @@ class _AdminTabState extends State<AdminTab> {
                                               children: [
                                                 ListTile(
                                                   dense: true,
+                                                  selected:
+                                                      dir.id == direccionParaResaltar,
                                                   leading: const Icon(
                                                       Icons.location_on,
                                                       color: Colors.blue,
@@ -900,6 +1156,11 @@ class _AdminTabState extends State<AdminTab> {
         );
       },
     );
+  }
+
+  /// Abre la vista del territorio comercial (ZONA-N).
+  void _abrirVistaComercial(String territorioId, String nombre) {
+    ComercialTab.abrir(context, territorioId, nombre, widget.usuarioData);
   }
 
   void _mostrarDialogoCrearTarjeta(BuildContext parentContext, String terId) {
@@ -1156,10 +1417,27 @@ class _AdminTabState extends State<AdminTab> {
     );
     if (confirmar != true) return;
     try {
-      await FirebaseFirestore.instance
+      // Al eliminar una dirección hay que descontarla de los contadores de la
+      // tarjeta; si no, `cantidad_direcciones`/`totalDirecciones` quedan
+      // inflados (antes nunca bajaban). Se hace en un batch con el delete.
+      final batch = FirebaseFirestore.instance.batch();
+      batch.delete(FirebaseFirestore.instance
           .collection('direcciones_globales')
-          .doc(docId)
-          .delete();
+          .doc(docId));
+      if (territorioId.isNotEmpty && tarjetaId.isNotEmpty) {
+        final tarjetaRef = FirebaseFirestore.instance
+            .collection('territorios')
+            .doc(territorioId)
+            .collection('tarjetas')
+            .doc(tarjetaId);
+        if ((await tarjetaRef.get()).exists) {
+          batch.update(tarjetaRef, {
+            'cantidad_direcciones': FieldValue.increment(-1),
+            'totalDirecciones': FieldValue.increment(-1),
+          });
+        }
+      }
+      await batch.commit();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1469,15 +1747,194 @@ class _AdminTabState extends State<AdminTab> {
     }
   }
 
-  void _editarNombreTerritorio(DocumentSnapshot doc) {
-    final nombre =
+  Future<void> _editarNombreTerritorio(DocumentSnapshot doc) async {
+    final nombreActual =
         (doc.data() as Map<String, dynamic>)['nombre'] ?? 'Sin nombre';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Editar Territorio: $nombre'),
-        backgroundColor: Colors.orange,
+    final ctrl = TextEditingController(text: nombreActual.toString());
+    final nuevoNombre = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Editar nombre de territorio'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: InputDecoration(
+            labelText: 'Nombre',
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide:
+                  const BorderSide(color: Color(0xFF1B5E20), width: 2),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white),
+            child: const Text('Guardar'),
+          ),
+        ],
       ),
     );
+    ctrl.dispose();
+    if (nuevoNombre == null || nuevoNombre.isEmpty) return;
+    try {
+      final db = FirebaseFirestore.instance;
+      // 1. Actualizar el nombre del territorio
+      await db
+          .collection('territorios')
+          .doc(doc.id)
+          .update({'nombre': nuevoNombre});
+
+      // 2. Propagar el nuevo nombre a sus tarjetas
+      final tarjetas = await db
+          .collection('territorios')
+          .doc(doc.id)
+          .collection('tarjetas')
+          .get();
+      final batch = db.batch();
+      for (final t in tarjetas.docs) {
+        batch.update(t.reference, {'territorio_nombre': nuevoNombre});
+      }
+
+      // 3. Propagar el nuevo nombre a las direcciones del territorio
+      //    (directorio global que referencia este territorio)
+      final direcciones = await db
+          .collection('direcciones_globales')
+          .where('territorio_id', isEqualTo: doc.id)
+          .get();
+      for (final d in direcciones.docs) {
+        batch.update(d.reference, {'territorio_nombre': nuevoNombre});
+      }
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('✅ Nombre de territorio actualizado'),
+              backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error editando territorio: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _convertirEnBase(DocumentSnapshot doc) async {
+    final data = doc.data() as Map<String, dynamic>;
+    final nombre = (data['nombre'] ?? doc.id).toString();
+    final yaBase = data['tipo'] == 'base';
+    if (yaBase) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Este territorio ya es Base.'),
+            backgroundColor: Colors.grey),
+      );
+      return;
+    }
+    if (!mounted) return;
+    String? categoria = 'farmacia';
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setSt) => AlertDialog(
+          title: const Text('Convertir en Base'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  'El territorio "$nombre" pasará a ser BASE: solo almacenará direcciones en el directorio global y no se enviará a publicadores.\n\nLas direcciones ya existentes se conservan. ¿Continuar?'),
+              const SizedBox(height: 16),
+              const Text('¿Qué tipo de comercios contiene?',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              ...['farmacia', 'mercado', 'mecanica', 'escuela'].map((cat) {
+                final colores = {
+                  'farmacia': Colors.teal,
+                  'mercado': Colors.orange,
+                  'mecanica': Colors.blueGrey,
+                  'escuela': Colors.indigo,
+                };
+                return RadioListTile<String>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                      cat[0].toUpperCase() + cat.substring(1),
+                      style: const TextStyle(fontSize: 14)),
+                  value: cat,
+                  groupValue: categoria,
+                  activeColor: colores[cat],
+                  onChanged: (v) => setSt(() => categoria = v),
+                );
+              }),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(c, true),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                  foregroundColor: Colors.white),
+              child: const Text('Convertir'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(doc.id)
+          .update({
+        'tipo': 'base',
+        'categoria': categoria,
+      });
+      // Propagar la categoría a las direcciones existentes de la base.
+      final dirs = await FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('territorio_id', isEqualTo: doc.id)
+          .get();
+      final batch = FirebaseFirestore.instance.batch();
+      for (final d in dirs.docs) {
+        batch.update(d.reference, {'categoria': categoria});
+      }
+      if (dirs.docs.isNotEmpty) await batch.commit();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '✅ "$nombre" ahora es base (${dirs.docs.length} dirs marcadas como $categoria)'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error convirtiendo a base: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Future<void> _borrarTerritorio(
@@ -1604,9 +2061,22 @@ class _AdminTabState extends State<AdminTab> {
         try {
           final batch = FirebaseFirestore.instance.batch();
           final Map<String, Map<String, dynamic>> direccionesParaAlgolia = {};
+
+          // Igual que en el importador de CSVs: el id lleva timestamp, así que
+          // hay que filtrar a mano lo que ya existe en la tarjeta.
+          final yaExistentes =
+              await _direccionesNormalizadasDeTarjeta(tarjetaId, terId);
+          var duplicadasOmitidas = 0;
+
           for (final dir in direcciones) {
             final calle = dir['calle'] ?? '';
             final complemento = dir['complemento'] ?? '';
+            final normalizada =
+                _normalizarDireccion('$calle $complemento').trim();
+            if (normalizada.isNotEmpty && !yaExistentes.add(normalizada)) {
+              duplicadasOmitidas++;
+              continue;
+            }
             final ts = DateTime.now().millisecondsSinceEpoch;
             final slug = complemento.isNotEmpty
                 ? '_${complemento.replaceAll(' ', '_')}'
@@ -1646,10 +2116,13 @@ class _AdminTabState extends State<AdminTab> {
 
           if (context.mounted) {
             Navigator.pop(context);
+            final importadas = direcciones.length - duplicadasOmitidas;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                    '✅ ${direcciones.length} direcciones importadas a $tarjetaNombre'),
+                  '✅ $importadas direcciones importadas a $tarjetaNombre'
+                  '${duplicadasOmitidas > 0 ? ' · $duplicadasOmitidas omitidas por ya existir' : ''}',
+                ),
                 backgroundColor: Colors.green,
               ),
             );
@@ -1885,12 +2358,18 @@ class _AdminTabState extends State<AdminTab> {
                             itemBuilder: (context, index) {
                               var doc = snapshot.data!.docs[index];
                               return GestureDetector(
-                                onTap: () => _abrirTerritorio(
-                                  doc.id,
-                                  (doc.data()
+                                onTap: () {
+                                  final tipoDoc = (doc.data()
+                                          as Map<String, dynamic>)['tipo'];
+                                  final nombreDoc = (doc.data()
                                           as Map<String, dynamic>)['nombre'] ??
-                                      doc.id,
-                                ),
+                                      doc.id;
+                                  if (tipoDoc == 'comercial') {
+                                    _abrirVistaComercial(doc.id, nombreDoc);
+                                  } else {
+                                    _abrirTerritorio(doc.id, nombreDoc);
+                                  }
+                                },
                                 child: Card(
                                   margin: const EdgeInsets.only(bottom: 10),
                                   color: Colors.green.shade50,
@@ -1919,14 +2398,68 @@ class _AdminTabState extends State<AdminTab> {
                                         int cantidadTarjetas = tarjetasSnapshot
                                                 .data?.docs.length ??
                                             0;
-                                        return Text(
-                                          'Tarjetas vinculadas: $cantidadTarjetas',
+                                        final tipo = (doc.data()
+                                                as Map<String, dynamic>)[
+                                            'tipo'];
+                                        final esBase = tipo == 'base';
+                                        final esComercial = tipo == 'comercial';
+                                        return Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Tarjetas vinculadas: $cantidadTarjetas',
+                                            ),
+                                            if (esBase || esComercial) ...[
+                                              const SizedBox(height: 4),
+                                              Container(
+                                                padding: const EdgeInsets
+                                                    .symmetric(
+                                                    horizontal: 8, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: esComercial
+                                                      ? Colors.purple
+                                                          .withOpacity(0.12)
+                                                      : Colors.teal
+                                                          .withOpacity(0.12),
+                                                  borderRadius:
+                                                      BorderRadius.circular(20),
+                                                ),
+                                                child: Text(
+                                                  esComercial
+                                                      ? 'COMERCIAL'
+                                                      : 'BASE (depósito)',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    letterSpacing: 0.8,
+                                                    color: esComercial
+                                                        ? Colors.purple
+                                                        : Colors.teal,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
                                         );
                                       },
                                     ),
                                     trailing: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
+                                        if ((doc.data() as Map<String,
+                                                    dynamic>)['tipo'] !=
+                                            'base') ...[
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.vertical_align_bottom,
+                                              color: Colors.teal,
+                                            ),
+                                            tooltip: 'Convertir en Base',
+                                            onPressed: () =>
+                                                _convertirEnBase(doc),
+                                          ),
+                                        ],
                                         IconButton(
                                           icon: const Icon(
                                             Icons.edit,

@@ -11,8 +11,8 @@ service cloud.firestore {
     }
 
     // --- Mantenimiento y Admin ---
-    // PIN de mantenimiento: 272700
-    // Los administradores desbloqueados tienen acceso total
+    // Acceso completo para cualquier sesión real mientras los documentos de
+    // usuario no tengan su id igual al uid de Firebase Auth (migración pendiente).
     
     // Configuración general
     match /configuracion/{doc} {

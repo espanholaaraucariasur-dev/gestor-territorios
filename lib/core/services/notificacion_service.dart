@@ -5,11 +5,14 @@ enum TipoNotificacion {
   motivacional,
   avisoDevolucion,
   solicitudDireccion,
+  nuevaDireccionEnviada,
   alertaPredicacion,
   solicitudAcceso,
   tarjetaTomada,
   devolucionTarjeta,
   devolucionAutomatica,
+  anuncio,
+  sugerencia,
 }
 
 /// Perfil de un usuario para leer sus notificaciones.
@@ -49,6 +52,8 @@ class NotificacionService {
         return 'aviso_devolucion';
       case TipoNotificacion.solicitudDireccion:
         return 'solicitud_direccion';
+      case TipoNotificacion.nuevaDireccionEnviada:
+        return 'nueva_direccion_enviada';
       case TipoNotificacion.alertaPredicacion:
         return 'alerta_predicacion';
       case TipoNotificacion.solicitudAcceso:
@@ -59,6 +64,10 @@ class NotificacionService {
         return 'devolucion_tarjeta';
       case TipoNotificacion.devolucionAutomatica:
         return 'devolucion_automatica';
+      case TipoNotificacion.anuncio:
+        return 'anuncio';
+      case TipoNotificacion.sugerencia:
+        return 'sugerencia';
     }
   }
 

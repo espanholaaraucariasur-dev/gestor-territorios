@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/services/algolia_service.dart';
-import '../../../../../core/services/mapbox_service.dart';
+import '../../../../../core/services/geocoding_backfill_service.dart';
+import '../../../../../core/utils/transferencia_tarjeta.dart';
 
 class TerritoriosTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -153,16 +156,16 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                 .collection('tarjetas')
                                 .get();
                             final batch = FirebaseFirestore.instance.batch();
+                            // Desbloquear TODAS las tarjetas con algo pendiente,
+                            // incluso las que están con un publicador/conductor,
+                            // para que se puedan ver y tomar.
                             for (final t in snap.docs) {
-                              final td = t.data() as Map<String, dynamic>;
-                              final asignado = td['asignado_a']?.toString() ?? '';
-                              final enviado = td['enviado_a']?.toString() ?? '';
-                              if (asignado.isEmpty && enviado.isEmpty) {
-                                batch.update(t.reference, {
-                                  'bloqueado': false,
-                                  'disponible_para_publicadores': true,
-                                });
-                              }
+                              final td = t.data();
+                              if (td['completada'] == true) continue;
+                              batch.update(t.reference, {
+                                'bloqueado': false,
+                                'disponible_para_publicadores': true,
+                              });
                             }
                             batch.update(
                               FirebaseFirestore.instance
@@ -294,6 +297,16 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                       final cantPrioridad = dirSnap.data?.docs
                                           .where((d) => (d.data() as Map<String,dynamic>)['prioridad_mes_anterior'] == true)
                                           .length ?? 0;
+                                      final cantPendientes = dirSnap.data?.docs
+                                          .where((d) {
+                                            final dd = d.data()
+                                                as Map<String, dynamic>;
+                                            final predicado =
+                                                dd['predicado'] == true ||
+                                                    dd['estado_predicacion'] ==
+                                                        'completada';
+                                            return !predicado;
+                                          }).length ?? 0;
                                       final enviadoNombre = (tarjetaMap['enviado_nombre'] as String?)
                                           ?? (tarjetaMap['asignado_a'] as String?) ?? '';
                                       final devueltaPor = tarjetaMap['devuelta_por'] as String? ?? '';
@@ -312,7 +325,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                       return Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text('Dir. vinculadas: $count'
+                                          Text('Dir. vinculadas: $count · $cantPendientes pendientes'
                                               '${cantPrioridad > 0 ? " · $cantPrioridad sin predicar" : ""}'),
                                           // Mostrar prioridad si hay dirs pendientes (con o sin flag en tarjeta)
                                           if (cantPrioridad > 0)
@@ -549,10 +562,10 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                           fontSize: 11))
                                                   : null,
                                               trailing: Container(
-                                                  color: Colors.transparent,
-                                                  child: Container(
-                                                padding: const EdgeInsets.symmetric(
-                                                    horizontal: 6, vertical: 2),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 2),
                                                 decoration: BoxDecoration(
                                                   color: estado == 'completada'
                                                       ? Colors.green.shade100
@@ -570,7 +583,6 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                             : Colors.grey
                                                                 .shade700)),
                                               ),
-                                                ),
                                                 ),
                                                 // Badge campaña — lee de la misma colección que usa el publicador
                                                 StreamBuilder<QuerySnapshot>(
@@ -675,85 +687,121 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         .where('estado', isEqualTo: 'aprobado')
         .get();
     if (!mounted) return;
+    final buscarCtrl = TextEditingController();
     await showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('Enviar: $nombre'),
-          content: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: double.maxFinite,
-              maxHeight: MediaQuery.of(context).size.height * 0.6,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (conductoresSnap.docs.isNotEmpty) ...[
-                    const Text('Conductores:',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDlgState) {
+          final texto = buscarCtrl.text.trim().toLowerCase();
+          final conductores = conductoresSnap.docs.where((doc) {
+            final d = doc.data();
+            final n = (d['nombre'] ?? '').toString().toLowerCase();
+            final e = (d['email'] ?? '').toString().toLowerCase();
+            return texto.isEmpty || n.contains(texto) || e.contains(texto);
+          }).toList();
+          final publicadores = publicadoresSnap.docs.where((doc) {
+            final d = doc.data();
+            final n = (d['nombre'] ?? '').toString().toLowerCase();
+            final e = (d['email'] ?? '').toString().toLowerCase();
+            return texto.isEmpty || n.contains(texto) || e.contains(texto);
+          }).toList();
+          return AlertDialog(
+            title: Text('Enviar: $nombre'),
+            content: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: double.maxFinite,
+                maxHeight: MediaQuery.of(context).size.height * 0.6,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Búsqueda por nombre o email
+                    TextField(
+                      controller: buscarCtrl,
+                      autofocus: false,
+                      decoration: InputDecoration(
+                        hintText: 'Buscar por nombre o email...',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: Colors.grey.shade100,
+                        isDense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                      onChanged: (_) => setDlgState(() {}),
+                    ),
+                    const SizedBox(height: 8),
+                    if (conductores.isNotEmpty) ...[
+                      const Text('Conductores:',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      ...conductores.map((doc) {
+                        final data = doc.data();
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.drive_eta, color: Color(0xFF1B5E20)),
+                          title: Text(data['nombre'] ?? 'Conductor'),
+                          subtitle: Text(data['email'] ?? ''),
+                          onTap: () async {
+                            Navigator.pop(context);
+                            await _ejecutarEnvio(
+                                terId: terId,
+                                tarjetaId: tarjetaId,
+                                nombre: nombre,
+                                destinatarioEmail: data['email'],
+                                tipo: 'conductor');
+                          },
+                        );
+                      }),
+                      const Divider(),
+                    ],
+                    const Text('Publicadores:',
                         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     const SizedBox(height: 4),
-                    ...conductoresSnap.docs.map((doc) {
-                      final data = doc.data();
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.drive_eta, color: Color(0xFF1B5E20)),
-                        title: Text(data['nombre'] ?? 'Conductor'),
-                        subtitle: Text(data['email'] ?? ''),
-                        onTap: () async {
-                          Navigator.pop(context);
-                          await _ejecutarEnvio(
-                              terId: terId,
-                              tarjetaId: tarjetaId,
-                              nombre: nombre,
-                              destinatarioEmail: data['email'],
-                              tipo: 'conductor');
-                        },
-                      );
-                    }),
-                    const Divider(),
+                    if (publicadores.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Text('No hay publicadores disponibles.',
+                            style: TextStyle(color: Colors.grey)),
+                      )
+                    else
+                      ...publicadores.map((doc) {
+                        final data = doc.data();
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.person, color: Colors.blue),
+                          title: Text(data['nombre'] ?? 'Publicador'),
+                          subtitle: Text(data['email'] ?? ''),
+                          onTap: () async {
+                            Navigator.pop(context);
+                            await _ejecutarEnvio(
+                                terId: terId,
+                                tarjetaId: tarjetaId,
+                                nombre: nombre,
+                                destinatarioEmail: data['email'],
+                                tipo: 'publicador');
+                          },
+                        );
+                      }),
                   ],
-                  const Text('Publicadores:',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 4),
-                  if (publicadoresSnap.docs.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Text('No hay publicadores disponibles.',
-                          style: TextStyle(color: Colors.grey)),
-                    )
-                  else
-                    ...publicadoresSnap.docs.map((doc) {
-                      final data = doc.data();
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.person, color: Colors.blue),
-                        title: Text(data['nombre'] ?? 'Publicador'),
-                        subtitle: Text(data['email'] ?? ''),
-                        onTap: () async {
-                          Navigator.pop(context);
-                          await _ejecutarEnvio(
-                              terId: terId,
-                              tarjetaId: tarjetaId,
-                              nombre: nombre,
-                              destinatarioEmail: data['email'],
-                              tipo: 'publicador');
-                        },
-                      );
-                    }),
-                ],
+                ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'))
-          ],
-        );
-      },
-    );
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'))
+            ],
+          );
+        },
+      ),
+    ).whenComplete(buscarCtrl.dispose);
   }
 
   Future<void> _ejecutarEnvio({
@@ -781,6 +829,49 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         territoryNombre = (terDoc.data()?['nombre'] as String?) ?? nombre;
       } catch (_) {}
 
+      // ── Leer el dueño ACTUAL antes de escribir ──────────────────────────
+      // `asignado_a` es la única fuente de propiedad: el publicador filtra sus
+      // tarjetas por `asignado_a == su nombre`. Si lo sobreescribimos sin
+      // avisar, la tarjeta desaparece de su lista sin aviso (el bug).
+      String? duenoAnterior;
+      if (tarjetaId != null) {
+        try {
+          final tarjetaDoc = await FirebaseFirestore.instance
+              .collection('territorios')
+              .doc(terId)
+              .collection('tarjetas')
+              .doc(tarjetaId)
+              .get();
+          duenoAnterior =
+              TransferenciaTarjeta.leerDuenoActual(tarjetaDoc.data());
+        } catch (_) {}
+      }
+
+      final esTransferencia = tipo == 'publicador' &&
+          TransferenciaTarjeta.esTransferenciaReal(
+              duenoAnterior, nombreDestinatario);
+
+      if (esTransferencia) {
+        final ok = await TransferenciaTarjeta.confirmarTransferencia(
+          context: context,
+          tarjetaNombre: nombre,
+          duenoActual: duenoAnterior,
+          nuevoDueno: nombreDestinatario,
+          nuevoEmail: destinatarioEmail,
+        );
+        if (!ok) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Transferencia cancelada. La tarjeta sigue intacta.'),
+                backgroundColor: Colors.grey,
+              ),
+            );
+          }
+          return;
+        }
+      }
+
       final payload = {
         'conductor_email': tipo == 'conductor' ? destinatarioEmail : null,
         'publicador_email': tipo == 'publicador' ? destinatarioEmail : null,
@@ -796,6 +887,10 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         'bloqueado': tipo == 'publicador' ? false : null,
         'prioridad_admin': false,   // ← limpiar al enviar
         'mes_prioridad': null,
+        // Campos que quedaban STALE con el nombre del publicador anterior.
+        'publicador_nombre': tipo == 'publicador' ? nombreDestinatario : null,
+        'tomado_por': null,
+        'tomado_en': null,
       };
       if (tarjetaId != null) {
         await FirebaseFirestore.instance
@@ -830,6 +925,22 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
               content: Text('"$nombre" enviado a $nombreDestinatario'),
               backgroundColor: Colors.green),
         );
+      }
+
+      // Avisar a los afectados SOLO si la tarjeta realmente cambió de dueño.
+      if (esTransferencia) {
+        unawaited(TransferenciaTarjeta.notificarTransferencia(
+          duenoAnterior: duenoAnterior,
+          nuevoDueno: nombreDestinatario,
+          tarjetaNombre: nombre,
+          territorioId: terId,
+          territorioNombre: territoryNombre,
+        ));
+        unawaited(TransferenciaTarjeta.notificarnuevoDueno(
+          nuevoDueno: nombreDestinatario,
+          tarjetaNombre: nombre,
+          territorioNombre: territoryNombre,
+        ));
       }
     } catch (e) {
       if (mounted) {
@@ -1008,6 +1119,23 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
     );
   }
 
+  /// Ciudad y estado del municipio donde opera la app. Ajustar si algún día
+  /// se necesita soportar más de un municipio.
+  static const String _ciudadEstado = 'Araucária - PR';
+
+  /// Anexa ", Araucária - PR" a la dirección si el usuario no la incluyó ya,
+  /// para que la geocodificación (Mapbox/Google) no resuelva la calle en un
+  /// municipio homónimo distante y genere rutas absurdamente largas.
+  String _conCiudadEstado(String direccion) {
+    final normalizada = direccion
+        .toLowerCase()
+        .replaceAll(RegExp(r'[áàâã]'), 'a');
+    if (normalizada.contains('araucaria') && normalizada.contains('pr')) {
+      return direccion; // el usuario ya especificó ciudad/estado
+    }
+    return '$direccion, $_ciudadEstado';
+  }
+
   Future<void> _agregarDireccionesATarjeta(BuildContext context, String terId,
       String tarjetaId, String tarjetaNombre) async {
     final calleCtrl = TextEditingController();
@@ -1060,10 +1188,19 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                     .get();
                 final terNombre = (terDoc.data()?['nombre'] as String?) ?? '';
 
-                /// Formatear la dirección cruda (usamos la original ya que geocodifica a coords)
-                String calleGuardar = calle;
-                // Note: Mapbox geocodifica a coordenadas, no a string formateado.
-                // Se usa la dirección original para el guardado.
+                /// Normalización real (Groq completa/limpia el texto,
+                /// Mapbox geocodifica) usando el mismo punto de entrada que
+                /// el resto de la app. Si falla por red/API, se cae al
+                /// parche local _conCiudadEstado() como red de seguridad
+                /// (evita al menos el bug de rutas de cientos de km, aunque
+                /// sin CEP/coordenadas).
+                final resultado = await GeocodingBackfillService.normalizarYGeocodificarUna({
+                  'calle': calle,
+                  'complemento': complemento,
+                  'barrio': terNombre,
+                });
+                final String calleGuardar =
+                    resultado != null ? resultado['calle'] as String : _conCiudadEstado(calle);
                 final calleNorm = calle.toLowerCase()
                     .replaceAll(RegExp(r'[áàâã]'), 'a')
                     .replaceAll(RegExp(r'[éèê]'), 'e')
@@ -1102,6 +1239,9 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                   'predicado': false,
                   'visitado': false,
                   'created_at': FieldValue.serverTimestamp(),
+                  if (resultado?['lat'] != null) 'lat': resultado!['lat'],
+                  if (resultado?['lng'] != null) 'lng': resultado!['lng'],
+                  if ((resultado?['cep'] ?? '').toString().isNotEmpty) 'cep': resultado!['cep'],
                 };
 
                 final docRef = await FirebaseFirestore.instance
@@ -1304,7 +1444,10 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
         horizontal: 14,
         vertical: 0,
       ),
-      child: StreamBuilder<QuerySnapshot>(
+      child: Column(
+        children: [
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('territorios')
             .orderBy('created_at', descending: true)
@@ -1315,7 +1458,16 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
               child: CircularProgressIndicator(),
             );
           }
-          if (snapshot.data!.docs.isEmpty) {
+          // El modo territorio solo puede enviar territorios/tarjetas reales.
+          // Los territorios BASE son depósitos del admin para formar el
+          // territorio comercial — nunca se envían, así que se ocultan aquí.
+          final docs = snapshot.data!.docs
+              .where((doc) {
+                final d = (doc.data() as Map<String, dynamic>?) ?? {};
+                return d['tipo'] != 'base';
+              })
+              .toList();
+          if (docs.isEmpty) {
             return const Center(
               child: Text(
                 'No hay territorios creados todavía.',
@@ -1328,10 +1480,10 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
           }
           return ListView.separated(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: snapshot.data!.docs.length,
+            itemCount: docs.length,
             separatorBuilder: (_, __) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
-              final territorio = snapshot.data!.docs[index];
+              final territorio = docs[index];
               final data = territorio.data() as Map<String, dynamic>? ?? {};
               final nombre = data['nombre'] ?? 'Territorio';
               final descripcion = data['descripcion'] ?? '';
@@ -1423,7 +1575,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
 
                                         if (tarjetaIds.isEmpty) {
                                           return Text(
-                                            'Total: 0 Direcciones ($numTarjetas Tarjetas)',
+                                            'Total: 0 Direcciones ($numTarjetas Tarjetas) · 0 pendientes',
                                             style: const TextStyle(color: Colors.grey, fontSize: 13),
                                           );
                                         }
@@ -1437,9 +1589,19 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                                   .where('tarjeta_id', whereIn: tarjetaIds.take(10).toList())
                                                   .get(),
                                               builder: (context, dirSnap) {
-                                                final numDirs = dirSnap.data?.docs.length ?? 0;
+                                                final dirs = dirSnap.data?.docs ?? [];
+                                                final numDirs = dirs.length;
+                                                final numPendientes = dirs.where((d) {
+                                                  final dd = d.data()
+                                                      as Map<String, dynamic>;
+                                                  final predicado =
+                                                      dd['predicado'] == true ||
+                                                          dd['estado_predicacion'] ==
+                                                              'completada';
+                                                  return !predicado;
+                                                }).length;
                                                 return Text(
-                                                  'Total: $numDirs Direcciones ($numTarjetas Tarjetas)',
+                                                  'Total: $numDirs Direcciones ($numTarjetas Tarjetas) · $numPendientes pendientes',
                                                   style: const TextStyle(color: Colors.grey, fontSize: 13),
                                                 );
                                               },
@@ -1563,17 +1725,19 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                                         .collection('tarjetas')
                                         .get();
                                     final batch = FirebaseFirestore.instance.batch();
+                                    // Liberar TODAS las tarjetas del territorio que
+                                    // aún tengan algo por hacer (no completadas),
+                                    // incluso las que están en manos de un
+                                    // publicador u otro conductor: el conductor
+                                    // debe verlas todas y poder tomarlas.
                                     for (final t in tarjetasSnap.docs) {
-                                      final td = t.data() as Map<String, dynamic>;
-                                      final asignado = td['asignado_a']?.toString() ?? '';
-                                      final enviado = td['enviado_a']?.toString() ?? '';
-                                      if (asignado.isEmpty && enviado.isEmpty) {
-                                        batch.update(t.reference, {
-                                          'bloqueado': false,
-                                          'disponible_para_publicadores': true,
-                                          'solo_conductores': soloConductores,
-                                        });
-                                      }
+                                      final td = t.data();
+                                      if (td['completada'] == true) continue;
+                                      batch.update(t.reference, {
+                                        'bloqueado': false,
+                                        'disponible_para_publicadores': true,
+                                        'solo_conductores': soloConductores,
+                                      });
                                     }
                                     batch.update(
                                       FirebaseFirestore.instance
@@ -1668,6 +1832,9 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
             },
           );
         },
+      ),
+          ),
+        ],
       ),
     );
   }

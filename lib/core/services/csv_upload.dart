@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:convert';
-import 'dart:typed_data';
 
 void startCsvUpload(
   BuildContext context,
@@ -18,14 +17,11 @@ void startCsvUpload(
     }
   }
 
-  FilePickerResult? result;
+  PlatformFile? file;
   try {
-    result = await FilePicker.platform.pickFiles(
+    file = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: ['csv', 'txt'],
-      allowMultiple: false,
-      withData: true,
-      withReadStream: true,
     );
   } catch (e) {
     debugPrint('Error al abrir archivo: $e');
@@ -33,13 +29,10 @@ void startCsvUpload(
     return;
   }
 
-  if (result == null || result.files.isEmpty) return;
-
-  final file = result.files.single;
+  if (file == null) return;
 
   try {
-    // En web, los bytes vienen con withData: true. Fallback a readStream.
-    Uint8List bytes = file.bytes ?? (await _leerStream(file));
+    final bytes = await file.readAsBytes();
     if (bytes.isEmpty) {
       alerta('No se pudo leer el contenido del archivo.');
       return;
@@ -58,14 +51,4 @@ void startCsvUpload(
     debugPrint('Error al leer archivo: $e');
     alerta('Error al leer el archivo: $e');
   }
-}
-
-Future<Uint8List> _leerStream(PlatformFile file) async {
-  final stream = file.readStream;
-  if (stream == null) return Uint8List(0);
-  final bytes = <int>[];
-  await for (final chunk in stream) {
-    bytes.addAll(chunk);
-  }
-  return Uint8List.fromList(bytes);
 }

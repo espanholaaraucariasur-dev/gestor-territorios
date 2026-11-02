@@ -27,8 +27,9 @@ class GroqTerritoryService {
 
   /// Lote más chico que [_maxSugerenciasPorLlamada] porque la respuesta de
   /// normalización es más verbosa (incluye la dirección completa por ítem).
-  static const int _maxDireccionesPorLoteGeocoding = 25;
-  static const int _maxOutputTokensGeocoding = 1400;
+  /// Se mantiene conservador para no acercarse al límite de tokens de salida.
+  static const int _maxDireccionesPorLoteGeocoding = 15;
+  static const int _maxOutputTokensGeocoding = 2000;
 
   /// Expuesto para que el orquestador de backfill sepa en qué lotes dividir
   /// las direcciones sin coordenadas.
@@ -306,6 +307,28 @@ Tarjetas actuales (resumen): ${jsonEncode(tarjetasCompactas)}
 
     final lote =
         direccionesCrudas.take(_maxDireccionesPorLoteGeocoding).toList();
+
+    try {
+      return await _normalizarLoteUnico(lote);
+    } catch (e) {
+      // Si el lote falla (ej. JSON truncado/inválido de Groq, como el error
+      // "json_validate_failed" cuando la respuesta se corta), se parte a la
+      // mitad y se reintenta cada mitad por separado, en vez de perder las
+      // 15 direcciones de una. En lotes de 1 ítem, si sigue fallando, se
+      // deja subir el error (el orquestador lo cuenta como fallido y sigue).
+      if (lote.length <= 1) rethrow;
+      final mitad = (lote.length / 2).ceil();
+      final resultados = await Future.wait([
+        normalizarDireccionesParaGeocoding(lote.sublist(0, mitad)),
+        normalizarDireccionesParaGeocoding(lote.sublist(mitad)),
+      ]);
+      return [...resultados[0], ...resultados[1]];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> _normalizarLoteUnico(
+    List<Map<String, dynamic>> lote,
+  ) async {
     final compactas = lote
         .map((d) => {
               'id': d['id']?.toString() ?? '',
@@ -323,9 +346,10 @@ Recibe una lista de direcciones crudas (posiblemente incompletas o mal escritas)
 Reglas de Negocio:
 1. Arma "direccion_normalizada" como un string completo listo para geocodificar: calle + número (si existe) + barrio (si existe) + ciudad/estado. Si el original NO especifica ciudad/estado, agrega ", Araucária - PR, Brasil" al final. Si el original YA especifica una ciudad/estado distinto, respétalo tal cual (no lo sobrescribas).
 2. Corrige abreviaturas comunes de calles en portugués: "R." -> "Rua", "Av." -> "Avenida", "Pça." -> "Praça", "Trav." -> "Travessa". No inventes número, barrio ni ningún dato que no esté en el original.
-3. Asigna "confianza" ("alta", "media", "baja") según qué tan completa/clara está la dirección original para ser geocodificada (ej. sin número = "baja").
-4. Asigna "orden" (entero desde 1) agrupando las direcciones por barrio/cercanía, de forma que direcciones del mismo barrio queden consecutivas.
-5. No omitas ninguna dirección recibida: la cantidad de salida debe ser igual a la de entrada.
+3. El número de la casa puede venir marcado de varias formas: "R. Begônia, 822", "rua begônia 822", "rua begônia #822", "rua begônia nº822", "rua begônia n°822". En TODOS los casos es el mismo dato (el número), sin importar el símbolo usado antes. Normalízalo siempre al formato "Calle, número" (coma + espacio, sin "#" ni "nº" ni "n°").
+4. Asigna "confianza" ("alta", "media", "baja") según qué tan completa/clara está la dirección original para ser geocodificada (ej. sin número = "baja").
+5. Asigna "orden" (entero desde 1) agrupando las direcciones por barrio/cercanía, de forma que direcciones del mismo barrio queden consecutivas.
+6. No omitas ninguna dirección recibida: la cantidad de salida debe ser igual a la de entrada.
 
 Responde SIEMPRE con un JSON válido de esta forma exacta:
 {
@@ -340,7 +364,7 @@ Responde SIEMPRE con un JSON válido de esta forma exacta:
     final objeto = await _chat(
       systemPrompt,
       userPrompt,
-      model: _razonamientoModel,
+      model: _model, // rápido (qwen): tarea mecánica, no necesita razonamiento
       maxTokens: _maxOutputTokensGeocoding,
     );
 

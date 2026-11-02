@@ -9,7 +9,7 @@ import 'notificacion_service.dart' as notif;
 ///
 /// Flujo completo:
 /// 1. IA decide la mejor tarjeta destino para cada dirección.
-/// 2. Si no hay tarjeta con cupo → crea una nueva (y territorio si no existe).
+/// 2. Si no hay tarjeta con cupo » crea una nueva (y territorio si no existe).
 /// 3. Guarda en `direcciones_globales` con `tarjeta_id` vinculada.
 /// 4. Actualiza el contador `totalDirecciones` de la tarjeta.
 /// 5. Registra en `historial_reorganizaciones`.
@@ -62,13 +62,39 @@ class AutoAsignadorService {
     final lng = validacion['lng'] as double?;
     final lugar = (validacion['lugar'] as String?) ?? '';
 
+    // Normalizar el TEXTO de la dirección (Groq: completa ciudad/estado,
+    // corrige abreviaturas) con el mismo motor que usa el resto de la app
+    // (admin, asignación manual del auditor). No se vuelve a geocodificar
+    // acá — ya se validaron lat/lng arriba con Mapbox — solo se limpia el
+    // texto para que se guarde igual de completo que en cualquier otro
+    // camino de ingreso.
+    String calleNormalizada = calleCampo;
+    try {
+      final normalizadas = await GroqTerritoryService.normalizarDireccionesParaGeocoding([
+        {
+          'id': 'temp',
+          'calle': calleCampo,
+          'numero': nuevaDireccion['numero'] ?? '',
+          'complemento': complemento,
+          'barrio': barrio,
+        }
+      ]);
+      if (normalizadas.isNotEmpty) {
+        final texto = normalizadas.first['direccion_normalizada']?.toString() ?? '';
+        if (texto.isNotEmpty) calleNormalizada = texto;
+      }
+    } catch (_) {
+      // Sin conexión/error de Groq: se guarda el texto original, sin
+      // bloquear el flujo de auto-asignación por un problema de red puntual.
+    }
+
     // ─────────────────── DEDUPLICACIÓN CONTRA EL BANCO ───────────────────
     // Antes de gastar tokens de IA y de guardar, comprobamos si la dirección
     // YA EXISTE en `direcciones_globales`. Regla de negocio:
     //   - MisMA calle + número + barrio con el MISMO complemento (o sin él)
-    //     → es un DUPLICADO: NO se guarda; se avisa y se espera confirmación.
+    //     » es un DUPLICADO: NO se guarda; se avisa y se espera confirmación.
     //   - MisMA calle + número + barrio pero con COMPLEMENTO distinto
-    //     → es una dirección VÁLIDA (otra casa/familia en el mismo terreno):
+    //     » es una dirección VÁLIDA (otra casa/familia en el mismo terreno):
     //     se guarda como dirección separada.
     final numero = (nuevaDireccion['numero'] ?? '').toString().trim();
     final duplicado = await _buscarDuplicado(
@@ -93,8 +119,13 @@ class AutoAsignadorService {
       };
     }
 
-    // Obtener tarjetas actuales para análisis
-    final tarjetasSnap = await _db.collection('tarjetas').get();
+    // Obtener tarjetas actuales para análisis. IMPORTANTE: las tarjetas viven
+    // en la subcolección territorios/{id}/tarjetas, no en una colección
+    // 'tarjetas' de nivel raíz (esa colección está desconectada del resto
+    // del sistema: admin y publicador nunca la leen). collectionGroup trae
+    // todas las tarjetas de todos los territorios, conservando su campo
+    // 'territorio_id' propio.
+    final tarjetasSnap = await _db.collectionGroup('tarjetas').get();
     final tarjetas =
         tarjetasSnap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
 
@@ -119,7 +150,13 @@ class AutoAsignadorService {
 
     Map<String, String>? resuelta;
     if (tarjetaExiste) {
-      resuelta = {'id': tarjetaIdTarget, 'nombre': tarjetaNombre};
+      final tarjetaMatch =
+          tarjetas.firstWhere((t) => t['id'] == tarjetaIdTarget);
+      resuelta = {
+        'id': tarjetaIdTarget,
+        'nombre': tarjetaNombre,
+        'territorio_id': tarjetaMatch['territorio_id']?.toString() ?? '',
+      };
     } else {
       resuelta = await _resolverTarjeta(
         direccion: nuevaDireccion,
@@ -130,7 +167,7 @@ class AutoAsignadorService {
 
     // No hay ningún territorio existente para albergar esta dirección.
     // NO se crea territorio: la dirección queda en la bandeja para revisión.
-    if (resuelta == null) {
+    if (resuelta == null || (resuelta['territorio_id'] ?? '').isEmpty) {
       return {
         'decision': 'SIN_TERRITORIO',
         'directa': false,
@@ -147,25 +184,54 @@ class AutoAsignadorService {
 
     String tarjetaFinalId = resuelta['id']!;
     String tarjetaFinalNombre = resuelta['nombre']!;
+    String tarjetaFinalTerritorioId = resuelta['territorio_id']!;
 
     // Guardar la dirección vinculada en direcciones_globales.
     final batch = _db.batch();
     final globalRef = _db.collection('direcciones_globales').doc();
     batch.set(globalRef, {
       ...nuevaDireccion,
+      'calle': calleNormalizada,
+      'direccionNormalizada': calleNormalizada,
       if (lat != null && lng != null) 'lat': lat,
       if (lat != null && lng != null) 'lng': lng,
       'lugar_validado': lugar,
       'tarjeta_id': tarjetaFinalId,
+      'territorio_id': tarjetaFinalTerritorioId,
+      // `complemento` y `barrio` se escriben SIEMPRE, aunque el llamador los
+      // traiga vacíos o no los traiga. Antes solo llegaban si venían en el
+      // spread de `nuevaDireccion`, y un documento sin la clave `complemento`
+      // hace que `_buscarDuplicado` no pueda verificar nada (ver el `continue`
+      // de más abajo). Un documento sin `barrio` además queda fuera de las tres
+      // consultas que filtran por ese campo. Van después del spread para ganar.
+      'complemento': (nuevaDireccion['complemento'] ?? '').toString().trim(),
+      'barrio': _barrioDe(
+        (nuevaDireccion['barrio'] ?? '').toString().trim(),
+        tarjetaFinalTerritorioId,
+      ),
       'estado_predicacion': 'pendiente',
-      'estado': 'ASIGNADO_AUTOMATICO',
+      // 'estado': 'asignada' (no un valor custom) porque el publicador
+      // filtra con .where('estado', isNotEqualTo: 'removida') — y además
+      // así queda consistente con lo que escribe el admin y el auditor.
+      'estado': 'asignada',
+      'origen': 'Auto-asignación (IA)',
       'creado_el': FieldValue.serverTimestamp(),
+      'created_at': FieldValue.serverTimestamp(),
     });
 
-    // Actualizar contador de la tarjeta.
-    batch.update(_db.collection('tarjetas').doc(tarjetaFinalId), {
-      'totalDirecciones': FieldValue.increment(1),
-    });
+    // Actualizar contador de la tarjeta (subcolección real, no la colección
+    // raíz desconectada).
+    batch.update(
+      _db
+          .collection('territorios')
+          .doc(tarjetaFinalTerritorioId)
+          .collection('tarjetas')
+          .doc(tarjetaFinalId),
+      {
+        'totalDirecciones': FieldValue.increment(1),
+        'cantidad_direcciones': FieldValue.increment(1),
+      },
+    );
 
     // Registrar en historial.
     final historialRef = _db.collection('historial_reorganizaciones').doc();
@@ -194,7 +260,7 @@ class AutoAsignadorService {
       final comp = (nuevaDireccion['complemento'] ?? '').toString();
       await notif.NotificacionService.enviarAAuditores(
         titulo: 'Dirección auto-asignada',
-        cuerpo: '$calle${comp.isNotEmpty ? ' ($comp)' : ''} → $tarjetaFinalNombre',
+        cuerpo: '$calle${comp.isNotEmpty ? ' ($comp)' : ''} » $tarjetaFinalNombre',
         tipo: notif.TipoNotificacion.solicitudDireccion,
         extra: {
           'tipo_evento': 'AUTO_ASIGNACION_DIRECTA',
@@ -243,7 +309,7 @@ class AutoAsignadorService {
           final calle =
               (dir['calle'] ?? dir['texto_direccion'] ?? '?').toString();
           final motivo = (resultado['explicacion'] as String?) ?? '';
-          errores.add('$calle → $decision: $motivo');
+          errores.add('$calle » $decision: $motivo');
         } else {
           resultados.add(resultado);
           procesadas++;
@@ -294,10 +360,10 @@ class AutoAsignadorService {
   /// Resuelve la mejor tarjeta para una dirección NUEVA.
   ///
   /// Regla de negocio (Punto 1): una dirección suelta NUNCA crea un territorio.
-  /// - Si ya existe una tarjeta con cupo → se reutiliza.
-  /// - Si hace falta crear una tarjeta → se crea DENTRO de un territorio
+  /// - Si ya existe una tarjeta con cupo » se reutiliza.
+  /// - Si hace falta crear una tarjeta » se crea DENTRO de un territorio
   ///   existente (coincide por barrio, o el territorio con más similitud).
-  /// - Si no existe ningún territorio → NO se crea: devuelve null y el
+  /// - Si no existe ningún territorio » NO se crea: devuelve null y el
   ///   llamador deja la dirección pendiente para revisión manual.
   ///
   /// Retorna {id, nombre} o null si no se puede ubicar sin crear territorio.
@@ -317,7 +383,11 @@ class AutoAsignadorService {
               nombreSugerido.trim().toLowerCase())
           .toList();
       if (porNombre.isNotEmpty) {
-        return {'id': porNombre.first['id'].toString(), 'nombre': nombreSugerido};
+        return {
+          'id': porNombre.first['id'].toString(),
+          'nombre': nombreSugerido,
+          'territorio_id': porNombre.first['territorio_id']?.toString() ?? '',
+        };
       }
     }
 
@@ -336,7 +406,11 @@ class AutoAsignadorService {
       for (final t in coincidenBarrio) {
         final total = (t['totalDirecciones'] as num?)?.toInt() ?? 0;
         if (total < 8) {
-          return {'id': t['id'].toString(), 'nombre': (t['nombre'] ?? '').toString()};
+          return {
+            'id': t['id'].toString(),
+            'nombre': (t['nombre'] ?? '').toString(),
+            'territorio_id': t['territorio_id']?.toString() ?? '',
+          };
         }
       }
     }
@@ -346,7 +420,7 @@ class AutoAsignadorService {
     //    coincidencia, NO se asigna a territorios ajenos.
     final territorioId = await _encontrarTerritorioPara(direccion);
     if (territorioId == null) {
-      // No hay ningún territorio relacionado → NO creamos ni asignamos.
+      // No hay ningún territorio relacionado » NO creamos ni asignamos.
       return null;
     }
 
@@ -368,7 +442,15 @@ class AutoAsignadorService {
     }
     nombreTarjeta = base.trim();
 
-    final tarRef = _db.collection('tarjetas').doc();
+    // Subcolección real (no la colección raíz desconectada). El id del
+    // documento ES el nombre de la tarjeta, igual que en el resto del
+    // sistema (admin, reorganización del auditor), para que el resto del
+    // código que asume esa convención pueda encontrarla sin problemas.
+    final tarRef = _db
+        .collection('territorios')
+        .doc(territorioId)
+        .collection('tarjetas')
+        .doc(nombreTarjeta);
     await tarRef.set({
       'nombre': nombreTarjeta,
       'territorio_id': territorioId,
@@ -376,7 +458,11 @@ class AutoAsignadorService {
       'creado_por_ia': true,
       'created_at': FieldValue.serverTimestamp(),
     });
-    return {'id': tarRef.id, 'nombre': nombreTarjeta};
+    return {
+      'id': tarRef.id,
+      'nombre': nombreTarjeta,
+      'territorio_id': territorioId,
+    };
   }
 
   /// Encuentra una TERRITORIO existente que pueda albergar la dirección.
@@ -423,12 +509,25 @@ class AutoAsignadorService {
       }
     }
 
-    // Sin barrio o sin coincidencia → NO se asigna a un territorio ajeno.
+    // Sin barrio o sin coincidencia » NO se asigna a un territorio ajeno.
     // La dirección queda pendiente para revisión manual del auditor.
     return null;
   }
 
   // ──────────────────── DEDUPLICACIÓN (banco de datos) ────────────────────
+
+  /// `barrio` con la convención que ya usa la base: si no viene del llamador,
+  /// se deriva del territorio con los guiones bajos convertidos en espacios.
+  ///
+  /// Es la misma regla con la que `restaurar-barrio.js` reconstruyó el campo
+  /// en los 194 documentos que la migración del 2026-10-04 había borrado
+  /// (§9.2 del plan), y la única con la que las consultas por `barrio` devuelven
+  /// algo: `CAMPINA_DA_BARRA` se busca como `CAMPINA DA BARRA`.
+  static String _barrioDe(String barrio, String territorioId) {
+    final b = barrio.trim();
+    if (b.isNotEmpty) return b;
+    return territorioId.replaceAll('_', ' ').trim();
+  }
 
   /// Normaliza texto para comparar direcciones (minúsculas, sin espacios
   /// dobles, sin tildes).
@@ -482,7 +581,25 @@ class AutoAsignadorService {
       if (barrio.trim().isNotEmpty && eBarrio != _norm(barrio)) continue;
 
       // Mismo calle+nº+barrio: sólo es duplicado si el complemento coincide.
-      final eComp = _norm((data['complemento'] ?? '').toString());
+      //
+      // La clave `complemento` tiene que EXISTIR en el documento. Si no existe
+      // no se puede verificar nada, así que se sigue buscando en vez de
+      // afirmar que es duplicado. Con un `?? ''` el "no lo sé" se convertía en
+      // "vacío", y como la dirección nueva sin complemento también normaliza a
+      // vacío, salía falso positivo: bloqueaba el alta de una dirección que en
+      // realidad era otra unidad (mismo lote, distinto depto).
+      //
+      // El sesgo es deliberado y va en contra del "no duplicar": ante la duda
+      // se inserta el duplicado, que se ve y se puede borrar, en lugar de
+      // bloquear el alta en silencio. Los 194 documentos que dejó la migración
+      // del 2026-10-04 están sin `complemento` (§9.2 del plan), así que hasta
+      // recuperar ese campo no se van a detectar duplicados contra ellos. Las
+      // direcciones nuevas sí lo traen, y desde la segunda alta el control
+      // vuelve a funcionar.
+      if (!data.containsKey('complemento') || data['complemento'] == null) {
+        continue;
+      }
+      final eComp = _norm(data['complemento'].toString());
       if (eComp == nComp) {
         return {'id': doc.id, ...data};
       }

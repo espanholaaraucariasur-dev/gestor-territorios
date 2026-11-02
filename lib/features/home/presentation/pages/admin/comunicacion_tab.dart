@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../../../../core/services/notificacion_service.dart';
-import '../../../../../core/services/mapbox_service.dart';
+import '../../../../../core/utils/campanas_utils.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/services/gemini_service.dart';
-import '../../../../../core/services/algolia_service.dart';
+import '../../../../../core/services/historial_temporales_service.dart';
 import '../../../../../core/l10n/translation_service.dart';
-import '../../../../../core/utils/direccion_utils.dart';
 
 class ComunicacionTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -23,8 +22,17 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   final TextEditingController _anuncioCtrl = TextEditingController();
   final TextEditingController _codigoAccesoCtrl = TextEditingController();
   final TextEditingController _mensajeMotivacionalCtrl = TextEditingController();
+  final TextEditingController _autoReturnHorasCtrl =
+      TextEditingController(text: '2');
+  final TextEditingController _autoReturnMinutosCtrl =
+      TextEditingController(text: '0');
+  final TextEditingController _autoReturnAvisoCtrl =
+      TextEditingController(text: '10');
+  bool _autoReturnActivo = true;
+  bool _guardandoAutoReturn = false;
   bool _enviandoAnuncio = false;
   bool _guardandoCodigo = false;
+  bool _mensajesMotivacionalesExpandido = false;
 
   static const Color _verde = Color(0xFF1B5E20);
   static const Color _naranja = Color(0xFFE65100);
@@ -33,6 +41,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   void initState() {
     super.initState();
     _verificarCampanasVencidas();
+    _cargarConfigAutoReturn();
   }
 
   @override
@@ -40,6 +49,9 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     _anuncioCtrl.dispose();
     _codigoAccesoCtrl.dispose();
     _mensajeMotivacionalCtrl.dispose();
+    _autoReturnHorasCtrl.dispose();
+    _autoReturnMinutosCtrl.dispose();
+    _autoReturnAvisoCtrl.dispose();
     super.dispose();
   }
 
@@ -77,16 +89,20 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     final db = FirebaseFirestore.instance;
     final nombre = (campanaData['nombre'] as String?) ?? slot;
     final mensajePendiente = (campanaData['mensaje_pendiente'] as String?) ??
-        'Falta entregar invitación';
+        'Falta entregar material de campaña';
     final mes =
         '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
 
     try {
       // 1. Obtener direcciones de la carpeta de campaña
+      // El nombre se convierte a ID de colección válido con el MISMO helper que
+      // usa el publicador al guardar, para no leer una carpeta que no existe.
+      final campId = CampanasUtils.idColeccionCampana(nombre);
+      if (campId.isEmpty) return;
       final carpetaSnap = await db
           .collection('territorios')
           .doc('campanas')
-          .collection(nombre)
+          .collection(campId)
           .get();
 
       int totalDejadas = 0;
@@ -105,7 +121,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         } else {
           totalFaltantes++;
           // Mover a temporales con mensaje de campaña
-          await db.collection('direcciones_globales').add({
+          final ref = await db.collection('direcciones_globales').add({
             'calle': data['calle'] ?? '',
             'complemento': data['complemento'] ?? '',
             'direccion_normalizada': data['direccion_normalizada'] ?? '',
@@ -118,7 +134,18 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             'motivo_temporal': mensajePendiente,
             'fecha_temporal': FieldValue.serverTimestamp(),
             'origen_campana': nombre,
+            'reportado_por': widget.usuarioData['nombre'] ?? '',
+            'reportado_por_email': widget.usuarioData['email'] ?? '',
           });
+          await registrarMovimientoTemporal(
+            tipo: 'entrada',
+            direccionId: ref.id,
+            territorioOrigenId: data['territorio_origen_id']?.toString() ?? '',
+            territorioOrigenNombre: territorioOrigen,
+            calle: data['calle']?.toString(),
+            motivo: 'campana_cierre',
+            por: widget.usuarioData['nombre']?.toString(),
+          );
         }
 
         // Contar por territorio
@@ -174,7 +201,9 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
     final nombreCtrl = TextEditingController(text: datos?['nombre'] ?? '');
     final mensajeCtrl = TextEditingController(
         text: datos?['mensaje_pendiente'] ??
-            'Falta entregar invitación de campaña');
+            'Falta entregar material de campaña');
+    final etiquetaEntregaCtrl = TextEditingController(
+        text: datos?['etiqueta_entrega'] ?? 'material entregado');
     DateTime fechaInicio = datos?['fecha_inicio'] != null
         ? (datos!['fecha_inicio'] as Timestamp).toDate()
         : DateTime.now();
@@ -217,19 +246,35 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                 const SizedBox(height: 12),
 
                 // Mensaje personalizable
-                const Text('Mensaje para direcciones sin invitación',
+                const Text('Mensaje para direcciones pendientes',
                     style:
                         TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: mensajeCtrl,
                   decoration: InputDecoration(
-                    hintText: 'Ej: Falta entregar invitación',
+                    hintText: 'Ej: Falta entregar folleto / invitación',
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8)),
                     isDense: true,
                   ),
                   maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+
+                // Etiqueta de progreso (qué se está entregando/haciendo)
+                const Text('Texto de progreso (qué se entrega o hace)',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: etiquetaEntregaCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Ej: folleto entregado / invitación entregada',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
                 ),
                 const SizedBox(height: 12),
 
@@ -339,6 +384,9 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                   'activa': true,
                   'nombre': nombre,
                   'mensaje_pendiente': mensajeCtrl.text.trim(),
+                  'etiqueta_entrega': etiquetaEntregaCtrl.text.trim().isEmpty
+                      ? 'material entregado'
+                      : etiquetaEntregaCtrl.text.trim(),
                   'fecha_inicio': Timestamp.fromDate(fechaInicio),
                   'fecha_fin': Timestamp.fromDate(fechaFin),
                   'creada_por': widget.usuarioData['nombre'] ?? '',
@@ -394,7 +442,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           destinatarioNombre: nombre,
           titulo: '📢 Anuncio de la congregación',
           cuerpo: texto,
-          tipo: TipoNotificacion.motivacional,
+          tipo: TipoNotificacion.anuncio,
         );
       }
 
@@ -425,678 +473,167 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   }
 
   // ─────────────────────────────────────────────────────────
-  // APROBAR SOLICITUD DE DIRECCIÓN
+  // DEVOLUCIÓN AUTOMÁTICA
   // ─────────────────────────────────────────────────────────
 
-  double _distanciaMetros(double lat1, double lng1, double lat2, double lng2) {
-    const r = 6371000.0;
-    final dLat = (lat2 - lat1) * 3.14159265358979 / 180;
-    final dLng = (lng2 - lng1) * 3.14159265358979 / 180;
-    final a = (dLat / 2) * (dLat / 2) +
-        (lat1 * 3.14159265358979 / 180) * (lat2 * 3.14159265358979 / 180) *
-            (dLng / 2) * (dLng / 2);
-    return r * 2 * (a < 1 ? a : 1);
-  }
-
-  Future<({String territorioId, String territorioNombre, String tarjetaId, double distancia})?>
-      _sugerirTarjetaCercana(double? lat, double? lng, {String? calleTexto}) async {
+  Future<void> _cargarConfigAutoReturn() async {
     try {
-      // ── Estrategia 1: por coordenadas GPS (si disponibles) ──
-      if (lat != null && lng != null) {
-        final dirs = await FirebaseFirestore.instance
-            .collection('direcciones_globales')
-            .where('estado', isEqualTo: 'activa')
-            .limit(500)
-            .get();
-
-        final Map<String, List<double>> distsPorTarjeta = {};
-        final Map<String, String> tarjetaATer = {};
-        final Map<String, String> tarjetaATerNombre = {};
-        int conCoordenadas = 0;
-
-        for (final dir in dirs.docs) {
-          final d = dir.data() as Map<String, dynamic>;
-          final dLat = (d['lat'] as num?)?.toDouble();
-          final dLng = (d['lng'] as num?)?.toDouble();
-          final tarjetaId = d['tarjeta_id'] as String?;
-          final territorioId = d['territorio_id'] as String?;
-          final terNombre = d['territorio_nombre'] as String?;
-          if (dLat == null || dLng == null || tarjetaId == null || territorioId == null) continue;
-          if (territorioId == 'temporales' || territorioId == 'campanas') continue;
-          conCoordenadas++;
-          final dist = _distanciaMetros(lat, lng, dLat, dLng);
-          distsPorTarjeta.putIfAbsent(tarjetaId, () => []).add(dist);
-          tarjetaATer[tarjetaId] = territorioId;
-          tarjetaATerNombre[tarjetaId] = terNombre ?? territorioId;
-        }
-
-        debugPrint('🗺️ Sugerencia GPS: $conCoordenadas dirs con coords de ${dirs.docs.length} total');
-
-        if (distsPorTarjeta.isNotEmpty) {
-          String? mejorTarjeta;
-          String? mejorTer;
-          String? mejorTerNombre;
-          double mejorDist = double.infinity;
-          for (final e in distsPorTarjeta.entries) {
-            final top = (e.value..sort()).take(5).toList();
-            final prom = top.reduce((a, b) => a + b) / top.length;
-            if (prom < mejorDist) {
-              mejorDist = prom;
-              mejorTarjeta = e.key;
-              mejorTer = tarjetaATer[e.key];
-              mejorTerNombre = tarjetaATerNombre[e.key];
-            }
-          }
-          if (mejorTarjeta != null && mejorTer != null) {
-            debugPrint('✅ Sugerencia GPS: $mejorTerNombre / $mejorTarjeta (~${mejorDist.toStringAsFixed(0)}m)');
-            return (territorioId: mejorTer, territorioNombre: mejorTerNombre ?? mejorTer, tarjetaId: mejorTarjeta, distancia: mejorDist);
-          }
-        }
-      }
-
-      // ── Estrategia 2: por texto de la calle (si no hay coords o no encontró) ──
-      if (calleTexto != null && calleTexto.isNotEmpty) {
-        debugPrint('🔤 Sugerencia por texto: "$calleTexto"');
-        // Normalizar y tokenizar
-        final norm = calleTexto.toLowerCase()
-            .replaceAll(RegExp(r'[àáâãä]'), 'a')
-            .replaceAll(RegExp(r'[èéêë]'), 'e')
-            .replaceAll(RegExp(r'[ìíîï]'), 'i')
-            .replaceAll(RegExp(r'[òóôõö]'), 'o')
-            .replaceAll(RegExp(r'[ùúûü]'), 'u')
-            .replaceAll(RegExp(r'[^a-z0-9 ]'), ' ');
-        final tokens = norm.split(' ').where((t) => t.length >= 3).toList();
-
-        if (tokens.isNotEmpty) {
-          final snap = await FirebaseFirestore.instance
-              .collection('direcciones_globales')
-              .where('palavras_clave', arrayContainsAny: tokens.take(5).toList())
-              .limit(50)
-              .get();
-
-          // Si no hay con palavras_clave, intentar con palabras_clave
-          final snap2 = snap.docs.isEmpty
-              ? await FirebaseFirestore.instance
-                  .collection('direcciones_globales')
-                  .where('palabras_clave', arrayContainsAny: tokens.take(5).toList())
-                  .limit(50)
-                  .get()
-              : snap;
-
-          final Map<String, int> scoresTarjeta = {};
-          final Map<String, String> tarjetaATer = {};
-          final Map<String, String> tarjetaATerNombre = {};
-
-          for (final dir in snap2.docs) {
-            final d = dir.data() as Map<String, dynamic>;
-            final tarjetaId = d['tarjeta_id'] as String?;
-            final territorioId = d['territorio_id'] as String?;
-            final terNombre = d['territorio_nombre'] as String?;
-            if (tarjetaId == null || territorioId == null) continue;
-            if (territorioId == 'temporales' || territorioId == 'campanas') continue;
-            final keywords = List<String>.from(d['palabras_clave'] ?? []);
-            final coinciden = tokens.where((t) => keywords.contains(t)).length;
-            scoresTarjeta[tarjetaId] = (scoresTarjeta[tarjetaId] ?? 0) + coinciden;
-            tarjetaATer[tarjetaId] = territorioId;
-            tarjetaATerNombre[tarjetaId] = terNombre ?? territorioId;
-          }
-
-          if (scoresTarjeta.isNotEmpty) {
-            final mejor = scoresTarjeta.entries.reduce((a, b) => a.value >= b.value ? a : b);
-            debugPrint('✅ Sugerencia texto: ${tarjetaATerNombre[mejor.key]} / ${mejor.key}');
-            return (
-              territorioId: tarjetaATer[mejor.key]!,
-              territorioNombre: tarjetaATerNombre[mejor.key] ?? tarjetaATer[mejor.key]!,
-              tarjetaId: mejor.key,
-              distancia: 0.0,
-            );
-          }
-        }
-      }
-
-      debugPrint('⚠️ Sin sugerencia disponible');
-      return null;
-    } catch (e) {
-      debugPrint('❌ Error en sugerencia: $e');
-      return null;
-    }
+      final doc = await FirebaseFirestore.instance
+          .collection('configuracion')
+          .doc('devolucion_automatica')
+          .get();
+      final data = doc.data() ?? {};
+      final total = (data['tiempo_limite_minutos'] as int?) ?? 120;
+      final aviso = (data['aviso_minutos'] as int?) ?? 10;
+      if (!mounted) return;
+      setState(() {
+        _autoReturnActivo = (data['activo'] as bool?) ?? true;
+        _autoReturnHorasCtrl.text = (total ~/ 60).toString();
+        _autoReturnMinutosCtrl.text = (total % 60).toString();
+        _autoReturnAvisoCtrl.text = aviso.toString();
+      });
+    } catch (_) {}
   }
 
-  Future<void> _aprobarSolicitud(DocumentSnapshot solicitudDoc) async {
-    final data = (solicitudDoc.data() as Map<String, dynamic>?) ?? {};
-    final calle = (data['direccion_original'] as String?) ?? '';
-    final complemento = (data['complemento'] as String?) ?? '';
-    final detalles = (data['detalles'] as String?) ?? '';
-    final latSol = (data['lat'] as num?)?.toDouble();
-    final lngSol = (data['lng'] as num?)?.toDouble();
-
-    // Nuevo tipo: añadir unidad a condominio existente
-    final tipoSolicitud = (data['tipo_solicitud'] as String?) ?? '';
-    final condominioDireccionId = (data['condominio_direccion_id'] as String?) ?? '';
-    final nuevaUnidad = (data['condominio_unidad'] as Map<String, dynamic>?) ?? {};
-
-    // Para compatibilidad con solicitudes antiguas
-    final esCondominioLegacy = (data['es_condominio'] as bool?) ?? false;
-    final unidadesLegacy = (data['unidades_condominio'] as List?) ?? [];
-
-    final territoriosSnap =
-        await FirebaseFirestore.instance.collection('territorios').get();
-
-    if (!mounted) return;
-
-    String? territorioIdSel;
-    String? territorioNombreSel;
-    String? tarjetaIdSel;
-    double? distSugerida;
-
-    // ── Sugerencia automática: condominio/multi-casas usan la dirección gemela ──
-    // La solicitud trae condominio_direccion_id → la unidad SIEMPRE va a esa misma
-    // dirección/tarjeta, sin depender de la sugerencia por proximidad.
-    Map<String, dynamic>? direccionGemela;
-    final esSolicitudUnidad = tipoSolicitud == 'condominio_nueva_unidad' ||
-        tipoSolicitud == 'casas_nueva_unidad';
-    // Dirección NUEVA que desde el inicio es condominio / multi-casas
-    final esNuevaDirCasas = tipoSolicitud == 'casas_nueva_direccion';
-    final esNuevaDirCondominio = tipoSolicitud == 'condominio_nueva_direccion';
-    final esNuevaDireccionMulti = esNuevaDirCasas || esNuevaDirCondominio;
-    if (esSolicitudUnidad && condominioDireccionId.isNotEmpty) {
-      final gemSnap = await FirebaseFirestore.instance
-          .collection('direcciones_globales')
-          .doc(condominioDireccionId)
-          .get();
-      if (gemSnap.exists) {
-        direccionGemela = gemSnap.data() as Map<String, dynamic>;
-      }
-    }
-
-    // Buscar sugerencia ANTES de abrir el diálogo
-    if (direccionGemela != null) {
-      territorioIdSel =
-          (direccionGemela['territorio_id'] as String?) ?? '';
-      territorioNombreSel =
-          (direccionGemela['territorio_nombre'] as String?) ??
-              (direccionGemela['barrio'] as String?) ??
-              '';
-      tarjetaIdSel = (direccionGemela['tarjeta_id'] as String?) ?? '';
-    } else if (latSol != null && lngSol != null || calle.isNotEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('📍 Buscando tarjeta más cercana...'), duration: Duration(seconds: 4)),
+  Future<void> _guardarConfigAutoReturn() async {
+    final horas = int.tryParse(_autoReturnHorasCtrl.text.trim()) ?? 0;
+    final minutos = int.tryParse(_autoReturnMinutosCtrl.text.trim()) ?? 0;
+    final aviso = int.tryParse(_autoReturnAvisoCtrl.text.trim()) ?? 10;
+    final total = horas * 60 + minutos;
+    if (total < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El tiempo límite debe ser de al menos 1 minuto'),
+          backgroundColor: Colors.red,
+        ),
       );
-      final sug = await _sugerirTarjetaCercana(latSol, lngSol, calleTexto: calle);
-      if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
-      if (sug != null) {
-        territorioIdSel = sug.territorioId;
-        territorioNombreSel = sug.territorioNombre;
-        tarjetaIdSel = sug.tarjetaId;
-        distSugerida = sug.distancia;
-      }
+      return;
     }
-
+    setState(() => _guardandoAutoReturn = true);
+    await FirebaseFirestore.instance
+        .collection('configuracion')
+        .doc('devolucion_automatica')
+        .set({
+      'activo': _autoReturnActivo,
+      'tiempo_limite_minutos': total,
+      'aviso_minutos': aviso < 0 ? 0 : aviso,
+      'actualizado_en': FieldValue.serverTimestamp(),
+      'actualizado_por': widget.usuarioData['nombre'] ?? '',
+    }, SetOptions(merge: true));
     if (!mounted) return;
+    setState(() => _guardandoAutoReturn = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('✅ Tiempo de devolución automática guardado'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
 
-    await showDialog(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (context, setDlg) {
-          return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(direccionGemela != null
-              ? 'Añadir unidad a dirección existente'
-              : esNuevaDireccionMulti
-                  ? 'Agregar dirección con unidades'
-                  : 'Agregar dirección a tarjeta'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+  Widget _buildDevolucionAutomatica() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Tiempo máximo que un publicador puede retener una tarjeta antes '
+            'de que el sistema la devuelva automáticamente.',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            value: _autoReturnActivo,
+            activeColor: const Color(0xFF1B5E20),
+            title: const Text('Devolución automática activada',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            subtitle: Text(
+              _autoReturnActivo
+                  ? 'Las tarjetas se devuelven solas al vencer el tiempo.'
+                  : 'Desactivada: las tarjetas no se devuelven solas.',
+              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+            onChanged: (v) => setState(() => _autoReturnActivo = v),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _autoReturnHorasCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Horas',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
                   ),
-                  // ── Dirección NUEVA condominio / multi-casas (primera vez) ──
-                  if (esNuevaDireccionMulti) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.blue.shade300),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Icon(
-                                esNuevaDirCasas
-                                    ? Icons.holiday_village
-                                    : Icons.apartment,
-                                color: Colors.blue.shade700,
-                                size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                esNuevaDirCasas
-                                    ? 'Terreno con varias casas (nuevo)'
-                                    : 'Condominio nuevo',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue.shade800),
-                              ),
-                            ),
-                          ]),
-                          const SizedBox(height: 6),
-                          Text(
-                            esNuevaDirCasas
-                                ? 'El publicador indica que aquí hay varias casas. Se crearán '
-                                    'direcciones SEPARADAS: la base ("$calle") y una por casa '
-                                    '("${nuevaUnidad['descripcion'] ?? ''}"), para que cuenten '
-                                    'individualmente en la tarjeta.'
-                                : 'El publicador indica que es un condominio. Se crearán '
-                                    'direcciones SEPARADAS: la base ("$calle") y la unidad '
-                                    '(Bl. ${nuevaUnidad['bloque'] ?? ''} Piso ${nuevaUnidad['piso'] ?? ''} Apto ${nuevaUnidad['apto'] ?? ''}), '
-                                    'para que cuenten individualmente en la tarjeta.',
-                            style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  // ── Dirección gemela encontrada (condominio / multi-casas) ──
-                  if (direccionGemela != null) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.blue.shade300),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Icon(
-                                tipoSolicitud == 'casas_nueva_unidad'
-                                    ? Icons.holiday_village
-                                    : Icons.apartment,
-                                color: Colors.blue.shade700,
-                                size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                tipoSolicitud == 'casas_nueva_unidad'
-                                    ? 'Terreno con varias casas ya registrado'
-                                    : 'Condominio ya registrado',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue.shade800),
-                              ),
-                            ),
-                          ]),
-                          const SizedBox(height: 6),
-                          Text(
-                            '"${direccionGemela!['calle'] ?? calle}" ya existe en la '
-                            'tarjeta $tarjetaIdSel (${direccionGemela['territorio_nombre'] ?? territorioNombreSel}). '
-                            'La nueva casa/unidad se creará como una dirección adicional en esa misma tarjeta.',
-                            style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  // Sugerencia por proximidad
-                  if (territorioIdSel != null && distSugerida != null) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1B5E20).withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF1B5E20).withOpacity(0.4)),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.near_me, color: Color(0xFF1B5E20), size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          const Text('📍 Sugerencia por proximidad',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
-                          Text('$territorioNombreSel · $tarjetaIdSel',
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                          if (distSugerida != null && distSugerida! > 0)
-                            Text('~${distSugerida!.toStringAsFixed(0)} m promedio',
-                                style: TextStyle(fontSize: 11, color: Colors.grey[600]))
-                          else
-                            Text('Tarjeta con calles similares',
-                                style: TextStyle(fontSize: 11, color: Colors.grey[600])),
-                        ])),
-                      ]),
-                    ),
-                  ] else if (latSol == null && direccionGemela == null) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(children: [
-                        Icon(Icons.location_off, size: 14, color: Colors.grey),
-                        SizedBox(width: 6),
-                        Text('Sin coordenadas — selecciona manualmente',
-                            style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      ]),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  const Text('Selecciona territorio:',
-                      style:
-                          TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
-                  const SizedBox(height: 6),
-                  ...territoriosSnap.docs
-                      .where((d) => d.id != 'temporales' && d.id != 'campanas')
-                      .map((terDoc) {
-                    final terData =
-                        (terDoc.data() as Map<String, dynamic>?) ?? {};
-                    final terNombre =
-                        (terData['nombre'] as String?) ?? terDoc.id;
-                    final sel = territorioIdSel == terDoc.id;
-                    return GestureDetector(
-                      onTap: () => setDlg(() {
-                        territorioIdSel = terDoc.id;
-                        territorioNombreSel = terNombre;
-                        tarjetaIdSel = null;
-                      }),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 4),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: sel
-                              ? _verde.withOpacity(0.08)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: sel ? _verde : Colors.grey.shade300),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.map,
-                                size: 16, color: sel ? _verde : Colors.grey),
-                            const SizedBox(width: 8),
-                            Text(terNombre,
-                                style: TextStyle(
-                                    fontWeight: sel
-                                        ? FontWeight.bold
-                                        : FontWeight.normal,
-                                    color: sel ? _verde : null)),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                  if (territorioIdSel != null) ...[
-                    const SizedBox(height: 12),
-                    const Text('Selecciona tarjeta:',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 12)),
-                    const SizedBox(height: 6),
-                    FutureBuilder<QuerySnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('territorios')
-                          .doc(territorioIdSel)
-                          .collection('tarjetas')
-                          .get(),
-                      builder: (context, tarjSnap) {
-                        if (!tarjSnap.hasData) {
-                          return const CircularProgressIndicator();
-                        }
-                        return Column(
-                          children: tarjSnap.data!.docs.map((tarjDoc) {
-                            final sel = tarjetaIdSel == tarjDoc.id;
-                            return GestureDetector(
-                              onTap: () =>
-                                  setDlg(() => tarjetaIdSel = tarjDoc.id),
-                              child: Container(
-                                margin: const EdgeInsets.only(bottom: 4),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: sel
-                                      ? Colors.blue.withOpacity(0.08)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                      color: sel
-                                          ? Colors.blue
-                                          : Colors.grey.shade300),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.credit_card,
-                                        size: 16,
-                                        color: sel ? Colors.blue : Colors.grey),
-                                    const SizedBox(width: 8),
-                                    Text(tarjDoc.id,
-                                        style: TextStyle(
-                                            fontWeight: sel
-                                                ? FontWeight.bold
-                                                : FontWeight.normal,
-                                            color: sel ? Colors.blue : null)),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        );
-                      },
-                    ),
-                  ],
-                ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _autoReturnMinutosCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Minutos',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _autoReturnAvisoCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Aviso (min antes)',
+                    border:
+                        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _guardandoAutoReturn ? null : _guardarConfigAutoReturn,
+              icon: _guardandoAutoReturn
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.save, size: 16),
+              label: Text(_guardandoAutoReturn ? 'Guardando...' : 'Guardar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
               ),
             ),
           ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(c),
-                child: const Text('Cancelar')),
-            ElevatedButton(
-              onPressed: territorioIdSel != null && tarjetaIdSel != null
-                  ? () => Navigator.pop(c, true)
-                  : null,
-              style: ElevatedButton.styleFrom(backgroundColor: _verde),
-              child: const Text('Agregar'),
-            ),
-          ],
-        );
-        }, // end StatefulBuilder
+        ],
       ),
     );
-
-    if (territorioIdSel == null || tarjetaIdSel == null) return;
-
-    try {
-      final db = FirebaseFirestore.instance;
-      final batch = db.batch();
-
-      String _norm(String s) {
-        return normalizarDireccion(s);
-      }
-
-      // Formatear la dirección cruda al formato completo vía Mapbox:
-      // "rua onze de fevereiro 163" → "Rua Onze de Fevereiro, 163 - Centro, Araucária - PR, 83702-135"
-      String calleFinal = calle;
-      // Note: Mapbox geocodifica a coordenadas, no a string formateado.
-      // Se usa la dirección original para el guardado.
-      if (calle.isNotEmpty) {
-        // Geocodificación opcional - las coordenadas se almacenan por separado
-      }
-
-      // ── 0. DIRECCIÓN NUEVA CONDOMINIO / MULTI-CASAS ──
-      // Lógica establecida: CADA dirección/casa es un documento separado
-      // (necesario para el contador de direcciones y el envío de tarjetas).
-      // NO se crea doc base genérico — solo las unidades específicas.
-      final esCasasNuevaDir = tipoSolicitud == 'casas_nueva_direccion';
-      final esSolicitudCasas = tipoSolicitud == 'casas_nueva_unidad';
-      if (esNuevaDireccionMulti) {
-        // Doc de la primera casa/unidad como dirección propia
-        final String compUnidad;
-        if (esCasasNuevaDir) {
-          compUnidad = '${nuevaUnidad['descripcion'] ?? ''}';
-        } else {
-          compUnidad =
-              'Bl. ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}';
-        }
-        final unitRef = db.collection('direcciones_globales').doc();
-        final dataUnit = {
-          'calle': calleFinal,
-          'complemento': compUnidad,
-          'direccion_normalizada': _norm('$calleFinal $compUnidad'),
-          'territorio_id': territorioIdSel,
-          'territorio_nombre': territorioNombreSel ?? '',
-          'tarjeta_id': tarjetaIdSel,
-          'barrio': territorioNombreSel ?? '',
-          'estado': 'activa',
-          'estado_predicacion': 'pendiente',
-          'predicado': false,
-          'es_hispano': true,
-          'solicitada_por': data['solicitante_email'] ?? '',
-          'created_at': FieldValue.serverTimestamp(),
-        };
-        batch.set(unitRef, dataUnit);
-        await AlgoliaService.sincronizarUna(unitRef.id, dataUnit);
-      }
-      // ── 1. NUEVA UNIDAD EN CONDOMINIO / CASA EN TERRENO MULTI-CASAS ──
-      // También se crea como DOCUMENTO SEPARADO (misma calle + complemento)
-      else if ((tipoSolicitud == 'condominio_nueva_unidad' || esSolicitudCasas) &&
-          condominioDireccionId.isNotEmpty) {
-        final String compNuevo;
-        final String normNuevo;
-        if (esSolicitudCasas) {
-          compNuevo = '${nuevaUnidad['descripcion'] ?? ''}';
-          normNuevo = _norm('$calleFinal $compNuevo');
-        } else {
-          compNuevo =
-              'Bl. ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}';
-          normNuevo = _norm('$calleFinal Bl ${nuevaUnidad['bloque']} Piso ${nuevaUnidad['piso']} Apto ${nuevaUnidad['apto']}');
-        }
-        final docRef = db.collection('direcciones_globales').doc();
-        final dataNueva = {
-          'calle': calleFinal,
-          'complemento': compNuevo,
-          'direccion_normalizada': normNuevo,
-          'territorio_id': territorioIdSel,
-          'territorio_nombre': territorioNombreSel ?? '',
-          'tarjeta_id': tarjetaIdSel,
-          'barrio': territorioNombreSel ?? '',
-          'estado': 'activa',
-          'estado_predicacion': 'pendiente',
-          'predicado': false,
-          'es_hispano': true,
-          'solicitada_por': data['solicitante_email'] ?? '',
-          'created_at': FieldValue.serverTimestamp(),
-        };
-        batch.set(docRef, dataNueva);
-        await AlgoliaService.sincronizarUna(docRef.id, dataNueva);
-      }
-      // ── 2. CONDOMINIO NUEVO (legacy) ──
-      else if (esCondominioLegacy && unidadesLegacy.isNotEmpty) {
-        for (final u in unidadesLegacy) {
-          final docRef = db.collection('direcciones_globales').doc();
-          final dataUnidad = {
-            'calle': calleFinal,
-            'complemento': u.toString(),
-            'direccion_normalizada': _norm('$calleFinal $u'),
-            'territorio_id': territorioIdSel,
-            'territorio_nombre': territorioNombreSel ?? '',
-            'tarjeta_id': tarjetaIdSel,
-            'barrio': territorioNombreSel ?? '',
-            'estado': 'activa',
-            'estado_predicacion': 'pendiente',
-            'predicado': false,
-            'es_hispano': true,
-            'es_condominio': true,
-            'created_at': FieldValue.serverTimestamp(),
-          };
-          batch.set(docRef, dataUnidad);
-          await AlgoliaService.sincronizarUna(docRef.id, dataUnidad);
-        }
-      }
-      // ── 3. DIRECCIÓN NORMAL ──
-      else {
-        final docRef = db.collection('direcciones_globales').doc();
-        final dataNormal = {
-          'calle': calleFinal,
-          'complemento': complemento,
-          'direccion_normalizada': _norm('$calleFinal $complemento'),
-          'territorio_id': territorioIdSel,
-          'territorio_nombre': territorioNombreSel ?? '',
-          'tarjeta_id': tarjetaIdSel,
-          'barrio': territorioNombreSel ?? '',
-          'estado': 'activa',
-          'estado_predicacion': 'pendiente',
-          'predicado': false,
-          'es_hispano': true,
-          'informacion': detalles,
-          'created_at': FieldValue.serverTimestamp(),
-        };
-        batch.set(docRef, dataNormal);
-        await AlgoliaService.sincronizarUna(docRef.id, dataNormal);
-      }
-
-      batch.update(solicitudDoc.reference, {
-        'estado': 'aprobada',
-        'aprobada_por': widget.usuarioData['nombre'] ?? '',
-        'aprobada_en': FieldValue.serverTimestamp(),
-        'territorio_asignado': territorioNombreSel,
-        'tarjeta_asignada': tarjetaIdSel,
-      });
-
-      await batch.commit();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(esNuevaDireccionMulti
-                ? '✅ Direcciones creadas por separado en $tarjetaIdSel'
-                : tipoSolicitud == 'condominio_nueva_unidad'
-                    ? '✅ Nueva dirección añadida a $tarjetaIdSel'
-                    : (esCondominioLegacy
-                        ? '✅ ${unidadesLegacy.length} unidades agregadas a $tarjetaIdSel'
-                        : '✅ Dirección agregada a $tarjetaIdSel')),
-            backgroundColor: _verde,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  Future<void> _rechazarSolicitud(DocumentSnapshot doc) async {
-    await doc.reference.update({
-      'estado': 'rechazada',
-      'rechazada_por': widget.usuarioData['nombre'] ?? '',
-      'rechazada_en': FieldValue.serverTimestamp(),
-    });
   }
 
   // ─────────────────────────────────────────────────────────
@@ -1223,15 +760,6 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
             ),
           ),
 
-          const SizedBox(height: 20),
-
-          // ── Solicitudes de direcciones ───────────────────
-          _seccionTitulo('DIRECCIONES ENVIADAS'),
-          const SizedBox(height: 10),
-          _buildSolicitudes(),
-
-          const SizedBox(height: 20),
-
           // ── Código de acceso ─────────────────────────────
           _seccionTitulo('CÓDIGO DE ACCESO'),
           const SizedBox(height: 10),
@@ -1326,6 +854,13 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
               ],
             ),
           ),
+
+          const SizedBox(height: 20),
+
+          // ── Devolución automática ────────────────────────
+          _seccionTitulo('DEVOLUCIÓN AUTOMÁTICA'),
+          const SizedBox(height: 10),
+          _buildDevolucionAutomatica(),
 
           const SizedBox(height: 20),
 
@@ -1595,7 +1130,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           ),
           const SizedBox(height: 12),
 
-          // Lista de mensajes
+          // Lista de mensajes (contraída por defecto para no ocupar tanto espacio)
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('configuracion')
@@ -1621,70 +1156,135 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                   ),
                 );
               }
+
+              final activos = docs.where((d) {
+                final data = d.data() as Map<String, dynamic>;
+                return (data['activo'] as bool?) ?? true;
+              }).length;
+
               return Column(
-                children: docs.map((doc) {
-                  final d = doc.data() as Map<String, dynamic>;
-                  final texto = (d['texto'] as String?) ?? '';
-                  final activo = (d['activo'] as bool?) ?? true;
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: activo ? Colors.green.shade50 : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: activo ? Colors.green.shade200 : Colors.grey.shade300,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Encabezado clicable: resume la lista sin ocupar espacio
+                  InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () {
+                      setState(() {
+                        _mensajesMotivacionalesExpandido =
+                            !_mensajesMotivacionalesExpandido;
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.format_list_bulleted,
+                              size: 16, color: Colors.grey.shade600),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${docs.length} mensajes guardados · $activos activos',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          Icon(
+                            _mensajesMotivacionalesExpandido
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                            color: Colors.grey.shade600,
+                          ),
+                        ],
                       ),
                     ),
-                    child: Row(children: [
-                      Expanded(
-                        child: Text(
-                          texto,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: activo ? Colors.black87 : Colors.grey,
+                  ),
+                  if (_mensajesMotivacionalesExpandido) ...[
+                    const SizedBox(height: 8),
+                    ...docs.map((doc) {
+                      final d = doc.data() as Map<String, dynamic>;
+                      final texto = (d['texto'] as String?) ?? '';
+                      final activo = (d['activo'] as bool?) ?? true;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: activo
+                              ? Colors.green.shade50
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: activo
+                                ? Colors.green.shade200
+                                : Colors.grey.shade300,
                           ),
                         ),
-                      ),
-                      // Toggle activo/inactivo
-                      IconButton(
-                        icon: Icon(
-                          activo ? Icons.toggle_on : Icons.toggle_off,
-                          color: activo ? const Color(0xFF1B5E20) : Colors.grey,
-                          size: 30,
-                        ),
-                        onPressed: () => doc.reference.update({'activo': !activo}),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                      const SizedBox(width: 4),
-                      // Eliminar
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                        onPressed: () async {
-                          final ok = await showDialog<bool>(
-                            context: context,
-                            builder: (c) => AlertDialog(
-                              title: const Text('Eliminar mensaje'),
-                              content: Text('"$texto"'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(c, true),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                  child: const Text('Eliminar'),
-                                ),
-                              ],
+                        child: Row(children: [
+                          Expanded(
+                            child: Text(
+                              texto,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: activo ? Colors.black87 : Colors.grey,
+                              ),
                             ),
-                          );
-                          if (ok == true) await doc.reference.delete();
-                        },
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                    ]),
-                  );
-                }).toList(),
+                          ),
+                          // Toggle activo/inactivo
+                          IconButton(
+                            icon: Icon(
+                              activo ? Icons.toggle_on : Icons.toggle_off,
+                              color: activo
+                                  ? const Color(0xFF1B5E20)
+                                  : Colors.grey,
+                              size: 30,
+                            ),
+                            onPressed: () =>
+                                doc.reference.update({'activo': !activo}),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                          const SizedBox(width: 4),
+                          // Eliminar
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.red, size: 20),
+                            onPressed: () async {
+                              final ok = await showDialog<bool>(
+                                context: context,
+                                builder: (c) => AlertDialog(
+                                  title: const Text('Eliminar mensaje'),
+                                  content: Text('"$texto"'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(c, false),
+                                        child: const Text('Cancelar')),
+                                    ElevatedButton(
+                                      onPressed: () => Navigator.pop(c, true),
+                                      style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.red),
+                                      child: const Text('Eliminar'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (ok == true) await doc.reference.delete();
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ]),
+                      );
+                    }),
+                  ],
+                ],
               );
             },
           ),
@@ -1876,7 +1476,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            'Sin invitación: "$mensaje"',
+                            'Pendiente: "$mensaje"',
                             style: TextStyle(
                                 fontSize: 11, color: Colors.orange.shade700),
                           ),
@@ -1954,6 +1554,11 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                 ...campanas.map((campDoc) {
                   final data = (campDoc.data() as Map<String, dynamic>?) ?? {};
                   final nombre = (data['nombre'] as String?) ?? 'Campaña';
+                  final etiquetaEntrega =
+                      (data['etiqueta_entrega'] as String?)?.trim().isNotEmpty ==
+                              true
+                          ? (data['etiqueta_entrega'] as String).trim()
+                          : 'material entregado';
 
                   final dirs = snap.data?.docs ?? [];
                   final total = dirs.length;
@@ -2023,7 +1628,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          '$conInvitacion de $total direcciones con invitación entregada',
+                          '$conInvitacion de $total direcciones con $etiquetaEntrega',
                           style:
                               TextStyle(fontSize: 11, color: Colors.grey[600]),
                         ),
@@ -2034,194 +1639,6 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
               ],
             );
           },
-        );
-      },
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────
-  // WIDGET: SOLICITUDES
-  // ─────────────────────────────────────────────────────────
-
-  Widget _buildSolicitudes() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('solicitudes_localizador')
-          .where('estado', isEqualTo: 'pendiente')
-          .orderBy('created_at', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        final docs = snapshot.data?.docs ?? [];
-
-        if (docs.isEmpty) {
-          return Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Center(
-              child: Column(
-                children: [
-                  Icon(Icons.mark_email_read_outlined,
-                      size: 36, color: Colors.grey[400]),
-                  const SizedBox(height: 8),
-                  Text('Sin solicitudes pendientes',
-                      style: TextStyle(color: Colors.grey[500], fontSize: 13)),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return Column(
-          children: docs.map((doc) {
-            final data = (doc.data() as Map<String, dynamic>?) ?? {};
-            final calle = (data['direccion_original'] as String?) ?? '';
-            final complemento = (data['complemento'] as String?) ?? '';
-            final detalles = (data['detalles'] as String?) ?? '';
-            final solicitante = (data['solicitante_email'] as String?) ?? '';
-            final createdAt = data['created_at'] as Timestamp?;
-
-            // Nuevo tipo: añadir unidad a condominio existente
-            final tipoSolicitud = (data['tipo_solicitud'] as String?) ?? '';
-            final esNuevaUnidadCondominio = tipoSolicitud == 'condominio_nueva_unidad';
-            final nuevaUnidad = (data['condominio_unidad'] as Map<String, dynamic>?) ?? {};
-
-            // Legacy
-            final esCondominioLegacy = (data['es_condominio'] as bool?) ?? false;
-            final unidadesLegacy = (data['unidades_condominio'] as List?) ?? [];
-
-            final esCondominio = esNuevaUnidadCondominio || esCondominioLegacy;
-
-            String fecha = '';
-            if (createdAt != null) {
-              final dt = createdAt.toDate();
-              fecha =
-                  '${dt.day}/${dt.month} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-            }
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border(
-                  left: BorderSide(
-                    color: esCondominio ? Colors.blue : _verde,
-                    width: 4,
-                  ),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-Row(
-                        children: [
-                          Icon(
-                            esCondominio ? Icons.apartment : Icons.location_on,
-                            color: esCondominio ? Colors.blue : _verde,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              '$calle${complemento.isNotEmpty ? ' · $complemento' : ''}',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
-                          ),
-                          if (esCondominio)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                esNuevaUnidadCondominio
-                                    ? '🏢 +1 unidad (Bl. ${nuevaUnidad['bloque']} P${nuevaUnidad['piso']} A${nuevaUnidad['apto']})'
-                                    : '🏢 ${unidadesLegacy.length} unid.',
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.blue),
-                              ),
-                            ),
-                        ],
-                      ),
-                    if (detalles.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(detalles,
-                          style:
-                              TextStyle(fontSize: 11, color: Colors.grey[600])),
-                    ],
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(Icons.person, size: 11, color: Colors.grey[400]),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(solicitante,
-                              style: TextStyle(
-                                  fontSize: 10, color: Colors.grey[500])),
-                        ),
-                        Text(fecha,
-                            style: TextStyle(
-                                fontSize: 10, color: Colors.grey[400])),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () => _aprobarSolicitud(doc),
-                            icon: const Icon(Icons.add_location_alt, size: 14),
-                            label: const Text('Agregar',
-                                style: TextStyle(fontSize: 12)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _verde,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: () => _rechazarSolicitud(doc),
-                          icon: const Icon(Icons.close, size: 14),
-                          label: const Text('Rechazar',
-                              style: TextStyle(fontSize: 12)),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
         );
       },
     );

@@ -52,10 +52,14 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-            
+
             // ✅ Recomendado activar minificación para el paquete de producción en la tienda
             isMinifyEnabled = true
             isShrinkResources = true
+            // Archivo por defecto OPTIMIZADO (sin -dontoptimize, con
+            // -allowaccessmodification): es el que recomienda el analizador R8
+            // de Google Play para subir la tasa de optimización/obfuscación.
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
         }
     }
 }

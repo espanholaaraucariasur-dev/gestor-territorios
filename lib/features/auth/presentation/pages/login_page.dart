@@ -1,4 +1,3 @@
-import 'package:araucaria_sur/features/home/presentation/pages/home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -29,11 +28,13 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   final _db = FirebaseFirestore.instance;
 
   final _localAuth = kIsWeb ? null : LocalAuthentication();
-  final _secureStorage = kIsWeb ? null : const FlutterSecureStorage(
-    aOptions: AndroidOptions(
-      encryptedSharedPreferences: true,
-    ),
-  );
+  final _secureStorage = kIsWeb
+      ? null
+      : const FlutterSecureStorage(
+          aOptions: AndroidOptions(
+            migrateWithBackup: true,
+          ),
+        );
 
   bool _isLoading = false;
   bool _obscurePass = true;
@@ -43,7 +44,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
   late Animation<double> _fadeAnim;
 
   static const Color _verde = Color(0xFF1B5E20);
-  static const String _codigoAccesoFallback = '2026';
   static const Color _verdeClaro = Color(0xFF2E7D32);
 
   @override
@@ -99,13 +99,15 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         return;
       }
       if (!canCheck) {
-        _snack('No hay biometría configurada. Usa email y contraseña', Colors.orange);
+        _snack('No hay biometría configurada. Usa email y contraseña',
+            Colors.orange);
         return;
       }
 
       final email = await _secureStorage!.read(key: 'biometric_email');
       if (email == null || email.isEmpty) {
-        _snack('Primero inicia sesión con email para activar biometría', Colors.orange);
+        _snack('Primero inicia sesión con email para activar biometría',
+            Colors.orange);
         return;
       }
 
@@ -125,10 +127,13 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         _snack('No hay huella registrada en el dispositivo', Colors.orange);
       } else if (msg.contains('LockedOut') || msg.contains('locked_out')) {
         _snack('Demasiados intentos. Intenta más tarde', Colors.red);
-      } else if (msg.contains('NotAvailable') || msg.contains('not_available')) {
-        _snack('Biometría no disponible. Usa email y contraseña', Colors.orange);
+      } else if (msg.contains('NotAvailable') ||
+          msg.contains('not_available')) {
+        _snack(
+            'Biometría no disponible. Usa email y contraseña', Colors.orange);
       } else if (msg.contains('PermanentlyLockedOut')) {
-        _snack('Biometría bloqueada. Desbloquea el dispositivo primero', Colors.red);
+        _snack('Biometría bloqueada. Desbloquea el dispositivo primero',
+            Colors.red);
       } else {
         _snack('Error biometría: $msg', Colors.red);
       }
@@ -168,7 +173,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
             _snack('Problema de conexión. Intenta de nuevo.', Colors.red);
             return;
           } else if (code == 'too-many-requests') {
-            _snack('Demasiados intentos. Espera un momento e intenta de nuevo.', Colors.red);
+            _snack('Demasiados intentos. Espera un momento e intenta de nuevo.',
+                Colors.red);
             return;
           }
 
@@ -186,7 +192,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
           try {
             await _migrarUsuarioAFirebaseAuth(email, password);
           } on FirebaseAuthException catch (mig) {
-            if (mig.code == 'wrong-password' || mig.code == 'invalid-credential') {
+            if (mig.code == 'wrong-password' ||
+                mig.code == 'invalid-credential') {
               _snack('Contraseña incorrecta.', Colors.red);
             } else {
               _snack('Error de sesión: ${mig.code}', Colors.red);
@@ -201,7 +208,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
           return;
         }
         if (FirebaseAuth.instance.currentUser == null) {
-          _snack('Sesión expirada. Inicia sesión con contraseña.', Colors.orange);
+          _snack(
+              'Sesión expirada. Inicia sesión con contraseña.', Colors.orange);
           return;
         }
       }
@@ -233,7 +241,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       if (!rawData.containsKey('rol')) {
         // Deducir rol antiguo
         String rolAntiguo = 'publicador';
-        if (rawData['es_admin'] == true || rawData['es_admin_territorios'] == true) {
+        if (rawData['es_admin'] == true ||
+            rawData['es_admin_territorios'] == true) {
           rolAntiguo = 'admin';
         } else if (rawData['es_conductor'] == true) {
           rolAntiguo = 'conductor';
@@ -272,7 +281,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => TerritoriosTab(
+            builder: (_) => PantallaHomeLegacy(
               usuarioData: {
                 ...rawData,
                 'docId': docId,
@@ -287,8 +296,10 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
     } on FirebaseException catch (e) {
       debugPrint('LOGIN ERROR: $e');
       final code = e.code.toLowerCase();
-      if (code.contains('permission-denied') || code.contains('unauthenticated')) {
-        _snack('No se pudo verificar el usuario. Intenta de nuevo.', Colors.red);
+      if (code.contains('permission-denied') ||
+          code.contains('unauthenticated')) {
+        _snack(
+            'No se pudo verificar el usuario. Intenta de nuevo.', Colors.red);
       } else if (code.contains('unavailable') || code.contains('network')) {
         _snack('Problema de conexión. Intenta de nuevo.', Colors.red);
       } else {
@@ -312,7 +323,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
     _loginConEmail(email, password: pass);
   }
 
-  Future<void> _migrarUsuarioAFirebaseAuth(String email, String password) async {
+  Future<void> _migrarUsuarioAFirebaseAuth(
+      String email, String password) async {
     try {
       await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
@@ -387,18 +399,23 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
               try {
                 if (FirebaseAuth.instance.currentUser == null) {
-                  try { await FirebaseAuth.instance.signInAnonymously(); } catch (_) {}
+                  try {
+                    await FirebaseAuth.instance.signInAnonymously();
+                  } catch (_) {}
                 }
 
-                final snap = await _db.collection('usuarios')
-                    .where('email', isEqualTo: email).get();
+                final snap = await _db
+                    .collection('usuarios')
+                    .where('email', isEqualTo: email)
+                    .get();
 
                 if (snap.docs.isEmpty) {
                   _snack('Email no registrado en el directorio.', Colors.red);
                   return;
                 }
 
-                await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                await FirebaseAuth.instance
+                    .sendPasswordResetEmail(email: email);
                 if (c.mounted) Navigator.pop(c);
                 _snack('✅ Email de recuperación enviado a $email', _verde);
               } on FirebaseAuthException catch (e) {
@@ -450,11 +467,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
               setDlg(() {});
               return;
             }
-            if (codigo == _codigoAccesoFallback) {
-              codigoValido = true;
-              Navigator.pop(context);
-              return;
-            }
             setDlg(() => verificando = true);
             try {
               final doc = await _db
@@ -464,6 +476,14 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
               final codigoGuardado = doc.exists
                   ? (doc.data()?['codigo']?.toString().trim() ?? '')
                   : '';
+              if (codigoGuardado.isEmpty) {
+                setDlg(() {
+                  verificando = false;
+                  errorMsg =
+                      'Código no configurado. Contacta al administrador.';
+                });
+                return;
+              }
               if (codigo == codigoGuardado) {
                 codigoValido = true;
                 Navigator.pop(context);
@@ -484,7 +504,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
           return Dialog(
             backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             child: Container(
               width: 360,
               padding: const EdgeInsets.all(24),
@@ -682,9 +703,13 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                             'pendiente';
                     if (c.mounted) Navigator.pop(c);
                     if (estadoExistente == 'aprobado') {
-                      _snack('Este correo ya tiene una cuenta aprobada. Inicia sesión.', Colors.orange);
+                      _snack(
+                          'Este correo ya tiene una cuenta aprobada. Inicia sesión.',
+                          Colors.orange);
                     } else {
-                      _snack('Ya enviaste una solicitud con este correo. Espera la aprobación.', Colors.orange);
+                      _snack(
+                          'Ya enviaste una solicitud con este correo. Espera la aprobación.',
+                          Colors.orange);
                     }
                     return;
                   }
@@ -704,7 +729,8 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
 
                   await NotificacionService.enviarAAdmins(
                     titulo: '👤 Nueva solicitud de acceso',
-                    cuerpo: '${nomCtrl.text.trim()} solicita acceso a la app. Toca para aprobar.',
+                    cuerpo:
+                        '${nomCtrl.text.trim()} solicita acceso a la app. Toca para aprobar.',
                     tipo: TipoNotificacion.solicitudAcceso,
                     extra: {
                       'solicitante_nombre': nomCtrl.text.trim(),
@@ -833,7 +859,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 36),
-
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(28),
@@ -867,7 +892,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                                 fontSize: 13, color: Colors.grey[500]),
                           ),
                           const SizedBox(height: 24),
-
                           Text(context.t('email'),
                               style: const TextStyle(
                                   fontSize: 12,
@@ -881,7 +905,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                             type: TextInputType.emailAddress,
                           ),
                           const SizedBox(height: 16),
-
                           Text(context.t('password'),
                               style: const TextStyle(
                                   fontSize: 12,
@@ -927,7 +950,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                               isDense: true,
                             ),
                           ),
-
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
@@ -946,9 +968,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                               ),
                             ),
                           ),
-
                           const SizedBox(height: 8),
-
                           if (_hasBiometricAccount) ...[
                             SizedBox(
                               width: double.infinity,
@@ -973,7 +993,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                             ),
                             const SizedBox(height: 10),
                           ],
-
                           SizedBox(
                             width: double.infinity,
                             height: 50,
@@ -1002,11 +1021,9 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                                     ),
                             ),
                           ),
-
                           const SizedBox(height: 20),
                           const Divider(),
                           const SizedBox(height: 12),
-
                           Center(
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -1037,7 +1054,6 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 24),
                     Text(
                       'Congregación Española Araucaria Sur',

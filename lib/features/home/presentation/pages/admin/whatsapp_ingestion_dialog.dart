@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:araucaria_sur/core/services/groq_territory_service.dart';
-import 'package:araucaria_sur/core/services/mapbox_service.dart';
+import 'package:araucaria_sur/core/services/mapbox_geocoding_service.dart';
 
 /// Modal para pegar fragmentos de chats de WhatsApp y cargar direcciones
 /// de forma masiva. El texto se envía a Groq para extraer un array JSON,
@@ -108,27 +108,72 @@ class _WhatsAppIngestionDialogState extends State<WhatsAppIngestionDialog> {
         return;
       }
 
-      // 2. Geocodificar cada dirección con Mapbox
-      setState(() => _estadoTexto = 'Geocodificando ${extraidas.length} direcciones con Mapbox...');
-      final conCoordenadas = <Map<String, dynamic>>[];
-      for (final dir in extraidas) {
-        final numero = (dir['numero'] ?? '').toString();
-        final direccionTexto = (dir['direccion'] ?? '').toString();
-        final dirCompleta =
-            [direccionTexto, if (numero.isNotEmpty) numero, dir['barrio']?.toString()]
-                .where((s) => s != null && s.isNotEmpty)
-                .join(', ');
+      // 2. Normalizar el texto (Groq, en lotes) y geocodificar con Mapbox
+      // (obteniendo CEP, no solo coordenadas). Antes acá se armaba
+      // 'direccion_normalizada' con una concatenación cruda
+      // ('$calle $numero $barrio'.trim()) que NO pasaba por Groq: no
+      // corregía abreviaturas ni garantizaba ciudad/estado/CEP.
+      setState(() => _estadoTexto =
+          'Normalizando y geocodificando ${extraidas.length} direcciones...');
 
+      final conCoordenadas = <Map<String, dynamic>>[];
+      final tamLote = GroqTerritoryService.maxDireccionesPorLoteGeocoding;
+      for (var inicio = 0; inicio < extraidas.length; inicio += tamLote) {
+        final fin = (inicio + tamLote > extraidas.length)
+            ? extraidas.length
+            : inicio + tamLote;
+        final lote = extraidas.sublist(inicio, fin);
+
+        final crudas = <Map<String, dynamic>>[];
+        for (var i = 0; i < lote.length; i++) {
+          final dir = lote[i];
+          crudas.add({
+            'id': i.toString(), // índice LOCAL al lote, no un id real de Firestore
+            'calle': dir['direccion'] ?? '',
+            'numero': dir['numero'] ?? '',
+            'complemento': dir['observaciones'] ?? '',
+            'barrio': dir['barrio'] ?? '',
+          });
+        }
+
+        List<Map<String, dynamic>> normalizadas = [];
         try {
-          final coords = await MapboxService.geocodificar(dirCompleta);
+          normalizadas =
+              await GroqTerritoryService.normalizarDireccionesParaGeocoding(crudas);
+        } catch (_) {
+          // Sin conexión/error de Groq: se sigue con el texto crudo para
+          // este lote en vez de bloquear toda la carga masiva.
+        }
+        final normalizadasPorIndice = {
+          for (final n in normalizadas)
+            int.tryParse(n['id']?.toString() ?? ''): n
+        };
+
+        for (var i = 0; i < lote.length; i++) {
+          final dir = lote[i];
+          final direccionTexto = (dir['direccion'] ?? '').toString();
+          final numero = (dir['numero'] ?? '').toString();
+          final direccionNormalizada =
+              normalizadasPorIndice[i]?['direccion_normalizada']?.toString() ??
+                  [direccionTexto, if (numero.isNotEmpty) numero, dir['barrio']?.toString()]
+                      .where((s) => s != null && s.isNotEmpty)
+                      .join(', ');
+
+          Map<String, dynamic>? geo;
+          try {
+            geo = await MapboxGeocodingService.geocodificarDireccion(direccionNormalizada);
+          } catch (_) {
+            geo = null;
+          }
+
           conCoordenadas.add({
             ...dir,
-            'lat': coords?[0],
-            'lng': coords?[1],
-            'completo': dirCompleta,
+            'lat': geo?['lat'],
+            'lng': geo?['lng'],
+            'cep': geo?['cep'] ?? '',
+            'completo': direccionNormalizada,
+            'direccionNormalizada': direccionNormalizada,
           });
-        } catch (_) {
-          conCoordenadas.add({...dir, 'lat': null, 'lng': null, 'completo': dirCompleta});
         }
       }
 
@@ -182,22 +227,33 @@ class _WhatsAppIngestionDialogState extends State<WhatsAppIngestionDialog> {
     var incremento = 0;
     for (final dir in _direccionesExtraidas) {
       final dirRef = _firestore.collection('direcciones_globales').doc();
-      final calle = (dir['direccion'] ?? '').toString();
+      // Preferir el texto YA normalizado (Groq + Mapbox) calculado en
+      // _extraerYGeocodificar; si por algún motivo no está (falló la red),
+      // caer al campo crudo en vez de dejarlo vacío.
+      final calle = (dir['direccionNormalizada'] ?? dir['direccion'] ?? '').toString();
       final numero = (dir['numero'] ?? '').toString();
       final barrio = (dir['barrio'] ?? _tarjetaDestino['territorio_nombre'] ?? '')
           .toString();
       final observ = (dir['observaciones'] ?? '').toString();
+      final cep = (dir['cep'] ?? '').toString();
 
       final data = {
         'calle': calle,
         'numero': numero,
         'complemento': observ,
-        'direccion_normalizada': '$calle $numero $barrio'.trim(),
+        'direccionNormalizada': calle,
+        if (cep.isNotEmpty) 'cep': cep,
         'territorio_id': _tarjetaDestino['territorio_id'] ?? '',
         'territorio_nombre': _tarjetaDestino['territorio_nombre'] ?? '',
-        'tarjeta_id': _tarjetaIdDestino ?? '',
+        // CRÍTICO: antes acá se guardaba _tarjetaIdDestino, que es la clave
+        // COMPUESTA "territorioId/tarjetaId" del dropdown — no el id real
+        // de la tarjeta. Eso hacía que la dirección nunca pudiera coincidir
+        // con la consulta del publicador (que filtra por el id plano).
+        'tarjeta_id': cardId,
         'barrio': barrio,
-        'estado': 'activa',
+        // 'asignada' (no 'activa'): el mismo valor que usan el admin, el
+        // auditor y la auto-asignación en todo el resto del sistema.
+        'estado': 'asignada',
         'estado_predicacion': 'pendiente',
         'predicado': false,
         'es_hispano': true,
@@ -205,6 +261,7 @@ class _WhatsAppIngestionDialogState extends State<WhatsAppIngestionDialog> {
         'origen': 'whatsapp',
         'lat': dir['lat'],
         'lng': dir['lng'],
+        'creado_el': FieldValue.serverTimestamp(),
         'created_at': FieldValue.serverTimestamp(),
       };
       batch.set(dirRef, data);

@@ -378,7 +378,10 @@ class _RemovidasTabState extends State<RemovidasTab> {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('direcciones_removidas')
-          .orderBy('removida_en', descending: false)
+          // Más reciente primero: lo que el admin acaba de remover tiene que
+          // aparecer arriba. Con ascendente caía al fondo de una lista de 27+
+          // y parecía que la dirección se había perdido.
+          .orderBy('removida_en', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {

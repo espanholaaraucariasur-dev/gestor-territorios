@@ -1,4 +1,5 @@
-﻿import 'dart:async';
+import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:math' show cos, sqrt, asin, pi;
 
 import 'package:flutter/material.dart';
@@ -8,12 +9,27 @@ import 'package:araucaria_sur/core/services/mapbox_poi_service.dart';
 import 'package:araucaria_sur/core/services/auto_asignador_service.dart';
 import 'package:araucaria_sur/core/services/notificacion_service.dart';
 import 'package:araucaria_sur/core/services/geocoding_backfill_service.dart';
+import 'package:araucaria_sur/core/services/historial_direcciones_nuevas_service.dart';
 import 'whatsapp_ingestion_dialog.dart';
 
 class AuditorPanelPage extends StatefulWidget {
   final Map<String, dynamic>? usuarioData;
-
   const AuditorPanelPage({Key? key, this.usuarioData}) : super(key: key);
+
+  /// Indice de sub-tab solicitado desde fuera (ver [solicitarTab]).
+  static int? _tabSolicitado;
+
+  /// 0 = Sugerencias, 1 = Nuevas Direcciones, 2 = Matriz Grid.
+  static void solicitarTab(int indice) {
+    _tabSolicitado = indice;
+  }
+
+  /// Devuelve el indice pendiente y lo limpia (get-and-clear).
+  static int? consumirTabSolicitado() {
+    final t = _tabSolicitado;
+    _tabSolicitado = null;
+    return t;
+  }
 
   @override
   State<AuditorPanelPage> createState() => _AuditorPanelPageState();
@@ -66,9 +82,12 @@ class _TerritorioTarjetaCache {
       final territoriosSnap = await _firestore.collection('territorios').get();
       final nuevoNombreATerritorioId = <String, String>{};
       final nuevoTerritorioNombre = <String, String>{};
+      final nuevoTerritorioTipo = <String, String>{};
       for (final t in territoriosSnap.docs) {
         final nombre = ((t.data()['nombre'] as String?) ?? '').trim();
         nuevoTerritorioNombre[t.id] = nombre.isEmpty ? t.id : nombre;
+        nuevoTerritorioTipo[t.id] =
+            ((t.data()['tipo'] as String?) ?? '').trim().toLowerCase();
         if (nombre.isNotEmpty) {
           nuevoNombreATerritorioId[nombre.toLowerCase()] = t.id;
         }
@@ -84,11 +103,17 @@ class _TerritorioTarjetaCache {
           continue; // No cuelga de territorios/{id}/tarjetas: se descarta.
         }
         final data = d.data();
+        // `tipo` = 'zona' en una tarjeta comercial (ZONA-1, ZONA-2, ...). El
+        // territorio también puede estar marcado como 'comercial'. Ambos datos
+        // permiten excluir zonas comerciales de las sugerencias cuando la
+        // dirección NO fue marcada como comercial por el usuario.
         nuevoTarjetaMeta[d.id] = {
           'id': d.id,
           'nombre': data['nombre'] ?? 'Sin nombre',
           'territorio_id': territorioId,
           'territorio_nombre': nuevoTerritorioNombre[territorioId],
+          'tipo': (data['tipo'] ?? '').toString().trim().toLowerCase(),
+          'territorio_tipo': nuevoTerritorioTipo[territorioId] ?? '',
           'totalDirecciones': (data['totalDirecciones'] as num?)?.toInt() ?? 0,
         };
       }
@@ -149,10 +174,40 @@ class _TerritorioTarjetaCache {
   }
 }
 
-class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerProviderStateMixin {
+class _AuditorPanelPageState extends State<AuditorPanelPage>
+    with SingleTickerProviderStateMixin {
+  /// Los íconos deben ser SIEMPRE literales (Icons.xxx) para que el
+  /// tree-shaking de íconos de Flutter (activo en release web/apk) pueda
+  /// determinar en tiempo de compilación qué subconjunto de la fuente
+  /// necesita. Reconstruir un IconData desde un codePoint dinámico rompe el
+  /// build de release ("Avoid non-constant invocations of IconData").
+  /// Por eso en Firestore se guarda solo una CLAVE de texto, y acá se mapea
+  /// a un ícono literal fijo — nunca se reconstruye el IconData a mano.
+  static const Map<String, IconData> _iconosPorClave = {
+    'touch_app': Icons.touch_app,
+    'cleaning_services': Icons.cleaning_services,
+    'auto_awesome': Icons.auto_awesome,
+    'travel_explore': Icons.travel_explore,
+    'rule': Icons.rule,
+    'add_location_alt': Icons.add_location_alt,
+    'history': Icons.history,
+  };
+
+  /// Guarda solo la clave (string) de un ícono conocido, nunca el IconData.
+  static String _iconoParaFirestore(String clave) => clave;
+
+  /// Reconstruye el IconData a partir de la clave guardada, usando siempre
+  /// referencias literales del mapa de arriba (compatible con tree-shaking).
+  static IconData _iconoDesdeFirestore(dynamic valor,
+      {IconData porDefecto = Icons.history}) {
+    if (valor is String) return _iconosPorClave[valor] ?? porDefecto;
+    return porDefecto;
+  }
+
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   late TabController _tabController;
-  late final _TerritorioTarjetaCache _catalogo = _TerritorioTarjetaCache(_firestore);
+  late final _TerritorioTarjetaCache _catalogo =
+      _TerritorioTarjetaCache(_firestore);
 
   bool _cargando = true;
   bool _autoDivision = true;
@@ -164,11 +219,21 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   bool _backfillEnCurso = false;
   int _backfillProcesadas = 0;
   int _backfillTotal = 0;
-  int _backfillActualizadas = 0;
-  int _backfillFallidas = 0;
+
+  // --- Normalización masiva de la bandeja pendiente ('sugerencias') ---
+  // Mismo motor que el backfill de arriba, pero apuntando a la bandeja de
+  // direcciones sin asignar todavía, no a las ya confirmadas.
+  bool _normalizandoBandeja = false;
+  int _normProcesadas = 0;
+  int _normTotal = 0;
 
   // Filtros
-  List<String> _reglasProtegidas = ['FARMACIAS', 'COMERCIOS', 'ESCUELAS', 'PUESTO DE GASOLINA'];
+  List<String> _reglasProtegidas = [
+    'FARMACIAS',
+    'COMERCIOS',
+    'ESCUELAS',
+    'PUESTO DE GASOLINA'
+  ];
   final TextEditingController _nuevoFiltroController = TextEditingController();
 
   // Selección dinámica
@@ -190,7 +255,6 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   // "Pendientes": existentes - completadas.
   int _direccionesExistentes = 0;
   int _direccionesCompletadas = 0;
-  int _direccionesPendientesProgreso = 0;
   double get _porcentajeProgresoMensual => _direccionesExistentes == 0
       ? 0.0
       : (_direccionesCompletadas / _direccionesExistentes).clamp(0.0, 1.0);
@@ -217,7 +281,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
   List<Map<String, dynamic>> _tarjetasMatriz = [];
   List<Map<String, dynamic>> _sugerenciasLista = [];
-  List<Map<String, dynamic>> _nuevasDireccionesLista = []; // Bandeja de entrada de nuevas direcciones
+  List<Map<String, dynamic>> _nuevasDireccionesLista =
+      []; // Bandeja de entrada de nuevas direcciones
 
   // Escaneo de zona con Mapbox (POI Discovery)
   bool _escanenandoZona = false;
@@ -225,8 +290,6 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   // Reorganización local de zonas protegidas (farmacias, comercios, etc.)
   bool _reorganizandoZona = false;
 
-  // Entrada de nuevas direcciones: texto pegado + modo automático en vivo
-  final TextEditingController _textoPegadoController = TextEditingController();
   StreamSubscription<QuerySnapshot>? _sugerenciasSub;
   StreamSubscription<QuerySnapshot>? _sugerenciasPendientesSub;
   bool _procesandoAutomatico = false;
@@ -236,6 +299,14 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    // Si una notificacion dejo indicado un indice (p.ej. "Direcciones
+    // Nuevas"), se aplica aqui: este panel se monta justo al entrar a la tab
+    // de Auditoria, y su TabController es interno, asi que no se puede
+    // animar desde afuera.
+    final tabSolicitado = AuditorPanelPage.consumirTabSolicitado();
+    if (tabSolicitado != null && tabSolicitado > 0) {
+      _tabController.index = tabSolicitado.clamp(0, _tabController.length - 1);
+    }
     _cargarConsolaDinamica();
     _cargarEstadoAutoAsignacion();
     _comprobarConexionIA();
@@ -254,14 +325,11 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   ///     si corresponde disparar el modo automático.
   void _iniciarEscuchaSugerencias() {
     _sugerenciasSub?.cancel();
-    _sugerenciasSub = _firestore
-        .collection('sugerencias')
-        .snapshots()
-        .listen((snap) {
+    _sugerenciasSub =
+        _firestore.collection('sugerencias').snapshots().listen((snap) {
       if (!mounted) return;
-      final nuevasProcesadas = snap.docs
-          .map((d) => {'id': d.id, ...d.data()})
-          .toList();
+      final nuevasProcesadas =
+          snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
       setState(() {
         _nuevasDireccionesLista = nuevasProcesadas;
         _totalNuevasDirecciones = nuevasProcesadas.length;
@@ -275,9 +343,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         .snapshots()
         .listen((snap) {
       if (!mounted || !_autoAsignacionActiva) return;
-      final pendientes = snap.docs
-          .where((d) => !_autoProcesadas.contains(d.id))
-          .toList();
+      final pendientes =
+          snap.docs.where((d) => !_autoProcesadas.contains(d.id)).toList();
       if (pendientes.isNotEmpty && !_procesandoAutomatico) {
         _autoProcesarSugerencias(pendientes);
       }
@@ -286,13 +353,15 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
   /// Coloca en lote todas las sugerencias pendientes de la bandeja cuando el
   /// modo automático está activo.
-  Future<void> _autoProcesarSugerencias(List<QueryDocumentSnapshot> docs) async {
+  Future<void> _autoProcesarSugerencias(
+      List<QueryDocumentSnapshot> docs) async {
     if (_procesandoAutomatico) return;
     _procesandoAutomatico = true;
 
     final direcciones = <Map<String, dynamic>>[];
     for (final d in docs) {
-      final data = (d.data() as Map<String, dynamic>?) ?? const <String, dynamic>{};
+      final data =
+          (d.data() as Map<String, dynamic>?) ?? const <String, dynamic>{};
       final texto = (data['texto_direccion'] ?? '').toString().trim();
       final calle = (data['calle'] ?? texto).toString().trim();
       direcciones.add({
@@ -415,7 +484,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         final lat = d['lat'];
         final lng = d['lng'];
         if (lat != null && lng != null) {
-          coordsExistentes.add('${lat.toStringAsFixed(1)},${lng.toStringAsFixed(1)}');
+          coordsExistentes
+              .add('${lat.toStringAsFixed(1)},${lng.toStringAsFixed(1)}');
         }
         final calle = (d['calle'] as String?)?.trim().toLowerCase() ?? '';
         if (calle.isNotEmpty) dirsExistentes.add(calle);
@@ -424,9 +494,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       errores.add('No se pudo leer direcciones existentes: $e');
     }
 
-    final List<String> categoriasAEscanear = (categoria == 'TODAS')
-        ? _reglasProtegidas
-        : [categoria];
+    final List<String> categoriasAEscanear =
+        (categoria == 'TODAS') ? _reglasProtegidas : [categoria];
 
     for (final cat in categoriasAEscanear) {
       List<Map<String, dynamic>> lugares;
@@ -442,7 +511,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       for (final lugar in lugares) {
         final lat = (lugar['lat'] as num).toDouble();
         final lng = (lugar['lng'] as num).toDouble();
-        final claveCoord = '${lat.toStringAsFixed(1)},${lng.toStringAsFixed(1)}';
+        final claveCoord =
+            '${lat.toStringAsFixed(1)},${lng.toStringAsFixed(1)}';
         final nombre = (lugar['nombre'] as String? ?? '').trim().toLowerCase();
         final dir = (lugar['direccion'] as String? ?? '').trim().toLowerCase();
 
@@ -474,7 +544,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     }
 
     // 3. La IA sugiere la asignación y el auditor aprueba.
-    final guardar = await _mostrarAsignacionPois(nuevos, duplicados, errores, email);
+    final guardar =
+        await _mostrarAsignacionPois(nuevos, duplicados, errores, email);
     if (guardar == true && mounted) {
       await _guardarPoisEncontrados(nuevos, email, region);
     }
@@ -482,7 +553,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
   /// Modal para elegir el filtro/categoría a escanear.
   Future<String?> _mostrarSelectorFiltro() {
-    String? seleccion = _reglasProtegidas.isNotEmpty ? _reglasProtegidas.first : null;
+    String? seleccion =
+        _reglasProtegidas.isNotEmpty ? _reglasProtegidas.first : null;
     TextEditingController nuevoCtrl = TextEditingController();
     final List<String> opciones = ['TODAS', ..._reglasProtegidas];
 
@@ -494,14 +566,16 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           builder: (context, setDialogState) {
             void update() => setDialogState(() {});
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               title: const Row(
                 children: [
                   Icon(Icons.travel_explore, color: Colors.teal),
                   SizedBox(width: 8),
                   Expanded(
                     child: Text("Filtrar zona a escanear",
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -541,7 +615,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                             ),
                             onSubmitted: (v) {
                               final t = v.trim().toUpperCase();
-                              if (t.isNotEmpty && !_reglasProtegidas.contains(t)) {
+                              if (t.isNotEmpty &&
+                                  !_reglasProtegidas.contains(t)) {
                                 _reglasProtegidas.add(t);
                                 seleccion = t;
                                 nuevoCtrl.clear();
@@ -555,7 +630,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                           icon: const Icon(Icons.add, color: Colors.teal),
                           onPressed: () {
                             final t = nuevoCtrl.text.trim().toUpperCase();
-                            if (t.isNotEmpty && !_reglasProtegidas.contains(t)) {
+                            if (t.isNotEmpty &&
+                                !_reglasProtegidas.contains(t)) {
                               _reglasProtegidas.add(t);
                               seleccion = t;
                               nuevoCtrl.clear();
@@ -605,14 +681,16 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       barrierDismissible: false,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
               const Icon(Icons.add_location_alt, color: Colors.teal),
               const SizedBox(width: 8),
               Expanded(
                 child: Text("Sugerencia de distribución (${nuevos.length})",
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -630,9 +708,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                   ...nuevos.asMap().entries.map((entry) {
                     final i = entry.key;
                     final p = entry.value;
-                    final asg = (asignaciones != null && i < asignaciones.length)
-                        ? asignaciones[i]
-                        : null;
+                    final asg =
+                        (asignaciones != null && i < asignaciones.length)
+                            ? asignaciones[i]
+                            : null;
                     final tarjeta = asg?['tarjeta_nombre'] ?? 'Sin asignación';
                     final razon = asg?['explicacion'] ?? '';
                     return Padding(
@@ -800,9 +879,12 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
       // Resolver el id real de la tarjeta destino (por id o por nombre).
       String? tarjetaRealId;
-      if (tarjetaId.isNotEmpty && (tarjetaId.startsWith('t') || tarjetasPorNombre.containsValue(tarjetaId))) {
+      if (tarjetaId.isNotEmpty &&
+          (tarjetaId.startsWith('t') ||
+              tarjetasPorNombre.containsValue(tarjetaId))) {
         tarjetaRealId = tarjetaId;
-      } else if (tarjetaNombre.isNotEmpty && tarjetasPorNombre.containsKey(tarjetaNombre)) {
+      } else if (tarjetaNombre.isNotEmpty &&
+          tarjetasPorNombre.containsKey(tarjetaNombre)) {
         tarjetaRealId = tarjetasPorNombre[tarjetaNombre];
       }
 
@@ -865,7 +947,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al guardar: $e'), backgroundColor: Colors.red),
+        SnackBar(
+            content: Text('Error al guardar: $e'), backgroundColor: Colors.red),
       );
     }
 
@@ -876,7 +959,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         'categorias': nuevos.map((n) => n['categoria_regla']).toSet().toList(),
         'resultados': nuevos.length,
         'usuario': email,
-        'detalle': 'Escaneo de zona con Mapbox, aprobado y cargado en direcciones_globales',
+        'usuario_nombre':
+            (widget.usuarioData?['nombre'] as String?) ?? '',
+        'detalle':
+            'Escaneo de zona con Mapbox, aprobado y cargado en direcciones_globales',
         'created_at': FieldValue.serverTimestamp(),
       });
     } catch (_) {}
@@ -908,19 +994,16 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       _backfillEnCurso = true;
       _backfillProcesadas = 0;
       _backfillTotal = 0;
-      _backfillActualizadas = 0;
-      _backfillFallidas = 0;
     });
 
     try {
-      final resultado = await GeocodingBackfillService.ejecutarBackfillCoordenadas(
+      final resultado =
+          await GeocodingBackfillService.ejecutarBackfillCoordenadas(
         onProgreso: (procesadas, total, actualizadas, fallidas) {
           if (!mounted) return;
           setState(() {
             _backfillProcesadas = procesadas;
             _backfillTotal = total;
-            _backfillActualizadas = actualizadas;
-            _backfillFallidas = fallidas;
           });
         },
       );
@@ -935,21 +1018,47 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           ),
         );
       } else {
+        // Errores únicos (por mensaje) para diagnosticar de un vistazo si
+        // fue algo sistemático (ej. token de Mapbox, sin conexión) en vez
+        // de casos puntuales por dirección.
+        final mensajesUnicos = resultado.errores
+            .map((e) => (e['error'] ?? '').toString())
+            .where((m) => m.isNotEmpty)
+            .toSet()
+            .take(5)
+            .toList();
+
         await showDialog(
           context: context,
           builder: (dialogCtx) => AlertDialog(
             title: const Text('Backfill de coordenadas completado'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Total revisadas: ${resultado.total}'),
-                Text('Actualizadas con coordenadas: ${resultado.actualizadas}',
-                    style: const TextStyle(color: Colors.green)),
-                if (resultado.fallidas > 0)
-                  Text('No se pudieron geocodificar: ${resultado.fallidas}',
-                      style: const TextStyle(color: Colors.orange)),
-              ],
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Total revisadas: ${resultado.total}'),
+                  Text(
+                      'Actualizadas con coordenadas: ${resultado.actualizadas}',
+                      style: const TextStyle(color: Colors.green)),
+                  if (resultado.fallidas > 0)
+                    Text('No se pudieron geocodificar: ${resultado.fallidas}',
+                        style: const TextStyle(color: Colors.orange)),
+                  if (mensajesUnicos.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    const Text('Detalle de los errores (para diagnosticar):',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    ...mensajesUnicos.map((m) => Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text('• $m',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.red)),
+                        )),
+                  ],
+                ],
+              ),
             ),
             actions: [
               TextButton(
@@ -970,6 +1079,71 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       );
     } finally {
       if (mounted) setState(() => _backfillEnCurso = false);
+    }
+  }
+
+  /// Normaliza y geocodifica en lote TODAS las sugerencias pendientes de la
+  /// bandeja ("Nuevas Direcciones") que todavía no tienen coordenadas.
+  /// Mismo motor que _ejecutarBackfillCoordenadas, apuntando a 'sugerencias'
+  /// en vez de 'direcciones_globales' — resuelve el backlog acumulado antes
+  /// de este arreglo, sin tener que abrir el diálogo manual una por una.
+  Future<void> _normalizarBandejaPendiente() async {
+    if (_normalizandoBandeja) return;
+
+    setState(() {
+      _normalizandoBandeja = true;
+      _normProcesadas = 0;
+      _normTotal = 0;
+    });
+
+    try {
+      final resultado =
+          await GeocodingBackfillService.ejecutarBackfillCoordenadas(
+            coleccion: 'sugerencias',
+            reprocesarSinCepVisible: true,
+            onProgreso: (procesadas, total, actualizadas, fallidas) {
+          if (!mounted) return;
+          setState(() {
+            _normProcesadas = procesadas;
+            _normTotal = total;
+          });
+        },
+      );
+
+      if (!mounted) return;
+
+      if (resultado.sinPendientes) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('La bandeja ya estaba toda normalizada. ✅'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Bandeja normalizada: ${resultado.actualizadas}/${resultado.total} '
+              'direcciones actualizadas'
+              '${resultado.fallidas > 0 ? " (${resultado.fallidas} sin geocodificar)" : ""}.',
+            ),
+            backgroundColor:
+                resultado.fallidas > 0 ? Colors.orange : Colors.green,
+          ),
+        );
+      }
+
+      await _cargarConsolaDinamica();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al normalizar la bandeja: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _normalizandoBandeja = false);
     }
   }
 
@@ -1018,13 +1192,16 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Auto-División', style: TextStyle(color: Colors.white, fontSize: 12)),
+            const Text('Auto-División',
+                style: TextStyle(color: Colors.white, fontSize: 12)),
             Switch(
               value: _autoDivision,
               activeColor: Colors.amber,
               onChanged: (val) => setState(() => _autoDivision = val),
             ),
-            IconButton(icon: const Icon(Icons.refresh, color: Colors.white), onPressed: _cargarConsolaDinamica),
+            IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: _cargarConsolaDinamica),
           ],
         ),
       ];
@@ -1190,7 +1367,6 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     _sugerenciasPendientesSub?.cancel();
     _tabController.dispose();
     _nuevoFiltroController.dispose();
-    _textoPegadoController.dispose();
     super.dispose();
   }
 
@@ -1207,8 +1383,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       final Map<String, String> nombreAId = {};
 
       for (var doc in territoriosSnap) {
-        final nombre =
-            ((doc.data()['nombre'] as String?) ?? doc.id).trim();
+        final nombre = ((doc.data()['nombre'] as String?) ?? doc.id).trim();
         matrizMap[doc.id] = {
           'id': doc.id,
           'nombre': nombre.isEmpty ? doc.id : nombre,
@@ -1227,7 +1402,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           await _catalogo.tarjetaMeta();
 
       // 2. Obtener Direcciones Globales
-      final direccionesSnap = await _firestore.collection('direcciones_globales').get();
+      final direccionesSnap =
+          await _firestore.collection('direcciones_globales').get();
       final List<Map<String, dynamic>> sugerenciasProcesadas = [];
       final Map<String, int> dirsPorTarjeta = {};
 
@@ -1311,12 +1487,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         // completada), esté o no vinculada a un territorio.
         final calleNorm = _normalizarTexto((data['calle'] ?? '').toString());
         final barrioNorm = _normalizarTexto((data['barrio'] ?? '').toString());
-        if (calleNorm.isNotEmpty) firmasTextoExistentes.add('$calleNorm|$barrioNorm');
+        if (calleNorm.isNotEmpty)
+          firmasTextoExistentes.add('$calleNorm|$barrioNorm');
         final latRaw = data['lat'];
         final lngRaw = data['lng'];
         if (latRaw is num && lngRaw is num) {
-          coordsExistentes.add(
-              '${latRaw.toStringAsFixed(4)},${lngRaw.toStringAsFixed(4)}');
+          coordsExistentes
+              .add('${latRaw.toStringAsFixed(4)},${lngRaw.toStringAsFixed(4)}');
         }
 
         final territorioResuelto = _resolverTerritorioId(data);
@@ -1330,6 +1507,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
         // Índice por vía (calle+número): la señal MÁS fuerte para sugerir
         // tarjeta destino, sin depender de coordenadas.
+        final esComercialDir = _tarjetaEsComercial(tidStr, tarjetaMeta);
         if (tidStr.isNotEmpty && tarjetaMeta.containsKey(tidStr)) {
           final claveVia = _extraerClaveVia(
               (data['calle'] ?? data['texto_direccion'] ?? '').toString());
@@ -1339,6 +1517,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
               'territorio_id': territorioResuelto,
               'calle': data['calle'] ?? '',
               'barrio': data['barrio'] ?? '',
+              'es_comercial': esComercialDir,
               'complemento': _extraerComplementoCorto(
                   (data['calle'] ?? '').toString(),
                   (data['complemento'] ?? '').toString()),
@@ -1360,12 +1539,17 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             'territorio_id': territorioResuelto,
             'calle': data['calle'] ?? '',
             'barrio': data['barrio'] ?? '',
+            'es_comercial': esComercialDir,
           });
         }
 
         // Requerimiento 3: universo de direcciones válidamente asignadas.
         existentes++;
-        final esPendiente = data['estado_predicacion'] == 'pendiente';
+        final esCompletadaAud = data['predicado'] == true ||
+            data['estado_predicacion'] == 'completada';
+        final esPendiente = !esCompletadaAud &&
+            data['estado_predicacion'] != 'temporal' &&
+            data['estado_predicacion'] != 'comercio_cerrado';
         if (esPendiente) pendientesProgreso++;
 
         (matrizMap[territorioResuelto]!['direcciones'] as List)
@@ -1375,12 +1559,11 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         // NO entran a la reorganización general: se manejan de forma local.
         final esProtegida =
             (matrizMap[territorioResuelto]!['esProtegida'] as bool? ?? false);
-        if (data['estado_predicacion'] == 'pendiente' && !esProtegida) {
+        if (esPendiente && !esProtegida) {
           sugerenciasProcesadas.add({
             'id': dirDoc.id,
             'territorio': territorioResuelto,
-            'barrio':
-                (data['barrio'] as String?)?.toString() ?? '',
+            'barrio': (data['barrio'] as String?)?.toString() ?? '',
             'calle': data['calle'] ?? 'Sin dirección',
           });
         }
@@ -1388,7 +1571,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
       // 3. Cargar Entrada de Nuevas Direcciones (Colección 'sugerencias' / bandeja)
       final nuevasSnap = await _firestore.collection('sugerencias').get();
-      final List<Map<String, dynamic>> nuevasProcesadas = nuevasSnap.docs.map((d) {
+      final List<Map<String, dynamic>> nuevasProcesadas =
+          nuevasSnap.docs.map((d) {
         return {
           'id': d.id,
           ...d.data(),
@@ -1399,8 +1583,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       // Un Territorio NO tiene límite de 8 direcciones: puede tener las tarjetas
       // que sean necesarias. Se muestra "Total: X Direcciones (Y Tarjetas)".
       // La saturación (>8) se calcula a nivel de TARJETA individual.
-      final int saturadas =
-          dirsPorTarjeta.values.where((n) => n > 8).length;
+      final int saturadas = dirsPorTarjeta.values.where((n) => n > 8).length;
 
       final List<Map<String, dynamic>> listaMatriz = [];
       matrizMap.forEach((key, item) {
@@ -1450,11 +1633,11 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         _totalNuevasDirecciones = nuevasProcesadas.length;
         _saturadasCount = saturadas;
         _sugerenciasLista = sugerenciasProcesadas;
-        _sugerenciasSeleccionadas = sugerenciasProcesadas.map((e) => e['id'] as String).toSet();
+        _sugerenciasSeleccionadas =
+            sugerenciasProcesadas.map((e) => e['id'] as String).toSet();
         // Requerimiento 3: contador estricto sobre el universo de tarjetas
         // activas (sin desfasaje por registros sueltos de la raíz).
         _direccionesExistentes = existentes;
-        _direccionesPendientesProgreso = pendientesProgreso;
         _direccionesCompletadas = existentes - pendientesProgreso;
         // Requerimiento 2.2 / 4: visibilidad de calidad de datos.
         _direccionesSinVinculo = sinVinculo;
@@ -1496,11 +1679,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       // segundo set de ids en su formato original: comparar ids sin
       // normalizar contra texto ya pasado a minúsculas nunca podía dar match
       // (bug latente del código anterior).
-      final nombreATerritorioId = await _catalogo.nombreATerritorioId(forzar: true);
+      final nombreATerritorioId =
+          await _catalogo.nombreATerritorioId(forzar: true);
       final tarjetasActivas = await _catalogo.idsActivos();
 
       // 2. Escanear la raíz y clasificar huérfanos.
-      final direccionesSnap = await _firestore.collection('direcciones_globales').get();
+      final direccionesSnap =
+          await _firestore.collection('direcciones_globales').get();
       final huerfanos = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
       for (final doc in direccionesSnap.docs) {
@@ -1510,7 +1695,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           continue; // Vinculación válida por tarjeta.
         }
         final barrio = (data['barrio'] ?? '').toString().trim().toLowerCase();
-        final destino = (data['territorio_destino'] ?? '').toString().trim().toLowerCase();
+        final destino =
+            (data['territorio_destino'] ?? '').toString().trim().toLowerCase();
         final resuelvePorTexto = nombreATerritorioId.containsKey(barrio) ||
             nombreATerritorioId.containsKey(destino);
         if (resuelvePorTexto) continue;
@@ -1524,7 +1710,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       if (huerfanos.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Sin registros huérfanos: todas las direcciones tienen vínculo válido.'),
+            content: Text(
+                'Sin registros huérfanos: todas las direcciones tienen vínculo válido.'),
             backgroundColor: Color(0xFF1B4D2E),
           ),
         );
@@ -1542,11 +1729,14 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             'Esta acción las eliminará permanentemente. ¿Deseas continuar?',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Eliminar', style: TextStyle(color: Colors.white)),
+              child:
+                  const Text('Eliminar', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -1572,10 +1762,12 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
       await _firestore.collection('historial_auditoria').doc().set({
         'accion_tomada': 'limpieza_huerfanos',
-        'detalle': '${huerfanos.length} dirección(es) huérfana(s) eliminada(s) de direcciones_globales.',
+        'detalle':
+            '${huerfanos.length} dirección(es) huérfana(s) eliminada(s) de direcciones_globales.',
         'usuario': (widget.usuarioData?['email'] as String?) ?? 'sistema',
+        'usuario_nombre': (widget.usuarioData?['nombre'] as String?) ?? '',
         'fecha': FieldValue.serverTimestamp(),
-        'icono': Icons.cleaning_services,
+        'icono': _iconoParaFirestore('cleaning_services'),
       });
 
       await _cargarConsolaDinamica();
@@ -1583,7 +1775,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${huerfanos.length} dirección(es) huérfana(s) eliminada(s).'),
+            content: Text(
+                '${huerfanos.length} dirección(es) huérfana(s) eliminada(s).'),
             backgroundColor: const Color(0xFF1B4D2E),
           ),
         );
@@ -1592,7 +1785,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       if (mounted) {
         setState(() => _cargando = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al limpiar huérfanos: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al limpiar huérfanos: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -1608,12 +1803,19 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   String _normalizarTexto(String s) {
     var out = s.trim().toLowerCase();
     const acentos = {
-      'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a',
-      'é': 'e', 'ê': 'e',
+      'á': 'a',
+      'à': 'a',
+      'ã': 'a',
+      'â': 'a',
+      'é': 'e',
+      'ê': 'e',
       'í': 'i',
-      'ó': 'o', 'õ': 'o', 'ô': 'o',
+      'ó': 'o',
+      'õ': 'o',
+      'ô': 'o',
       'ú': 'u',
-      'ç': 'c', 'ñ': 'n',
+      'ç': 'c',
+      'ñ': 'n',
     };
     acentos.forEach((k, v) => out = out.replaceAll(k, v));
     out = out.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
@@ -1644,7 +1846,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     if (match == null) return null;
     final calleBase = match.group(1)!.trim();
     final numero = match.group(2)!;
-    if (calleBase.length < 3) return null; // evita falsos positivos con texto casi vacío
+    if (calleBase.length < 3)
+      return null; // evita falsos positivos con texto casi vacío
     return '$calleBase|$numero';
   }
 
@@ -1653,7 +1856,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   String _extraerComplementoCorto(String textoCrudo, String complementoCampo) {
     if (complementoCampo.trim().isNotEmpty) return complementoCampo.trim();
     final t = _normalizarTexto(textoCrudo);
-    final match = RegExp(r'(casa|apto|apartamento|bloco|torre|lote|kitnet)\s*\d+').firstMatch(t);
+    final match =
+        RegExp(r'(casa|apto|apartamento|bloco|torre|lote|kitnet)\s*\d+')
+            .firstMatch(t);
     return match?.group(0) ?? '';
   }
 
@@ -1675,15 +1880,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     final calle = _normalizarTexto(
         (item['calle'] ?? item['texto_direccion'] ?? '').toString());
     final barrio = _normalizarTexto((item['barrio'] ?? '').toString());
-    if (calle.isNotEmpty &&
-        _firmasTextoExistentes.contains('$calle|$barrio')) {
+    if (calle.isNotEmpty && _firmasTextoExistentes.contains('$calle|$barrio')) {
       return true;
     }
     final lat = item['lat'];
     final lng = item['lng'];
     if (lat is num && lng is num) {
-      final clave =
-          '${lat.toStringAsFixed(4)},${lng.toStringAsFixed(4)}';
+      final clave = '${lat.toStringAsFixed(4)},${lng.toStringAsFixed(4)}';
       if (_coordsExistentes.contains(clave)) return true;
     }
     return false;
@@ -1693,7 +1896,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   /// El mensaje de confirmación se adapta si además se detectó como
   /// probable duplicado de una dirección ya existente.
   Future<void> _eliminarSugerencia(Map<String, dynamic> item) async {
-    final calle = (item['calle'] ?? item['texto_direccion'] ?? 'esta dirección').toString();
+    final calle = (item['calle'] ?? item['texto_direccion'] ?? 'esta dirección')
+        .toString();
     final esDuplicado = _esPosibleDuplicado(item);
     final confirmar = await showDialog<bool>(
       context: context,
@@ -1704,11 +1908,14 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                 '¿Eliminar esta entrada duplicada de la bandeja?'
             : '¿Eliminar "$calle" de la bandeja de nuevas direcciones?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Eliminar', style: TextStyle(color: Colors.white)),
+            child:
+                const Text('Eliminar', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -1726,20 +1933,43 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo eliminar: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('No se pudo eliminar: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
+  }
+
+  /// ¿La tarjeta [tarjetaId] pertenece a un conjunto COMERCIAL/ESPECIAL?
+  /// Se considera así cuando la tarjeta es de tipo 'zona' (ZONA-1, ZONA-2, ...)
+  /// o cuando cuelga de un territorio 'comercial' (COMERCIAL) o 'base'
+  /// (FARMACIAS, MERCADOS, TALLERES), que son agrupadores de direcciones
+  /// comerciales. Se usa para no sugerir estas zonas a una dirección que NO fue
+  /// marcada como comercial por el usuario.
+  bool _tarjetaEsComercial(
+      String tarjetaId, Map<String, Map<String, dynamic>> tarjetaMeta) {
+    final meta = tarjetaMeta[tarjetaId];
+    if (meta == null) return false;
+    final tipoTerr = meta['territorio_tipo'];
+    return meta['tipo'] == 'zona' ||
+        tipoTerr == 'comercial' ||
+        tipoTerr == 'base';
   }
 
   /// Busca, entre los puntos de referencia con coordenadas + tarjeta activa
   /// (`_puntosReferencia`, recolectados en `_cargarConsolaDinamica`), el más
   /// cercano a [lat]/[lng]. Esta es la base por CERCANÍA que exige el flujo
   /// de asignación manual.
-  Map<String, dynamic>? _buscarPuntoMasCercano(double lat, double lng) {
+  ///
+  /// Con [incluirComercial] en false, se ignoran las zonas comerciales: así una
+  /// sugerencia normal no cae en un territorio comercial (p. ej. ZONA 2).
+  Map<String, dynamic>? _buscarPuntoMasCercano(double lat, double lng,
+      {bool incluirComercial = true}) {
     Map<String, dynamic>? mejor;
     double mejorDist = double.infinity;
     for (final p in _puntosReferencia) {
+      if (!incluirComercial && p['es_comercial'] == true) continue;
       final d = _distanciaKm(lat, lng, p['lat'] as double, p['lng'] as double);
       if (d < mejorDist) {
         mejorDist = d;
@@ -1747,242 +1977,6 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       }
     }
     return mejor;
-  }
-
-  /// Igual que `_buscarPuntoMasCercano`, pero devuelve hasta 2 candidatos de
-  /// TARJETAS DISTINTAS (no solo el punto más cercano en general), ordenados
-  /// por distancia. Sirve para ofrecer una alternativa real —de otra
-  /// tarjeta— cuando el auditor no está de acuerdo con la principal. El
-  /// primer elemento siempre coincide con `_buscarPuntoMasCercano`.
-  List<Map<String, dynamic>> _buscarDosTarjetasMasCercanas(double lat, double lng) {
-    final mejorPorTarjeta = <String, Map<String, dynamic>>{};
-    for (final p in _puntosReferencia) {
-      final d = _distanciaKm(lat, lng, p['lat'] as double, p['lng'] as double);
-      final tid = p['tarjeta_id'] as String;
-      final actual = mejorPorTarjeta[tid];
-      if (actual == null || d < (actual['distancia_km'] as double)) {
-        mejorPorTarjeta[tid] = {...p, 'distancia_km': d};
-      }
-    }
-    final ordenados = mejorPorTarjeta.values.toList()
-      ..sort((a, b) =>
-          (a['distancia_km'] as double).compareTo(b['distancia_km'] as double));
-    return ordenados.take(2).toList();
-  }
-
-  /// Direcciones ya existentes (con coordenadas) de una tarjeta, para
-  /// mostrarlas en el diagrama de sugerencia junto con su distancia a la
-  /// dirección nueva. Se toman de `_puntosReferencia` (ya filtrado a
-  /// tarjetas activas con lat/lng reales).
-  List<Map<String, dynamic>> _direccionesDeTarjeta(String tarjetaId) {
-    return _puntosReferencia.where((p) => p['tarjeta_id'] == tarjetaId).toList();
-  }
-
-  /// Formatea una distancia en km como metros (< 1 km) o km con un decimal.
-  String _formatDistancia(double km) {
-    if (km < 1) return '${(km * 1000).round()} m';
-    return '${km.toStringAsFixed(1)} km';
-  }
-
-  /// Construye el nodo visual "carpeta (territorio) → tarjeta" en estilo
-  /// diagrama/flowchart: la tarjeta muestra sus direcciones existentes (con
-  /// la distancia aproximada a la dirección nueva) y la dirección nueva
-  /// resaltada. [destacado] controla si se pinta como la opción activa
-  /// (verde, con glow) o como alternativa atenuada (gris).
-  Widget _nodoSugerencia({
-    required String territorioNombre,
-    required String tarjetaNombre,
-    required List<Map<String, dynamic>> direccionesExistentes,
-    required String nuevaDireccionTexto,
-    required String nuevaComplemento,
-    required double? nuevaLat,
-    required double? nuevaLng,
-    required int cupoActual,
-    required bool destacado,
-  }) {
-    final colorBase = destacado ? const Color(0xFF1B4D2E) : Colors.grey.shade500;
-    final colorFondo =
-        destacado ? const Color(0xFF1B4D2E).withOpacity(0.06) : Colors.grey.shade50;
-    final lleno = cupoActual >= 8;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // --- Nodo "carpeta" = territorio ---
-        Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: destacado
-                    ? [const Color(0xFF1B4D2E), const Color(0xFF2E7D52)]
-                    : [Colors.grey.shade400, Colors.grey.shade500],
-              ),
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: destacado
-                  ? [
-                      BoxShadow(
-                          color: const Color(0xFF1B4D2E).withOpacity(0.35),
-                          blurRadius: 10,
-                          spreadRadius: 1),
-                    ]
-                  : [],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.folder_open, color: Colors.white, size: 15),
-                const SizedBox(width: 6),
-                Text(
-                  territorioNombre,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11.5,
-                      letterSpacing: 0.3),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // --- Conector ---
-        Center(
-          child: Column(
-            children: [
-              Container(width: 2, height: 9, color: colorBase.withOpacity(0.5)),
-              Icon(Icons.arrow_drop_down, color: colorBase.withOpacity(0.7), size: 18),
-            ],
-          ),
-        ),
-        // --- Nodo "tarjeta" ---
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: colorFondo,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: colorBase, width: destacado ? 1.4 : 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.badge, size: 14, color: colorBase),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      tarjetaNombre,
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12.5,
-                          color: destacado ? const Color(0xFF1B4D2E) : Colors.grey.shade700),
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: lleno ? Colors.red.shade100 : colorBase.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      '$cupoActual/8',
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: lleno ? Colors.red.shade800 : colorBase),
-                    ),
-                  ),
-                ],
-              ),
-              if (direccionesExistentes.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text('YA EN ESTA TARJETA',
-                    style: TextStyle(
-                        fontSize: 9,
-                        color: Colors.grey[500],
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.5)),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 5,
-                  runSpacing: 5,
-                  children: direccionesExistentes.take(4).map((d) {
-                    String? dist;
-                    final dLat = d['lat'];
-                    final dLng = d['lng'];
-                    if (nuevaLat != null &&
-                        nuevaLng != null &&
-                        dLat is double &&
-                        dLng is double) {
-                      dist = _formatDistancia(
-                          _distanciaKm(nuevaLat, nuevaLng, dLat, dLng));
-                    }
-                    final etiqueta =
-                        (d['calle'] as String? ?? '?').split(',').first.trim();
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: Text(
-                        dist != null ? '$etiqueta · $dist' : etiqueta,
-                        style: TextStyle(fontSize: 10, color: Colors.grey[700]),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                if (direccionesExistentes.length > 4)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 3),
-                    child: Text('+${direccionesExistentes.length - 4} más',
-                        style: TextStyle(fontSize: 9, color: Colors.grey[500])),
-                  ),
-                const SizedBox(height: 8),
-              ],
-              // --- Dirección nueva, resaltada ---
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: destacado ? Colors.amber.shade50 : Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: destacado ? Colors.amber.shade700 : Colors.grey.shade400,
-                      width: 1.3),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.push_pin,
-                        size: 14, color: destacado ? Colors.amber.shade800 : Colors.grey.shade600),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(nuevaDireccionTexto,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 11.5)),
-                          if (nuevaComplemento.isNotEmpty)
-                            Text(nuevaComplemento,
-                                style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Text('NUEVA',
-                        style: TextStyle(
-                            fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
   }
 
   /// Abre el flujo de asignación MANUAL para una sugerencia de la bandeja.
@@ -2003,11 +1997,28 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   /// En todos los casos se le pide a Groq una explicación en lenguaje
   /// natural adicional (best-effort) para reforzar el motivo mostrado.
   Future<void> _abrirAsignacionManual(Map<String, dynamic> item) async {
-    final calle = (item['calle'] ?? item['texto_direccion'] ?? 'Sin calle').toString();
+    // 'calle' es el texto normalizado FINAL (Title Case + barrio + CEP) que
+    // deja "Normalizar bandeja"; se prioriza para que el diálogo muestre la
+    // dirección tal como va a quedar. Se cae a 'direccionNormalizada' o al
+    // texto crudo solo si la sugerencia todavía no pasó por el backfill (en
+    // ese caso el geocoding al vuelo de más abajo la completa).
+    var calle = (item['calle'] ??
+            item['direccionNormalizada'] ??
+            item['texto_direccion'] ??
+            'Sin calle')
+        .toString();
+    // Sincronizar item['calle']: _confirmarAsignacionManual lee item['calle']
+    // directamente, no esta variable local, así que sin esto la tarjeta podía
+    // mostrar el texto normalizado pero guardarse otro.
+    item['calle'] = calle;
     final barrio = (item['barrio'] ?? '').toString();
-    final lat = item['lat'];
-    final lng = item['lng'];
-    final tieneCoords = lat is num && lng is num;
+    dynamic lat = item['lat'];
+    dynamic lng = item['lng'];
+    bool tieneCoords = lat is num && lng is num;
+
+    // ¿El usuario marcó esta dirección como comercial? Solo en ese caso se
+    // permite sugerir un territorio/zona comercial (p. ej. "ZONA 2").
+    final bool esComercialSugerencia = item['es_comercial'] == true;
 
     showDialog(
       context: context,
@@ -2029,77 +2040,108 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     final claveVia = _extraerClaveVia(calle);
     if (claveVia != null && _direccionesPorVia.containsKey(claveVia)) {
       hermanas = _direccionesPorVia[claveVia]!;
+      // Si la dirección NO es comercial, se descartan las hermanas que ya viven
+      // en una zona comercial: la misma vía no debe arrastrar una dirección
+      // normal hacia un territorio comercial.
+      if (!esComercialSugerencia) {
+        hermanas =
+            hermanas.where((h) => h['es_comercial'] != true).toList();
+      }
       // Si por algún motivo hay hermanas en más de una tarjeta (dato
       // legado inconsistente), se toma la tarjeta con más coincidencias.
-      final conteoPorTarjeta = <String, int>{};
-      for (final h in hermanas) {
-        final tid = h['tarjeta_id'] as String;
-        conteoPorTarjeta[tid] = (conteoPorTarjeta[tid] ?? 0) + 1;
+      if (hermanas.isNotEmpty) {
+        final conteoPorTarjeta = <String, int>{};
+        for (final h in hermanas) {
+          final tid = h['tarjeta_id'] as String;
+          conteoPorTarjeta[tid] = (conteoPorTarjeta[tid] ?? 0) + 1;
+        }
+        final tidGanadora = conteoPorTarjeta.entries
+            .reduce((a, b) => a.value >= b.value ? a : b)
+            .key;
+        porVia = hermanas.firstWhere((h) => h['tarjeta_id'] == tidGanadora);
       }
-      final tidGanadora =
-          conteoPorTarjeta.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
-      porVia = hermanas.firstWhere((h) => h['tarjeta_id'] == tidGanadora);
     }
 
-    // --- NIVEL 2: cercanía geográfica. Se calcula SIEMPRE que haya
-    // coordenadas (no solo cuando el Nivel 1 no encontró nada), porque
-    // también sirve como candidata a ALTERNATIVA cuando el Nivel 1 sí
-    // encontró algo pero el auditor prefiere ver otra opción cercana.
-    final List<Map<String, dynamic>> dosMasCercanas =
-        tieneCoords ? _buscarDosTarjetasMasCercanas((lat as num).toDouble(), (lng as num).toDouble()) : const [];
-    final Map<String, dynamic>? cercano = dosMasCercanas.isNotEmpty ? dosMasCercanas.first : null;
-
-    // Candidato ganador para esta sugerencia (Nivel 1 tiene prioridad).
-    final Map<String, dynamic>? ganador = porVia ?? cercano;
-    final bool porMultiCasa = porVia != null;
-
-    // Candidato ALTERNATIVO: la tarjeta cercana más próxima que NO sea la
-    // misma que el ganador (así siempre es una opción realmente distinta).
-    Map<String, dynamic>? alternativa;
-    if (ganador != null) {
-      for (final c in dosMasCercanas) {
-        if (c['tarjeta_id'] != ganador['tarjeta_id']) {
-          alternativa = c;
-          break;
+    // --- NIVEL 1.5: normalizar/geocodificar la sugerencia AL VUELO si el
+    // TEXTO todavía no pasó por Groq. OJO: la señal es 'direccionNormalizada'
+    // vacío, NO 'sin coordenadas' — una dirección puede tener lat/lng de
+    // otro camino (ej. la validación de Mapbox del auto-asignador) sin
+    // nunca haber pasado por Groq para limpiar el texto; si solo mirábamos
+    // coordenadas, esa dirección quedaba atascada con texto crudo para
+    // siempre porque este bloque (y el backfill masivo) la daban por lista.
+    // Usa el MISMO punto de entrada compartido que el resto de los caminos
+    // de ingreso (admin, WhatsApp, auto-asignación), para que la
+    // normalización sea consistente en toda la app.
+    final necesitaNormalizarTexto =
+        (item['direccionNormalizada'] ?? '').toString().isEmpty;
+    if (porVia == null && necesitaNormalizarTexto) {
+      final resultado =
+          await GeocodingBackfillService.normalizarYGeocodificarUna({
+        'calle': calle,
+        'numero': item['numero'] ?? '',
+        'complemento': item['complemento'] ?? '',
+        'barrio': barrio,
+      });
+      if (resultado != null) {
+        final direccionNormalizada = resultado['calle'] as String;
+        calle = direccionNormalizada;
+        item['calle'] = direccionNormalizada;
+        item['direccionNormalizada'] = direccionNormalizada;
+        if (resultado['lat'] != null && resultado['lng'] != null) {
+          lat = resultado['lat'];
+          lng = resultado['lng'];
+          tieneCoords = true;
+        }
+        if (item['id'] != null) {
+          await _firestore.collection('sugerencias').doc(item['id']).update({
+            if (lat != null) 'lat': lat,
+            if (lng != null) 'lng': lng,
+            if ((resultado['cep'] ?? '').toString().isNotEmpty)
+              'cep': resultado['cep'],
+            'calle': direccionNormalizada,
+            'direccionNormalizada': direccionNormalizada,
+            'geocodingSource': 'groq+mapbox (al vuelo)',
+          });
         }
       }
+      // Si resultado es null (sin conexión, error de API), se sigue con el
+      // flujo normal: el Nivel 3 con Groq queda como fallback de todas formas.
     }
 
-    // Nombres legibles del territorio/tarjeta ganadores y de la alternativa.
-    String? territorioNombre;
-    String? tarjetaNombre;
-    String? territorioNombreAlt;
-    String? tarjetaNombreAlt;
-    int cupoGanador = 0;
-    int cupoAlternativa = 0;
-    final tMeta = await _catalogo.tarjetaMeta();
-    if (ganador != null) {
-      final tNombres = await _catalogo.territorioNombre();
-      tarjetaNombre = tMeta[ganador['tarjeta_id']]?['nombre']?.toString();
-      territorioNombre = tNombres[ganador['territorio_id']];
-      cupoGanador = (tMeta[ganador['tarjeta_id']]?['totalDirecciones'] as int?) ?? 0;
-    }
-    if (alternativa != null) {
-      final tNombres = await _catalogo.territorioNombre();
-      tarjetaNombreAlt = tMeta[alternativa['tarjeta_id']]?['nombre']?.toString();
-      territorioNombreAlt = tNombres[alternativa['territorio_id']];
-      cupoAlternativa = (tMeta[alternativa['tarjeta_id']]?['totalDirecciones'] as int?) ?? 0;
+    // --- NIVEL 2: cercanía geográfica (solo si el Nivel 1 no encontró nada) ---
+    Map<String, dynamic>? cercano;
+    if (porVia == null && tieneCoords) {
+      cercano = _buscarPuntoMasCercano(
+          (lat as num).toDouble(), (lng as num).toDouble(),
+          incluirComercial: esComercialSugerencia);
     }
 
-    // Direcciones ya existentes de cada tarjeta candidata, para el diagrama.
-    final direccionesGanador =
-        ganador != null ? _direccionesDeTarjeta(ganador['tarjeta_id'] as String) : const <Map<String, dynamic>>[];
-    final direccionesAlternativa = alternativa != null
-        ? _direccionesDeTarjeta(alternativa['tarjeta_id'] as String)
-        : const <Map<String, dynamic>>[];
+    // Candidato ganador para esta sugerencia (Nivel 1 tiene prioridad).
+    // Mutable: si Niveles 1 y 2 no encuentran nada, el Nivel 3 (Groq) puede
+    // asignarlo más abajo para que la decisión también tenga su tarjeta
+    // visual, no solo el párrafo de explicación.
+    Map<String, dynamic>? ganador = porVia ?? cercano;
+    final bool porMultiCasa = porVia != null;
+    bool porIA = false;
 
-    // --- NIVEL 3 / refuerzo: explicación enriquecida con IA (Groq). ------
-    // Best-effort: si falla o no hay conexión, se usa solo la explicación
-    // local (que ya es sólida en los Niveles 1 y 2).
+    // --- NIVEL 3: si 1 y 2 no encontraron nada, se le pide a Groq una
+    // decisión basada en el texto (barrio/calle) contra las tarjetas
+    // existentes. Si Groq devuelve una tarjeta válida, esa pasa a ser el
+    // "ganador" (con su propia tarjeta futurista), no solo texto suelto.
     String explicacionIA = '';
     if (ganador == null) {
       try {
-        final tarjetas = await _catalogo.tarjetasComoLista();
+        var tarjetas = await _catalogo.tarjetasComoLista();
+        // Igual que en los niveles 1 y 2: si la dirección no es comercial, no
+        // se le ofrecen zonas comerciales a la IA para que no las elija.
+        if (!esComercialSugerencia) {
+          tarjetas = tarjetas
+              .where((t) =>
+                  t['tipo'] != 'zona' &&
+                  t['territorio_tipo'] != 'comercial' &&
+                  t['territorio_tipo'] != 'base')
+              .toList();
+        }
         final decision = await GroqTerritoryService.decidirTarjetaParaDireccion(
           direccion: {
             'calle': calle,
@@ -2111,8 +2153,129 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           tarjetasExistentes: tarjetas,
         );
         explicacionIA = (decision['explicacion'] ?? '').toString();
+        final tidIA = decision['tarjeta_id_destino']?.toString() ?? '';
+        if (tidIA.isNotEmpty) {
+          final tMeta = await _catalogo.tarjetaMeta();
+          final metaIA = tMeta[tidIA];
+          // Defensa extra: aunque se filtró la lista, Groq podría devolver una
+          // zona comercial; se descarta si la dirección no es comercial.
+          final metaIAEsComercial = metaIA != null &&
+              (metaIA['tipo'] == 'zona' ||
+                  metaIA['territorio_tipo'] == 'comercial' ||
+                  metaIA['territorio_tipo'] == 'base');
+          if (metaIA != null &&
+              (esComercialSugerencia || !metaIAEsComercial)) {
+            ganador = {
+              'tarjeta_id': tidIA,
+              'territorio_id': metaIA['territorio_id']?.toString() ?? '',
+            };
+            porIA = true;
+          }
+        }
       } catch (_) {
         // Sin IA disponible: se deja solo la explicación local.
+      }
+    }
+
+    // Nombres legibles del territorio/tarjeta ganadores (ya sea por
+    // cercanía/vía o por la decisión de Groq).
+    String? territorioNombre;
+    String? tarjetaNombre;
+    int? capacidadUsada;
+    if (ganador != null) {
+      final tMeta = await _catalogo.tarjetaMeta();
+      final tNombres = await _catalogo.territorioNombre();
+      tarjetaNombre = tMeta[ganador['tarjeta_id']]?['nombre']?.toString();
+      territorioNombre = tNombres[ganador['territorio_id']];
+      capacidadUsada =
+          (tMeta[ganador['tarjeta_id']]?['totalDirecciones'] as int?) ?? 0;
+    }
+
+    // --- Datos para la tarjeta futurista de sugerencia --------------------
+    // "Carpeta" del territorio ganador: qué direcciones ya tiene la tarjeta
+    // y a qué distancia queda cada una de la dirección nueva.
+    List<Map<String, dynamic>> direccionesTarjetaGanadora = [];
+    // Alternativa cercana (segunda mejor tarjeta), colapsada por defecto.
+    Map<String, dynamic>? alternativa;
+
+    if (ganador != null) {
+      if (porMultiCasa) {
+        direccionesTarjetaGanadora = hermanas
+            .map((h) => {
+                  'calle': h['calle'],
+                  'barrio': h['barrio'],
+                  'complemento': h['complemento'],
+                  'distanciaKm': null,
+                })
+            .toList();
+      } else if (tieneCoords) {
+        final nuevaLat = (lat as num).toDouble();
+        final nuevaLng = (lng as num).toDouble();
+        direccionesTarjetaGanadora = _puntosReferencia
+            .where((p) => p['tarjeta_id'] == ganador!['tarjeta_id'])
+            .map((p) => {
+                  'calle': p['calle'],
+                  'barrio': p['barrio'],
+                  'complemento': '',
+                  'distanciaKm': _distanciaKm(nuevaLat, nuevaLng,
+                      p['lat'] as double, p['lng'] as double),
+                })
+            .toList()
+          ..sort((a, b) => (a['distanciaKm'] as double)
+              .compareTo(b['distanciaKm'] as double));
+      } else if (porIA) {
+        // Sin coordenadas propias: se listan las direcciones que ya tiene
+        // la tarjeta elegida por Groq, pero sin badge de distancia (no hay
+        // forma de calcularla sin lat/lng de la dirección nueva).
+        direccionesTarjetaGanadora = _puntosReferencia
+            .where((p) => p['tarjeta_id'] == ganador!['tarjeta_id'])
+            .map((p) => {
+                  'calle': p['calle'],
+                  'barrio': p['barrio'],
+                  'complemento': '',
+                  'distanciaKm': null,
+                })
+            .toList();
+      }
+
+      // La alternativa solo tiene sentido con coordenadas reales y cuando el
+      // ganador vino por cercanía (con multi-casa, la tarjeta es casi segura
+      // y no aporta ofrecer una "segunda opción"; con la decisión de Groq
+      // tampoco hay un ranking numérico de segundas opciones).
+      if (tieneCoords && !porMultiCasa && !porIA) {
+        final nuevaLat = (lat as num).toDouble();
+        final nuevaLng = (lng as num).toDouble();
+        final Map<String, double> distanciaMinPorTarjeta = {};
+        final Map<String, List<Map<String, dynamic>>> puntosPorTarjeta = {};
+        for (final p in _puntosReferencia) {
+          final tid = p['tarjeta_id'] as String;
+          if (tid == ganador['tarjeta_id']) continue;
+          final d = _distanciaKm(
+              nuevaLat, nuevaLng, p['lat'] as double, p['lng'] as double);
+          if (!distanciaMinPorTarjeta.containsKey(tid) ||
+              d < distanciaMinPorTarjeta[tid]!) {
+            distanciaMinPorTarjeta[tid] = d;
+          }
+          (puntosPorTarjeta[tid] ??= []).add({...p, 'distanciaKm': d});
+        }
+        if (distanciaMinPorTarjeta.isNotEmpty) {
+          final tidAlt = distanciaMinPorTarjeta.entries
+              .reduce((a, b) => a.value <= b.value ? a : b)
+              .key;
+          final tMeta = await _catalogo.tarjetaMeta();
+          final direccionesAlt = (puntosPorTarjeta[tidAlt] ?? [])
+            ..sort((a, b) => (a['distanciaKm'] as double)
+                .compareTo(b['distanciaKm'] as double));
+          alternativa = {
+            'tarjeta_id': tidAlt,
+            'territorio_id': tMeta[tidAlt]?['territorio_id']?.toString() ?? '',
+            'tarjetaNombre': tMeta[tidAlt]?['nombre']?.toString() ?? tidAlt,
+            'territorioNombre':
+                tMeta[tidAlt]?['territorio_nombre']?.toString() ?? '',
+            'distanciaKm': distanciaMinPorTarjeta[tidAlt],
+            'direcciones': direccionesAlt,
+          };
+        }
       }
     }
 
@@ -2137,7 +2300,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           'que debe ir en esa misma tarjeta sin importar la distancia exacta '
           'que reporte el mapa.';
     } else if (cercano != null) {
-      explicacionLocal = 'Es la mejor opción local: la dirección registrada más cercana '
+      explicacionLocal =
+          'Es la mejor opción local: la dirección registrada más cercana '
           '("${cercano['calle']}"${(cercano['barrio'] as String).isNotEmpty ? ', ${cercano['barrio']}' : ''}) '
           'está a ${(cercano['distancia_km'] as double).toStringAsFixed(2)} km, '
           'dentro de la tarjeta "$tarjetaNombre" del territorio "$territorioNombre". '
@@ -2153,167 +2317,529 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           'confianza. Elige el territorio/tarjeta manualmente abajo.';
     }
 
-    // Estado local del diálogo: si el auditor tocó "Usar esta alternativa",
-    // se destaca ella en vez del ganador original, y "Asignar aquí" apunta
-    // a la que esté activa en ese momento.
-    bool usarAlternativa = false;
-    bool verAlternativa = false;
-
     await showDialog<void>(
       context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
-        final Map<String, dynamic>? activo = usarAlternativa ? alternativa : ganador;
-        final String? territorioActivo = usarAlternativa ? territorioNombreAlt : territorioNombre;
-        final String? tarjetaActiva = usarAlternativa ? tarjetaNombreAlt : tarjetaNombre;
+      builder: (ctx) {
+        // Vive en el scope del builder externo (no del de StatefulBuilder)
+        // para que sobreviva entre llamadas a setDialogState.
+        bool altExpandida = false;
 
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(porMultiCasa ? 'Misma dirección detectada' : 'Asignación manual'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(
+                  porMultiCasa ? Icons.home_work : Icons.travel_explore,
+                  color: const Color(0xFF1B4D2E),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    porMultiCasa
+                        ? 'Misma dirección detectada'
+                        : 'Asignación manual',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(calle, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text(calle,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                   if (barrio.isNotEmpty)
-                    Text(barrio, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
-                  const SizedBox(height: 14),
-
-                  // --- Diagrama de la opción activa (principal o alternativa) ---
-                  if (ganador != null)
-                    _nodoSugerencia(
-                      territorioNombre: territorioActivo ?? activo!['territorio_id'] as String,
-                      tarjetaNombre: tarjetaActiva ?? activo!['tarjeta_id'] as String,
-                      direccionesExistentes: usarAlternativa ? direccionesAlternativa : direccionesGanador,
-                      nuevaDireccionTexto: calle,
-                      nuevaComplemento: (item['complemento'] ?? '').toString(),
-                      nuevaLat: tieneCoords ? (lat as num).toDouble() : null,
-                      nuevaLng: tieneCoords ? (lng as num).toDouble() : null,
-                      cupoActual: usarAlternativa ? cupoAlternativa : cupoGanador,
-                      destacado: true,
+                    Text(barrio,
+                        style:
+                            TextStyle(color: Colors.grey[700], fontSize: 12)),
+                  const Divider(height: 20),
+                  if (ganador != null) ...[
+                    _tarjetaFuturistaTerritorio(
+                      territorioNombre: territorioNombre ??
+                          ganador['territorio_id'].toString(),
+                      tarjetaNombre:
+                          tarjetaNombre ?? ganador['tarjeta_id'].toString(),
+                      direcciones: direccionesTarjetaGanadora,
+                      direccionNueva: calle,
+                      barrioNueva: barrio,
+                      complementoNueva: (item['complemento'] ?? '').toString(),
+                      capacidadUsada: capacidadUsada,
+                      porIA: porIA,
                     ),
-
-                  if (porMultiCasa && !usarAlternativa) ...[
-                    const SizedBox(height: 6),
-                    Row(children: [
-                      const Icon(Icons.home_work, size: 14, color: Color(0xFF1B4D2E)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text('${hermanas.length} dirección(es) más en el mismo predio',
-                            style: const TextStyle(fontSize: 11)),
+                    if (alternativa != null) ...[
+                      const SizedBox(height: 10),
+                      _bloqueAlternativaColapsable(
+                        alternativa: alternativa,
+                        direccionNueva: calle,
+                        barrioNueva: barrio,
+                        expandida: altExpandida,
+                        onToggle: () =>
+                            setDialogState(() => altExpandida = !altExpandida),
                       ),
-                    ]),
+                    ],
+                    const SizedBox(height: 14),
                   ],
-
-                  const SizedBox(height: 12),
                   const Text('¿Por qué es mejor local?',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   const SizedBox(height: 4),
                   Text(explicacionLocal, style: const TextStyle(fontSize: 12)),
                   if (explicacionIA.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text('IA (Groq): $explicacionIA',
                         style: TextStyle(
-                            fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey[700])),
-                  ],
-
-                  // --- Alternativa colapsable ---
-                  if (alternativa != null) ...[
-                    const SizedBox(height: 14),
-                    const Divider(height: 1),
-                    const SizedBox(height: 8),
-                    InkWell(
-                      onTap: () => setLocal(() => verAlternativa = !verAlternativa),
-                      child: Row(
-                        children: [
-                          Icon(verAlternativa ? Icons.expand_less : Icons.expand_more,
-                              size: 18, color: Colors.grey[700]),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              verAlternativa
-                                  ? 'Ocultar alternativa'
-                                  : 'Ver alternativa: ${tarjetaNombreAlt ?? alternativa['tarjeta_id']} (${_formatDistancia(alternativa['distancia_km'] as double)})',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[700],
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (verAlternativa) ...[
-                      const SizedBox(height: 8),
-                      _nodoSugerencia(
-                        territorioNombre: territorioNombreAlt ?? alternativa['territorio_id'] as String,
-                        tarjetaNombre: tarjetaNombreAlt ?? alternativa['tarjeta_id'] as String,
-                        direccionesExistentes: direccionesAlternativa,
-                        nuevaDireccionTexto: calle,
-                        nuevaComplemento: (item['complemento'] ?? '').toString(),
-                        nuevaLat: tieneCoords ? (lat as num).toDouble() : null,
-                        nuevaLng: tieneCoords ? (lng as num).toDouble() : null,
-                        cupoActual: cupoAlternativa,
-                        destacado: false,
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          onPressed: () => setLocal(() => usarAlternativa = !usarAlternativa),
-                          icon: Icon(usarAlternativa ? Icons.check_circle : Icons.swap_horiz, size: 16),
-                          label: Text(usarAlternativa
-                              ? 'Usando la alternativa'
-                              : 'Usar esta alternativa'),
-                        ),
-                      ),
-                    ],
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: Colors.grey[700])),
                   ],
                 ],
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                await _abrirSelectorManualTerritorioTarjeta(item);
-              },
-              child: const Text('Elegir otro territorio/tarjeta'),
-            ),
-            if (activo != null)
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B4D2E)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
                 onPressed: () async {
                   Navigator.pop(ctx);
-                  await _confirmarAsignacionManual(
-                    item: item,
-                    tarjetaId: activo['tarjeta_id'] as String,
-                    territorioId: activo['territorio_id'] as String,
-                  );
+                  await _abrirSelectorManualTerritorioTarjeta(item);
                 },
-                child: const Text('Asignar aquí', style: TextStyle(color: Colors.white)),
+                child: const Text('Elegir otro territorio/tarjeta'),
               ),
-          ],
+              if (ganador != null)
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B4D2E)),
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await _confirmarAsignacionManual(
+                      item: item,
+                      tarjetaId: ganador!['tarjeta_id'] as String,
+                      territorioId: ganador['territorio_id'] as String,
+                    );
+                  },
+                  child: const Text('Asignar aquí',
+                      style: TextStyle(color: Colors.white)),
+                ),
+            ],
+          ),
         );
-      }),
+      },
+    );
+  }
+
+  /// Tarjeta estilo "carpeta futurista" para un territorio/tarjeta sugerido:
+  /// nombre del territorio en la pestaña superior, direcciones ya existentes
+  /// en la tarjeta como nodos tenues, y la dirección nueva resaltada con
+  /// glow mostrando la distancia aproximada a las direcciones existentes.
+  /// Convierte km a un texto legible: metros si es menos de 1km, si no km.
+  String _formatearDistancia(double km) {
+    if (km < 1) return '${(km * 1000).round()} m';
+    return '${km.toStringAsFixed(2)} km';
+  }
+
+  Widget _tarjetaFuturistaTerritorio({
+    required String territorioNombre,
+    required String tarjetaNombre,
+    required List<Map<String, dynamic>> direcciones,
+    required String direccionNueva,
+    required String barrioNueva,
+    String? complementoNueva,
+    int? capacidadUsada,
+    int capacidadMax = 8,
+    bool esGanadora = true,
+    bool porIA = false,
+  }) {
+    final Color acento =
+        esGanadora ? const Color(0xFF00C853) : const Color(0xFF7C4DFF);
+    final Color acentoSuave =
+        esGanadora ? const Color(0xFFE8FBEF) : const Color(0xFFF2ECFF);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        if (esGanadora)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              porIA
+                  ? '◆ SUGERENCIA INTELIGENTE (GROQ)'
+                  : '◆ SUGERENCIA POR CERCANÍA',
+              style: TextStyle(
+                color: acento,
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.4,
+              ),
+            ),
+          ),
+        // Pastilla "carpeta" del territorio, con glow.
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [acento, acento.withOpacity(0.75)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: [
+              BoxShadow(
+                  color: acento.withOpacity(0.5),
+                  blurRadius: 14,
+                  spreadRadius: 0.5),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.folder_rounded, size: 14, color: Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                territorioNombre,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        // Conector: línea + flecha, con el mismo acento (efecto "circuito").
+        Container(width: 1.6, height: 10, color: acento.withOpacity(0.5)),
+        Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: acento),
+        // Tarjeta principal: clara, con borde-degradé simulado + sombra glow
+        // (relieve real, no plano) + sombra ambiente para dar profundidad.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(1.4), // grosor del "borde degradé"
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [acento, acento.withOpacity(0.25)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                  color: acento.withOpacity(0.30),
+                  blurRadius: 18,
+                  spreadRadius: 1),
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 6,
+                  offset: const Offset(0, 3)),
+            ],
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.white, acentoSuave],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.bookmark_rounded, size: 15, color: acento),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(tarjetaNombre,
+                          style: const TextStyle(
+                              color: Color(0xFF1B1F2A),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    if (capacidadUsada != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: capacidadUsada >= capacidadMax
+                              ? Colors.red.shade50
+                              : acentoSuave,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: capacidadUsada >= capacidadMax
+                                  ? Colors.red.shade300
+                                  : acento.withOpacity(0.4)),
+                        ),
+                        child: Text(
+                          '$capacidadUsada/$capacidadMax',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: capacidadUsada >= capacidadMax
+                                  ? Colors.red.shade700
+                                  : acento),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (direcciones.isNotEmpty) ...[
+                  Text('YA EN ESTA TARJETA',
+                      style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.8)),
+                  const SizedBox(height: 6),
+                  ...direcciones.take(4).map((d) => Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.location_on_outlined,
+                                size: 13, color: Colors.grey.shade500),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                [d['calle'], d['complemento']]
+                                    .where(
+                                        (s) => (s ?? '').toString().isNotEmpty)
+                                    .join(' · '),
+                                style: TextStyle(
+                                    color: Colors.grey.shade800,
+                                    fontSize: 11.5),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (d['distanciaKm'] != null)
+                              Text(
+                                '· ${_formatearDistancia(d['distanciaKm'] as double)}',
+                                style: TextStyle(
+                                    color: Colors.grey.shade500,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                          ],
+                        ),
+                      )),
+                  if (direcciones.length > 4)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                          '+ ${direcciones.length - 4} dirección(es) más en esta tarjeta',
+                          style: TextStyle(
+                              color: Colors.grey.shade500,
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic)),
+                    ),
+                ] else
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'Tarjeta vacía todavía: esta sería la primera dirección.',
+                      style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 10.5,
+                          fontStyle: FontStyle.italic),
+                    ),
+                  ),
+                // Bloque resaltado: la dirección nueva, "flotando" sobre el resto.
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFFFE9B8), Color(0xFFFFD98A)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: const Color(0xFFE8A93B)),
+                    boxShadow: [
+                      BoxShadow(
+                          color: const Color(0xFFE8A93B).withOpacity(0.35),
+                          blurRadius: 10,
+                          spreadRadius: 0.5),
+                    ],
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.location_on,
+                          size: 17, color: Color(0xFF8A5A00)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(direccionNueva,
+                                style: const TextStyle(
+                                    color: Color(0xFF3A2900),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12.5),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                            if ((complementoNueva ?? '').isNotEmpty)
+                              Text(complementoNueva!,
+                                  style: const TextStyle(
+                                      color: Color(0xFF8A6A20),
+                                      fontSize: 10.5)),
+                            if (barrioNueva.isNotEmpty)
+                              Text(barrioNueva,
+                                  style: const TextStyle(
+                                      color: Color(0xFF8A6A20),
+                                      fontSize: 10.5)),
+                          ],
+                        ),
+                      ),
+                      Text('nueva',
+                          style: TextStyle(
+                              color: const Color(0xFF8A5A00).withOpacity(0.7),
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Bloque de la sugerencia alternativa: colapsado por defecto, en una
+  /// pastilla ancha; se expande al tocarla mostrando la misma tarjeta
+  /// futurista pero con acento violeta (para diferenciarla de la ganadora).
+  Widget _bloqueAlternativaColapsable({
+    required Map<String, dynamic> alternativa,
+    required String direccionNueva,
+    required String barrioNueva,
+    required bool expandida,
+    required VoidCallback onToggle,
+  }) {
+    final direcciones = (alternativa['direcciones'] as List)
+        .cast<Map<String, dynamic>>()
+        .map((p) => {
+              'calle': p['calle'],
+              'barrio': p['barrio'],
+              'complemento': '',
+              'distanciaKm': p['distanciaKm'],
+            })
+        .toList();
+    final distanciaTxt =
+        _formatearDistancia(alternativa['distanciaKm'] as double);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF2ECFF),
+              borderRadius: BorderRadius.circular(20),
+              border:
+                  Border.all(color: const Color(0xFF7C4DFF).withOpacity(0.4)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  expandida
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  size: 18,
+                  color: const Color(0xFF7C4DFF),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Ver alternativa: ${alternativa['tarjetaNombre']} · $distanciaTxt',
+                    style: const TextStyle(
+                      color: Color(0xFF7C4DFF),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedCrossFade(
+          duration: const Duration(milliseconds: 220),
+          crossFadeState:
+              expandida ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+          firstChild: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: _tarjetaFuturistaTerritorio(
+              territorioNombre:
+                  alternativa['territorioNombre']?.toString() ?? '',
+              tarjetaNombre: alternativa['tarjetaNombre']?.toString() ?? '',
+              direcciones: direcciones,
+              direccionNueva: direccionNueva,
+              barrioNueva: barrioNueva,
+              esGanadora: false,
+            ),
+          ),
+          secondChild: const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 
   /// Selector simple de territorio -> tarjeta cuando el auditor prefiere no
   /// seguir la sugerencia por cercanía (o cuando no había coordenadas para
   /// calcularla).
-  Future<void> _abrirSelectorManualTerritorioTarjeta(Map<String, dynamic> item) async {
+  Future<void> _abrirSelectorManualTerritorioTarjeta(
+      Map<String, dynamic> item) async {
     final territorios = await _catalogo.territorios();
     final tarjetaMeta = await _catalogo.tarjetaMeta();
     String? territorioSel;
     String? tarjetaSel;
+    bool mostrarPreview = false;
+
+    // Si la dirección no fue marcada como comercial, no se ofrecen territorios
+    // ni tarjetas comerciales (ZONA-N) para elegir, coherente con la
+    // sugerencia automática.
+    final bool esComercialItem =
+        item['es_comercial'] == true || item['es_comercial'] == 'true';
+    bool esTarjetaComercialMeta(Map<String, dynamic>? meta) =>
+        meta != null &&
+        (meta['tipo'] == 'zona' ||
+            meta['territorio_tipo'] == 'comercial' ||
+            meta['territorio_tipo'] == 'base');
+    final territoriosOfrecidos = territorios.where((t) {
+      if (esComercialItem) return true;
+      final tipo = ((t.data()['tipo'] as String?) ?? '').toLowerCase();
+      return tipo != 'comercial' && tipo != 'base';
+    }).toList();
+
+    final calleItem =
+        (item['calle'] ?? item['texto_direccion'] ?? 'Sin calle').toString();
+    final barrioItem = (item['barrio'] ?? '').toString();
+    final latItem = item['lat'];
+    final lngItem = item['lng'];
+    final tieneCoordsItem = latItem is num && lngItem is num;
 
     await showDialog<void>(
       context: context,
@@ -2323,42 +2849,125 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
               ? const <MapEntry<String, Map<String, dynamic>>>[]
               : tarjetaMeta.entries
                   .where((e) => e.value['territorio_id'] == territorioSel)
+                  .where((e) =>
+                      esComercialItem || !esTarjetaComercialMeta(e.value))
                   .toList();
+
+          // Direcciones ya existentes en la tarjeta seleccionada, con
+          // distancia a la dirección nueva si hay coordenadas de ambos lados.
+          List<Map<String, dynamic>> direccionesPreview = [];
+          if (tarjetaSel != null) {
+            if (tieneCoordsItem) {
+              final nuevaLat = (latItem).toDouble();
+              final nuevaLng = (lngItem).toDouble();
+              direccionesPreview = _puntosReferencia
+                  .where((p) => p['tarjeta_id'] == tarjetaSel)
+                  .map((p) => {
+                        'calle': p['calle'],
+                        'barrio': p['barrio'],
+                        'complemento': '',
+                        'distanciaKm': _distanciaKm(nuevaLat, nuevaLng,
+                            p['lat'] as double, p['lng'] as double),
+                      })
+                  .toList()
+                ..sort((a, b) => (a['distanciaKm'] as double)
+                    .compareTo(b['distanciaKm'] as double));
+            } else {
+              direccionesPreview = _puntosReferencia
+                  .where((p) => p['tarjeta_id'] == tarjetaSel)
+                  .map((p) => {
+                        'calle': p['calle'],
+                        'barrio': p['barrio'],
+                        'complemento': '',
+                        'distanciaKm': null,
+                      })
+                  .toList();
+            }
+          }
+
           return AlertDialog(
             title: const Text('Elegir territorio y tarjeta'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: territorioSel,
-                  decoration: const InputDecoration(labelText: 'Territorio'),
-                  items: territorios
-                      .map((t) => DropdownMenuItem(
-                            value: t.id,
-                            child: Text((t.data()['nombre'] as String?) ?? t.id),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setLocal(() {
-                    territorioSel = v;
-                    tarjetaSel = null;
-                  }),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: tarjetaSel,
-                  decoration: const InputDecoration(labelText: 'Tarjeta'),
-                  items: tarjetasDelTerritorio
-                      .map((e) => DropdownMenuItem(
-                            value: e.key,
-                            child: Text(e.value['nombre']?.toString() ?? e.key),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setLocal(() => tarjetaSel = v),
-                ),
-              ],
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: territorioSel,
+                    decoration: const InputDecoration(labelText: 'Territorio'),
+                    items: territoriosOfrecidos
+                        .map((t) => DropdownMenuItem(
+                              value: t.id,
+                              child:
+                                  Text((t.data()['nombre'] as String?) ?? t.id),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setLocal(() {
+                      territorioSel = v;
+                      tarjetaSel = null;
+                      mostrarPreview = false;
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: tarjetaSel,
+                    decoration: const InputDecoration(labelText: 'Tarjeta'),
+                    items: tarjetasDelTerritorio
+                        .map((e) => DropdownMenuItem(
+                              value: e.key,
+                              child:
+                                  Text(e.value['nombre']?.toString() ?? e.key),
+                            ))
+                        .toList(),
+                    onChanged: (v) => setLocal(() {
+                      tarjetaSel = v;
+                      mostrarPreview = false;
+                    }),
+                  ),
+                  if (tarjetaSel != null) ...[
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () =>
+                            setLocal(() => mostrarPreview = !mostrarPreview),
+                        icon: Icon(mostrarPreview
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined),
+                        label: Text(mostrarPreview
+                            ? 'Ocultar direcciones y distancias'
+                            : 'Ver tarjeta: direcciones y distancias'),
+                      ),
+                    ),
+                    if (mostrarPreview)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: _tarjetaFuturistaTerritorio(
+                          territorioNombre: tarjetaMeta[tarjetaSel]
+                                      ?['territorio_nombre']
+                                  ?.toString() ??
+                              territorioSel ??
+                              '',
+                          tarjetaNombre:
+                              tarjetaMeta[tarjetaSel]?['nombre']?.toString() ??
+                                  tarjetaSel!,
+                          direcciones: direccionesPreview,
+                          direccionNueva: calleItem,
+                          barrioNueva: barrioItem,
+                          complementoNueva:
+                              (item['complemento'] ?? '').toString(),
+                          capacidadUsada: (tarjetaMeta[tarjetaSel]
+                                  ?['totalDirecciones'] as int?) ??
+                              0,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancelar')),
               ElevatedButton(
                 onPressed: (territorioSel != null && tarjetaSel != null)
                     ? () async {
@@ -2390,25 +2999,73 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     try {
       final batch = _firestore.batch();
       final ref = _firestore.collection('direcciones_globales').doc();
-      batch.set(ref, {
+      final esComercialDir = item['es_comercial'] == true;
+      final dataDir = <String, dynamic>{
         'calle': item['calle'] ?? item['texto_direccion'] ?? '',
         'complemento': item['complemento'] ?? '',
         'barrio': item['barrio'] ?? '',
+        'categoria': item['categoria'] ?? '',
+        'es_comercial': esComercialDir,
         'tarjeta_id': tarjetaId,
         'territorio_id': territorioId,
-        'estado_predicacion': 'pendiente',
+        // CRÍTICO: el publicador filtra con
+        // .where('estado', isNotEqualTo: 'removida'). Firestore excluye
+        // por completo cualquier documento SIN el campo 'estado' de ese
+        // tipo de consulta (no cuenta como "distinto", directamente lo
+        // descarta). Sin esta línea, la dirección quedaba invisible para
+        // el publicador aunque existiera en Firestore.
+        'estado': 'asignada',
+        'estado_predicacion': 'completada',
+        'predicado': true,
+        'fecha_predicacion': FieldValue.serverTimestamp(),
         if (item['lat'] != null) 'lat': item['lat'],
         if (item['lng'] != null) 'lng': item['lng'],
         'origen': 'Asignación manual (Auditor)',
+        // Quién envió la dirección (el publicador), distinto de quién la
+        // agrega (el auditor). Se conserva aunque la sugerencia se borre.
+        'enviado_por': (item['enviado_por'] ?? '').toString(),
+        'enviado_por_nombre': (item['enviado_por_nombre'] ?? '').toString(),
         'creado_el': FieldValue.serverTimestamp(),
-      });
+        'created_at': FieldValue.serverTimestamp(),
+      };
+
+      // Marcar campañas activas como entregadas si no es comercial
+      if (!esComercialDir) {
+        try {
+          final campSnap = await FirebaseFirestore.instance
+              .collection('configuracion')
+              .where('activa', isEqualTo: true)
+              .get();
+          for (final campDoc in campSnap.docs) {
+            final campData = campDoc.data();
+            final campNombre = (campData['nombre'] as String?) ?? '';
+            if (campNombre.isEmpty) continue;
+            final usuarioNombre = (widget.usuarioData?['nombre'] as String?) ??
+                (widget.usuarioData?['email'] as String?) ??
+                'auditor';
+            dataDir['campana_invitacion_$campNombre'] = true;
+            dataDir['campana_invitacion_fecha'] = FieldValue.serverTimestamp();
+            dataDir['campana_estado'] = 'entregada';
+            dataDir['campana_nombre'] = campNombre;
+            dataDir['fecha_campana'] = FieldValue.serverTimestamp();
+            dataDir['campana_por'] = usuarioNombre;
+          }
+        } catch (_) {}
+      }
+
+      batch.set(ref, dataDir);
       batch.update(
         _firestore
             .collection('territorios')
             .doc(territorioId)
             .collection('tarjetas')
             .doc(tarjetaId),
-        {'totalDirecciones': FieldValue.increment(1)},
+        {
+          'totalDirecciones': FieldValue.increment(1),
+          // El publicador muestra este contador en la tarjeta; se mantiene
+          // junto con totalDirecciones para que ambos reflejen los docs reales.
+          'cantidad_direcciones': FieldValue.increment(1),
+        },
       );
       if (item['id'] != null) {
         batch.delete(_firestore.collection('sugerencias').doc(item['id']));
@@ -2416,14 +3073,38 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       await batch.commit();
       _catalogo.invalidar();
 
+      // Historial PERMANENTE de la dirección nueva. Va después del commit: si
+      // el batch falla no se registra nada, y si el historial falla la dirección
+      // sigue en la tarjeta pero el log de error avisa que quedó sin rastro.
+      // Se guarda `ref.id` porque es lo que permite verificar después que la
+      // dirección existe de verdad en `direcciones_globales`.
+      await HistorialDireccionesNuevasService.registrar(
+        direccionId: ref.id,
+        calle: (item['calle'] ?? item['texto_direccion'] ?? '').toString(),
+        complemento: (item['complemento'] ?? '').toString(),
+        barrio: (item['barrio'] ?? '').toString(),
+        tarjetaId: tarjetaId,
+        territorioId: territorioId,
+        origen: kOrigenManual,
+        usuario: (widget.usuarioData?['email'] as String?) ?? 'sistema',
+        usuarioNombre:
+            (widget.usuarioData?['nombre'] as String?)?.isNotEmpty == true
+                ? (widget.usuarioData!['nombre'] as String)
+                : ((widget.usuarioData?['email'] as String?) ?? ''),
+        enviadoPor: (item['enviado_por'] ?? '').toString(),
+        enviadoPorNombre: (item['enviado_por_nombre'] ?? '').toString(),
+        sugerenciaId: item['id']?.toString() ?? '',
+      );
+
       await _firestore.collection('historial_auditoria').doc().set({
         'accion_tomada': 'asignacion_manual',
         'direccion_ingresada': item['calle'] ?? item['texto_direccion'] ?? '',
         'territorio': territorioId,
         'tarjeta_nombre': tarjetaId,
         'usuario': (widget.usuarioData?['email'] as String?) ?? 'sistema',
+        'usuario_nombre': (widget.usuarioData?['nombre'] as String?) ?? '',
         'fecha': FieldValue.serverTimestamp(),
-        'icono': Icons.touch_app,
+        'icono': _iconoParaFirestore('touch_app'),
       });
 
       await _cargarConsolaDinamica();
@@ -2438,7 +3119,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al asignar: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al asignar: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -2466,6 +3149,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           'complemento': complemento,
           'barrio': barrio,
           'texto_direccion': textoDireccion,
+          'categoria': data['categoria'] ?? '',
+          'es_comercial': data['es_comercial'] ?? false,
         },
         usuarioEmail: email,
       );
@@ -2491,7 +3176,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Dirección colocada automáticamente en su mejor ubicación.'),
+            content: Text(
+                'Dirección colocada automáticamente en su mejor ubicación.'),
             backgroundColor: Color(0xFF1B4D2E),
           ),
         );
@@ -2499,7 +3185,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al auto-colocar: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error al auto-colocar: $e'),
+              backgroundColor: Colors.red),
         );
       }
     }
@@ -2520,9 +3208,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             .collection('sugerencias')
             .where('estado', isEqualTo: 'PENDIENTE_AUDITORIA')
             .get();
-        final pendientes = snap.docs
-            .where((d) => !_autoProcesadas.contains(d.id))
-            .toList();
+        final pendientes =
+            snap.docs.where((d) => !_autoProcesadas.contains(d.id)).toList();
         if (pendientes.isNotEmpty) {
           _autoProcesarSugerencias(pendientes);
         }
@@ -2532,211 +3219,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
   Future<void> _cargarEstadoAutoAsignacion() async {
     try {
-      final doc = await _firestore
-          .collection('configuracion')
-          .doc('auditoria')
-          .get();
+      final doc =
+          await _firestore.collection('configuracion').doc('auditoria').get();
       if (doc.exists && mounted) {
         final valor = doc.data()?['auto_asignacion'] as bool?;
         if (valor != null) setState(() => _autoAsignacionActiva = valor);
       }
     } catch (_) {}
-  }
-
-  /// Organiza texto desordenado pegado (p. ej. chat de WhatsApp) con la IA y
-  /// lo procesa: en modo automático coloca directo; en manual muestra un
-  /// preview para aprobar antes de guardar.
-  Future<void> _organizarTextoPegado() async {
-    final texto = _textoPegadoController.text.trim();
-    if (texto.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Pega el texto con las direcciones primero.'),
-              backgroundColor: Colors.orange),
-        );
-      }
-      return;
-    }
-
-    final email = (widget.usuarioData?['email'] as String?) ?? 'sistema';
-
-    // Loader mientras la IA organiza el texto.
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
-            Expanded(
-                child:
-                    Text('La IA está organizando las direcciones del texto...')),
-          ],
-        ),
-      ),
-    );
-
-    List<Map<String, dynamic>> direcciones;
-    try {
-      // 1. La IA extrae y organiza las direcciones del texto pegado.
-      final extraidas = await GroqTerritoryService.extraerDireccionesWhatsApp(
-          textoWhatsApp: texto);
-      direcciones = extraidas.map((e) {
-        final calle = (e['direccion'] ?? '').toString().trim();
-        return {
-          'calle': calle,
-          'numero': (e['numero'] ?? '').toString().trim(),
-          'complemento': (e['observaciones'] ?? '').toString().trim(),
-          'barrio': (e['barrio'] ?? '').toString().trim(),
-          'casas_detectadas': e['casas_detectadas'] ?? 1,
-          'texto_direccion': calle,
-        };
-      }).toList();
-    } catch (e) {
-      if (mounted) Navigator.pop(context);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al organizar: $e'), backgroundColor: Colors.red),
-        );
-      }
-      return;
-    }
-
-    if (!mounted) return;
-    Navigator.pop(context); // Cierra loader.
-
-    if (direcciones.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('La IA no encontró direcciones claras en el texto.'),
-              backgroundColor: Colors.orange),
-        );
-      }
-      return;
-    }
-
-    // 2. Decidir según el modo.
-    if (_autoAsignacionActiva) {
-      await _procesarDireccionesConIA(direcciones, email, texto);
-    } else {
-      await _mostrarPreviewYProcesar(direcciones, email, texto);
-    }
-  }
-
-  /// Procesa de inmediato (modo automático).
-  Future<void> _procesarDireccionesConIA(
-      List<Map<String, dynamic>> direcciones, String email, String texto) async {
-    try {
-      final resumen = await AutoAsignadorService.procesarLoteDirecciones(
-        direcciones: direcciones,
-        usuarioEmail: email,
-      );
-      _textoPegadoController.clear();
-      _cargarConsolaDinamica();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-                'Modo automático: ${resumen['procesadas']} dirección(es) colocada(s). '
-                '${(resumen['errores'] as List).length} error(es).'),
-            backgroundColor: const Color(0xFF1B4D2E),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  /// Muestra un preview de las direcciones organizadas para aprobación
-  /// (modo manual). Al aprobar, las procesa.
-  Future<void> _mostrarPreviewYProcesar(
-      List<Map<String, dynamic>> direcciones, String email, String texto) async {
-    final aprobar = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              const Icon(Icons.auto_awesome, color: Colors.teal),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('Direcciones organizadas (${direcciones.length})',
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('La IA interpretó el texto así. Aprueba para colocar:',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-                  const Divider(),
-                  ...direcciones.map((d) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.teal.shade50,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.teal.shade200),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('${d['calle']}',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13)),
-                              if ((d['complemento'] ?? '').toString().isNotEmpty)
-                                Text('Complemento: ${d['complemento']}',
-                                    style: const TextStyle(fontSize: 11)),
-                              if ((d['barrio'] ?? '').toString().isNotEmpty)
-                                Text('Barrio: ${d['barrio']}',
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.blueGrey.shade600)),
-                            ],
-                          ),
-                        ),
-                      )),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Descartar'),
-            ),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-              onPressed: () => Navigator.pop(context, true),
-              icon: const Icon(Icons.check_circle, size: 18),
-              label: Text('Aprobar y colocar (${direcciones.length})'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (aprobar != true || !mounted) return;
-    await _procesarDireccionesConIA(direcciones, email, texto);
   }
 
   void _solicitarPlanInteligente(List<Map<String, dynamic>> sugerencias) async {
@@ -2767,11 +3256,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
     try {
       // Obtener snapshot de tarjetas actuales (subcolección canónica)
-      final tarjetas =
-          await _cargarTodasTarjetas(FirebaseFirestore.instance);
+      final tarjetas = await _cargarTodasTarjetas(FirebaseFirestore.instance);
 
-      progreso.total =
-          (sugerencias.length / 40).ceil().clamp(1, 999999);
+      progreso.total = (sugerencias.length / 40).ceil().clamp(1, 999999);
       progreso.onUpdate?.call();
 
       // 2. Consulta a la API de Groq (payload compacto y en lotes para no
@@ -2885,7 +3372,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             Text(
               'Esto puede tardar entre 1 y 5 minutos o más, sin prisa. '
               'No cierres esta ventana mientras procesa.',
-              style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.orange.shade800),
+              style: TextStyle(
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                  color: Colors.orange.shade800),
             ),
           ],
         ),
@@ -2908,7 +3398,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   Future<Map<String, dynamic>> _pedirPlanCompleto(
     List<Map<String, dynamic>> sugerencias,
     List<Map<String, dynamic>> tarjetas, {
-    void Function(int loteActual, int totalLotes, double segPorLote)? onProgresoLote,
+    void Function(int loteActual, int totalLotes, double segPorLote)?
+        onProgresoLote,
   }) async {
     const int lote = 100;
 
@@ -2938,8 +3429,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             }
           }
         }
-        if (p['territorio_nuevo_sugerido'] is Map && resultado['territorio_nuevo_sugerido'] == null) {
-          resultado['territorio_nuevo_sugerido'] = p['territorio_nuevo_sugerido'];
+        if (p['territorio_nuevo_sugerido'] is Map &&
+            resultado['territorio_nuevo_sugerido'] == null) {
+          resultado['territorio_nuevo_sugerido'] =
+              p['territorio_nuevo_sugerido'];
         }
       }
       resultado['explicacion_narrativa'] = narrativas.join('\n\n');
@@ -2955,21 +3448,24 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         tarjetasActuales: tarjetas,
       );
       stopwatch.stop();
-      onProgresoLote?.call(1, 1,
-          stopwatch.elapsedMilliseconds / 1000.0);
+      onProgresoLote?.call(1, 1, stopwatch.elapsedMilliseconds / 1000.0);
       return plan;
     }
 
     // Procesar por lotes.
-    final totalLotes =
-        (sugerencias.length / lote).ceil();
+    final totalLotes = (sugerencias.length / lote).ceil();
     final planes = <Map<String, dynamic>>[];
     final demoras = <double>[];
     for (int i = 0; i < sugerencias.length; i += lote) {
       final loteActual = (i ~/ lote) + 1;
-      final chunk = sugerencias.sublist(i, (i + lote) > sugerencias.length ? sugerencias.length : i + lote);
-      onProgresoLote?.call(loteActual, totalLotes,
-          demoras.isEmpty ? 0 : (demoras.reduce((a, b) => a + b) / demoras.length));
+      final chunk = sugerencias.sublist(
+          i, (i + lote) > sugerencias.length ? sugerencias.length : i + lote);
+      onProgresoLote?.call(
+          loteActual,
+          totalLotes,
+          demoras.isEmpty
+              ? 0
+              : (demoras.reduce((a, b) => a + b) / demoras.length));
       final stopwatch = Stopwatch()..start();
       planes.add(await GroqTerritoryService.analizarYPlanificarReorganizacion(
         sugerencias: chunk,
@@ -2990,10 +3486,12 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       Map<String, dynamic> plan, List<Map<String, dynamic>> tarjetas) {
     // Normalizador de "clave de dirección" que ignora el complemento.
     String claveSinComplemento(Map<String, dynamic> d) {
-      final calle =
-          ((d['calle'] ?? d['direccion'] ?? d['texto_direccion'] ?? '') as String)
-              .trim()
-              .toLowerCase();
+      final calle = ((d['calle'] ??
+              d['direccion'] ??
+              d['texto_direccion'] ??
+              '') as String)
+          .trim()
+          .toLowerCase();
       final numero = ((d['numero'] ?? '') as String).trim().toLowerCase();
       final barrio = ((d['barrio'] ?? '') as String).trim().toLowerCase();
       return '$calle|$numero|$barrio';
@@ -3047,14 +3545,16 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       barrierDismissible: false,
       builder: (context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Row(
             children: [
               Icon(Icons.map_outlined, color: Colors.teal),
               SizedBox(width: 8),
               Expanded(
                 child: Text("Plan de Reorganización",
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -3072,24 +3572,28 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                 const Divider(height: 24),
 
                 // Duplicados a eliminar
-                _sec('Direcciones duplicadas a eliminar (${_len(plan, 'direcciones_duplicadas')})'),
+                _sec(
+                    'Direcciones duplicadas a eliminar (${_len(plan, 'direcciones_duplicadas')})'),
                 if (_length(plan, 'direcciones_duplicadas') == 0)
-                  const Text('" Ninguna detectada (se consideró el complemento).',
+                  const Text(
+                      '" Ninguna detectada (se consideró el complemento).',
                       style: TextStyle(fontSize: 12, color: Colors.green))
                 else
-                  ...(_items(plan, 'direcciones_duplicadas')).map((d) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Text(
-                          '" ${d['calle']} · ${d['barrio']}'
-                          '${(d['complemento'] as String? ?? '').isNotEmpty ? ' · ${d['complemento']}' : ''}'
-                          ' " ${d['motivo']}',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      )),
+                  ...(_items(plan, 'direcciones_duplicadas'))
+                      .map((d) => Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text(
+                              '" ${d['calle']} · ${d['barrio']}'
+                              '${(d['complemento'] as String? ?? '').isNotEmpty ? ' · ${d['complemento']}' : ''}'
+                              ' " ${d['motivo']}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          )),
                 const Divider(height: 24),
 
                 // Movimientos
-                _sec('Movimientos de direcciones (${_len(plan, 'movimientos')})'),
+                _sec(
+                    'Movimientos de direcciones (${_len(plan, 'movimientos')})'),
                 if (_length(plan, 'movimientos') == 0)
                   const Text('" Sin movimientos especificados.',
                       style: TextStyle(fontSize: 12, color: Colors.grey))
@@ -3104,22 +3608,23 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                 const Divider(height: 24),
 
                 // Tarjetas a crear/actualizar
-                _sec('Tarjetas a crear / actualizar (${_len(plan, 'tarjetas_a_crear_o_actualizar')})'),
-                ...(_items(plan, 'tarjetas_a_crear_o_actualizar')).map((t) =>
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '" ${t['nombre'] ?? '?'} (${t['direccionesCount'] ?? 0} dirs)'
-                        '${(t['nueva'] == true) ? ' " NUEVA' : ''}',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    )),
+                _sec(
+                    'Tarjetas a crear / actualizar (${_len(plan, 'tarjetas_a_crear_o_actualizar')})'),
+                ...(_items(plan, 'tarjetas_a_crear_o_actualizar'))
+                    .map((t) => Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Text(
+                            '" ${t['nombre'] ?? '?'} (${t['direccionesCount'] ?? 0} dirs)'
+                            '${(t['nueva'] == true) ? ' " NUEVA' : ''}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        )),
                 const Divider(height: 24),
 
                 // Tarjetas a eliminar
-                _sec('Tarjetas a eliminar (${_len(plan, 'tarjetas_a_eliminar')})'),
-                ...(_items(plan, 'tarjetas_a_eliminar')).map((t) =>
-                    Padding(
+                _sec(
+                    'Tarjetas a eliminar (${_len(plan, 'tarjetas_a_eliminar')})'),
+                ...(_items(plan, 'tarjetas_a_eliminar')).map((t) => Padding(
                       padding: const EdgeInsets.only(bottom: 4),
                       child: Text(
                         "${t['nombre'] ?? t['id']}",
@@ -3224,6 +3729,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     var batch = firestore.batch();
     int ops = 0;
 
+    /// Cada dirección nueva creada por el plan, para escribirla en el historial
+    /// permanente una vez confirmado el batch. Antes solo quedaba un evento
+    /// agregado en `historial_reorganizaciones`, que al renderizarse mostraba
+    /// "Sin dirección" y sin territorio: el historial no decía qué direcciones
+    /// se agregaron, así que no había forma de verificarlo.
+    final nuevasCreadas = <Map<String, String>>[];
+
     /// Nombre -> (id, territorio) de las tarjetas ya existentes en la
     /// subcolección canónica, para actualizar en vez de crear duplicados
     /// (la IA puede inventar IDs ficticios).
@@ -3258,7 +3770,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       if (t is! Map) continue;
       final nombre = (t['id'] ?? t['nombre'])?.toString() ?? '';
       if (nombre.isEmpty) continue;
-      final terPlan = (t['territorioId'] ?? t['territorio_id'])?.toString() ?? '';
+      final terPlan =
+          (t['territorioId'] ?? t['territorio_id'])?.toString() ?? '';
       final terr = terPlan.isNotEmpty
           ? terPlan
           : (tarjetasExistentesPorNombre[nombre]?['territorio_id'] ?? '');
@@ -3278,8 +3791,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     final duplicados = (plan['direcciones_duplicadas'] as List?) ?? [];
     for (var d in duplicados) {
       if (d is Map && d['id'] != null) {
-        final ref =
-            firestore.collection('direcciones_globales').doc(d['id'].toString());
+        final ref = firestore
+            .collection('direcciones_globales')
+            .doc(d['id'].toString());
         batch.delete(ref);
         ops++;
         await commitSiNecesario();
@@ -3293,7 +3807,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       if (t is! Map || t['nombre'] == null) continue;
       final nombre = t['nombre'].toString();
       final dirs = (t['direccionesCount'] is num) ? t['direccionesCount'] : 0;
-      final terPlan = (t['territorioId'] ?? t['territorio_id'])?.toString() ?? '';
+      final terPlan =
+          (t['territorioId'] ?? t['territorio_id'])?.toString() ?? '';
       final territorio = terPlan.isNotEmpty
           ? terPlan
           : (tarjetasExistentesPorNombre[nombre]?['territorio_id'] ?? '');
@@ -3333,7 +3848,72 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       await commitSiNecesario();
     }
 
-    // 4. Eliminar las sugerencias ya procesadas de la bandeja.
+    // 4. CRÍTICO: crear el documento REAL de cada dirección movida.
+    // Antes este paso no existía: se borraba la sugerencia pendiente sin
+    // nunca escribir la dirección en `direcciones_globales`, así que
+    // desaparecía sin llegar jamás al publicador. Se incluye 'estado':
+    // 'asignada' porque el publicador filtra con
+    // .where('estado', isNotEqualTo: 'removida'), que excluye por completo
+    // cualquier documento sin ese campo.
+    final sugerenciasPorId = {
+      for (final s in sugerenciasProcesadas)
+        if (s['id'] != null) s['id'].toString(): s
+    };
+    final movimientos = (plan['movimientos'] as List?) ?? [];
+    for (var m in movimientos) {
+      if (m is! Map) continue;
+      final direccionId = m['direccion_id']?.toString() ?? '';
+      final haciaTarjeta = m['hacia_tarjeta']?.toString() ?? '';
+      if (haciaTarjeta.isEmpty) continue;
+
+      final territorioDestino =
+          tarjetasExistentesPorNombre[haciaTarjeta]?['territorio_id'] ?? '';
+      if (territorioDestino.isEmpty) continue; // tarjeta destino no resuelta
+
+      // Datos completos de la sugerencia original (complemento, lat/lng),
+      // con fallback a lo que trae el propio movimiento del plan.
+      final original = sugerenciasPorId[direccionId];
+      final calle = (original?['calle'] ??
+              original?['texto_direccion'] ??
+              m['calle'] ??
+              '')
+          .toString();
+      final barrio = (original?['barrio'] ?? m['barrio'] ?? '').toString();
+      final complemento = (original?['complemento'] ?? '').toString();
+      final lat = original?['lat'];
+      final lng = original?['lng'];
+
+      final ref = firestore.collection('direcciones_globales').doc();
+      batch.set(ref, {
+        'calle': calle,
+        'complemento': complemento,
+        'barrio': barrio,
+        'categoria': original?['categoria'] ?? '',
+        'es_comercial': original?['es_comercial'] ?? false,
+        'tarjeta_id': haciaTarjeta,
+        'territorio_id': territorioDestino,
+        'estado': 'asignada',
+        'estado_predicacion': 'pendiente',
+        if (lat != null) 'lat': lat,
+        if (lng != null) 'lng': lng,
+        'origen': 'Reorganización IA (Auditor)',
+        'creado_el': FieldValue.serverTimestamp(),
+        'created_at': FieldValue.serverTimestamp(),
+      });
+      nuevasCreadas.add({
+        'direccion_id': ref.id,
+        'calle': calle,
+        'complemento': complemento,
+        'barrio': barrio,
+        'tarjeta_id': haciaTarjeta,
+        'territorio_id': territorioDestino,
+        'sugerencia_id': direccionId,
+      });
+      ops++;
+      await commitSiNecesario();
+    }
+
+    // 5. Eliminar las sugerencias ya procesadas de la bandeja.
     for (var sug in sugerenciasProcesadas) {
       if (sug['id'] != null) {
         batch.delete(firestore.collection('sugerencias').doc(sug['id']));
@@ -3358,7 +3938,32 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       return;
     }
 
-    // 5. Registrar auditoría completa en el Historial.
+    // 6. Registrar auditoría completa en el Historial.
+    //
+    // Primero el historial permanente, una entrada por dirección nueva y con su
+    // ID real: es el registro que sobrevive a que la sugerencia se borre de la
+    // bandeja y el único que permite verificar contra `direcciones_globales`.
+    final usuarioActual =
+        (widget.usuarioData?['email'] as String?) ?? 'Auditor';
+    final usuarioActualNombre =
+        (widget.usuarioData?['nombre'] as String?)?.isNotEmpty == true
+            ? (widget.usuarioData!['nombre'] as String)
+            : ((widget.usuarioData?['email'] as String?) ?? '');
+    for (final nueva in nuevasCreadas) {
+      await HistorialDireccionesNuevasService.registrar(
+        direccionId: nueva['direccion_id'] ?? '',
+        calle: nueva['calle'] ?? '',
+        complemento: nueva['complemento'] ?? '',
+        barrio: nueva['barrio'] ?? '',
+        tarjetaId: nueva['tarjeta_id'] ?? '',
+        territorioId: nueva['territorio_id'] ?? '',
+        origen: kOrigenIa,
+        usuario: usuarioActual,
+        usuarioNombre: usuarioActualNombre,
+        sugerenciaId: nueva['sugerencia_id'] ?? '',
+      );
+    }
+
     await firestore.collection('historial_reorganizaciones').add({
       'fecha': FieldValue.serverTimestamp(),
       'usuario': (widget.usuarioData?['email'] as String?) ?? 'Auditor',
@@ -3379,7 +3984,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('¡Proceso completado! Se actualizó la estructura y se guardó en el historial.'),
+        content: Text(
+            '¡Proceso completado! Se actualizó la estructura y se guardó en el historial.'),
         backgroundColor: Colors.green,
       ),
     );
@@ -3399,13 +4005,16 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         actions: _buildAppBarActions(context),
         bottom: TabBar(
           controller: _tabController,
-          isScrollable: MediaQuery.of(context).size.width < _anchoAngostoBreakpoint,
+          isScrollable:
+              MediaQuery.of(context).size.width < _anchoAngostoBreakpoint,
           indicatorColor: Colors.amber,
           labelColor: Colors.amber,
           unselectedLabelColor: Colors.white70,
           tabs: [
             Tab(text: 'Sugerencias (${_sugerenciasSeleccionadas.length})'),
-            Tab(text: 'Nuevas Direcciones ($_totalNuevasDirecciones)'), // Reemplazado aquí
+            Tab(
+                text:
+                    'Nuevas Direcciones ($_totalNuevasDirecciones)'), // Reemplazado aquí
             Tab(text: 'Matriz Grid (${_tarjetasMatriz.length})'),
           ],
         ),
@@ -3420,20 +4029,34 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                   padding: const EdgeInsets.all(12.0),
                   child: Row(
                     children: [
-                      _buildInteractiveKpiCard('$_totalSugerencias', 'Sugerencias', Colors.teal.shade100, Colors.teal, () {
+                      _buildInteractiveKpiCard('$_totalSugerencias',
+                          'Sugerencias', Colors.teal.shade100, Colors.teal, () {
                         _tabController.animateTo(0);
                       }),
                       const SizedBox(width: 8),
                       // KPI de Nuevas Direcciones (Reemplazado)
-                      _buildInteractiveKpiCard('$_totalNuevasDirecciones', 'Nuevas Direcciones', Colors.blue.shade100, Colors.blue.shade900, () {
+                      _buildInteractiveKpiCard(
+                          '$_totalNuevasDirecciones',
+                          'Nuevas Direcciones',
+                          Colors.blue.shade100,
+                          Colors.blue.shade900, () {
                         _tabController.animateTo(1);
                       }),
                       const SizedBox(width: 8),
-                      _buildInteractiveKpiCard('$_saturadasCount', 'Saturadas (>8)', Colors.red.shade100, Colors.red.shade900, () {
+                      _buildInteractiveKpiCard(
+                          '$_saturadasCount',
+                          'Saturadas (>8)',
+                          Colors.red.shade100,
+                          Colors.red.shade900, () {
                         _tabController.animateTo(2);
                       }),
                       const SizedBox(width: 8),
-                      _buildInteractiveKpiCard('${_reglasProtegidas.length}', 'Reglas Activas', Colors.amber.shade100, Colors.amber.shade900, _abrirReglasActivas),
+                      _buildInteractiveKpiCard(
+                          '${_reglasProtegidas.length}',
+                          'Reglas Activas',
+                          Colors.amber.shade100,
+                          Colors.amber.shade900,
+                          _abrirReglasActivas),
                     ],
                   ),
                 ),
@@ -3450,14 +4073,17 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Progreso mensual',
-                              style: TextStyle(color: Colors.white70, fontSize: 12)),
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 12)),
                           Flexible(
                             child: Text(
                               '$_direccionesCompletadas / $_direccionesExistentes  '
                               '(${(_porcentajeProgresoMensual * 100).toStringAsFixed(0)}%)'
                               '${_direccionesSinVinculo > 0 ? '  ·  ${_direccionesSinVinculo} sin vínculo' : ''}',
                               style: const TextStyle(
-                                  color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
+                                  color: Colors.amber,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
                               textAlign: TextAlign.right,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -3472,7 +4098,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                           value: _porcentajeProgresoMensual,
                           minHeight: 8,
                           backgroundColor: Colors.white24,
-                          valueColor: const AlwaysStoppedAnimation(Colors.amber),
+                          valueColor:
+                              const AlwaysStoppedAnimation(Colors.amber),
                         ),
                       ),
                     ],
@@ -3482,29 +4109,42 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                 // Reglas Protegidas
                 Container(
                   color: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 8.0),
                   child: Row(
                     children: [
-                      const Text('Reglas Protegidas: ', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                      const Text('Reglas Protegidas: ',
+                          style: TextStyle(
+                              color: Colors.redAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12)),
                       Expanded(
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
-                            children: _reglasProtegidas.map((tag) => Padding(
-                              padding: const EdgeInsets.only(right: 6.0),
-                              child: InkWell(
-                                onTap: () => _abrirReglasActivas(tag),
-                                borderRadius: BorderRadius.circular(16),
-                                child: Chip(
-                                  backgroundColor: Colors.amber.shade100,
-                                  label: Text(tag, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                                  onDeleted: () {
-                                    setState(() => _reglasProtegidas.remove(tag));
-                                    _cargarConsolaDinamica();
-                                  },
-                                ),
-                              ),
-                            )).toList(),
+                            children: _reglasProtegidas
+                                .map((tag) => Padding(
+                                      padding:
+                                          const EdgeInsets.only(right: 6.0),
+                                      child: InkWell(
+                                        onTap: () => _abrirReglasActivas(tag),
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: Chip(
+                                          backgroundColor:
+                                              Colors.amber.shade100,
+                                          label: Text(tag,
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold)),
+                                          onDeleted: () {
+                                            setState(() =>
+                                                _reglasProtegidas.remove(tag));
+                                            _cargarConsolaDinamica();
+                                          },
+                                        ),
+                                      ),
+                                    ))
+                                .toList(),
                           ),
                         ),
                       ),
@@ -3516,12 +4156,15 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                           style: const TextStyle(fontSize: 12),
                           decoration: InputDecoration(
                             hintText: '+ Filtro...',
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 8),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6)),
                           ),
                           onSubmitted: (val) {
                             if (val.trim().isNotEmpty) {
-                              setState(() => _reglasProtegidas.add(val.trim().toUpperCase()));
+                              setState(() => _reglasProtegidas
+                                  .add(val.trim().toUpperCase()));
                               _nuevoFiltroController.clear();
                               _cargarConsolaDinamica();
                             }
@@ -3538,20 +4181,27 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                                   child: SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   ),
                                 ),
                               )
                             : TextButton.icon(
                                 style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10),
                                   backgroundColor: const Color(0xFF1B4D2E),
                                   foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(6)),
                                 ),
                                 onPressed: _escanearZonaConMapbox,
-                                icon: const Icon(Icons.travel_explore, size: 16),
-                                label: const Text('Escanear Zona con IA/Mapbox', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                icon:
+                                    const Icon(Icons.travel_explore, size: 16),
+                                label: const Text('Escanear Zona con IA/Mapbox',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold)),
                               ),
                       ),
                     ],
@@ -3564,6 +4214,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                     color: const Color(0xFFF2F4F3),
                     child: TabBarView(
                       controller: _tabController,
+                      physics:
+                          const NeverScrollableScrollPhysics(), // Deshabilita el Swipe
                       children: [
                         // 1. Bloques de Sugerencias
                         _buildBloquesSugerenciasTab(),
@@ -3580,46 +4232,84 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
                 // Botón Global de Acción
                 Container(
-                  padding: const EdgeInsets.all(12.0),
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   color: Colors.white,
-                  child: Row(
-                    children: [
-                      OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cancelar Operación'),
-                      ),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                          side: const BorderSide(color: Color(0xFF1B4D2E)),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('Cancelar Operación'),
                         ),
-                        onPressed: _abrirHistorialDetallado,
-                        icon: const Icon(Icons.history, color: Color(0xFF1B4D2E)),
-                        label: const Text('Histórico',
-                            style: TextStyle(color: Color(0xFF1B4D2E))),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1B4D2E),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                            side: const BorderSide(color: Color(0xFF1B4D2E)),
+                          ),
+                          onPressed: _abrirHistorialDetallado,
+                          icon: const Icon(Icons.history,
+                              color: Color(0xFF1B4D2E)),
+                          label: const Text('Histórico',
+                              style: TextStyle(color: Color(0xFF1B4D2E))),
                         ),
-                        onPressed:
-                            _sugerenciasSeleccionadas.isEmpty || !_iaConectada
-                                ? null
-                                : () {
-                                    final seleccionadas = _sugerenciasLista
-                                        .where((s) => _sugerenciasSeleccionadas
-                                            .contains(s['id']))
-                                        .toList();
-                                    _solicitarPlanInteligente(seleccionadas);
-                                  },
-                        icon: const Icon(Icons.flash_on, color: Colors.amber),
-                        label: Text('EJECUTAR REORGANIZACIÓN (${_sugerenciasSeleccionadas.length})'),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                            side: BorderSide(
+                                color: _backfillEnCurso
+                                    ? Colors.grey
+                                    : const Color(0xFF00695C)),
+                          ),
+                          onPressed: _backfillEnCurso
+                              ? null
+                              : _ejecutarBackfillCoordenadas,
+                          icon: _backfillEnCurso
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.travel_explore,
+                                  color: Color(0xFF00695C)),
+                          label: Text(
+                            _backfillEnCurso
+                                ? 'Geolocalizando... ($_backfillProcesadas/$_backfillTotal)'
+                                : 'Geolocalizar direcciones',
+                            style: const TextStyle(color: Color(0xFF00695C)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1B4D2E),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 12),
+                          ),
+                          onPressed: _sugerenciasSeleccionadas.isEmpty ||
+                                  !_iaConectada
+                              ? null
+                              : () {
+                                  final seleccionadas = _sugerenciasLista
+                                      .where((s) => _sugerenciasSeleccionadas
+                                          .contains(s['id']))
+                                      .toList();
+                                  _solicitarPlanInteligente(seleccionadas);
+                                },
+                          icon: const Icon(Icons.flash_on, color: Colors.amber),
+                          label: Text(
+                              'EJECUTAR REORGANIZACIÓN (${_sugerenciasSeleccionadas.length})'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -3627,17 +4317,23 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     );
   }
 
-  Widget _buildInteractiveKpiCard(String valor, String titulo, Color bg, Color textCol, VoidCallback? onTap) {
+  Widget _buildInteractiveKpiCard(String valor, String titulo, Color bg,
+      Color textCol, VoidCallback? onTap) {
     return Expanded(
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+          decoration:
+              BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
           child: Column(
             children: [
-              Text(valor, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textCol)),
+              Text(valor,
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: textCol)),
               const SizedBox(height: 2),
               Text(
                 titulo,
@@ -3662,19 +4358,27 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Seleccionadas: ${_sugerenciasSeleccionadas.length} / ${_sugerenciasLista.length}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text(
+                  'Seleccionadas: ${_sugerenciasSeleccionadas.length} / ${_sugerenciasLista.length}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 12)),
               TextButton(
                 onPressed: () {
                   setState(() {
-                    if (_sugerenciasSeleccionadas.length == _sugerenciasLista.length) {
+                    if (_sugerenciasSeleccionadas.length ==
+                        _sugerenciasLista.length) {
                       _sugerenciasSeleccionadas.clear();
                     } else {
-                      _sugerenciasSeleccionadas = _sugerenciasLista.map((e) => e['id'] as String).toSet();
+                      _sugerenciasSeleccionadas = _sugerenciasLista
+                          .map((e) => e['id'] as String)
+                          .toSet();
                     }
                   });
                 },
-                child: Text(_sugerenciasSeleccionadas.length == _sugerenciasLista.length ? 'Desmarcar Todas' : 'Marcar Todas'),
+                child: Text(
+                    _sugerenciasSeleccionadas.length == _sugerenciasLista.length
+                        ? 'Desmarcar Todas'
+                        : 'Marcar Todas'),
               ),
             ],
           ),
@@ -3735,9 +4439,15 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(item['calle'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+                            Text(item['calle'],
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 11),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
                             const SizedBox(height: 4),
-                            Text('Barrio: ${item['barrio']}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                            Text('Barrio: ${item['barrio']}',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.grey)),
                           ],
                         ),
                       ),
@@ -3764,10 +4474,14 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: _autoAsignacionActiva ? Colors.green.shade50 : Colors.grey.shade100,
+                color: _autoAsignacionActiva
+                    ? Colors.green.shade50
+                    : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: _autoAsignacionActiva ? Colors.green : Colors.grey.shade400,
+                  color: _autoAsignacionActiva
+                      ? Colors.green
+                      : Colors.grey.shade400,
                 ),
               ),
               child: Row(
@@ -3783,7 +4497,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                     _autoAsignacionActiva ? 'Modo: Automático' : 'Modo: Manual',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: _autoAsignacionActiva ? Colors.green.shade900 : Colors.black87,
+                      color: _autoAsignacionActiva
+                          ? Colors.green.shade900
+                          : Colors.black87,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -3803,14 +4519,50 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         // WhatsAppIngestionDialog. Tenerlo duplicado acá generaba confusión
         // visual y dos caminos distintos para lo mismo.
 
+        if (_nuevasDireccionesLista.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(
+                      color: _normalizandoBandeja
+                          ? Colors.grey
+                          : const Color(0xFF00695C)),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                onPressed:
+                    _normalizandoBandeja ? null : _normalizarBandejaPendiente,
+                icon: _normalizandoBandeja
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_fix_high,
+                        size: 16, color: Color(0xFF00695C)),
+                label: Text(
+                  _normalizandoBandeja
+                      ? 'Normalizando... ($_normProcesadas/$_normTotal)'
+                      : 'Normalizar bandeja pendiente (${_nuevasDireccionesLista.length})',
+                  style:
+                      const TextStyle(color: Color(0xFF00695C), fontSize: 12),
+                ),
+              ),
+            ),
+          ),
+
         Expanded(
           child: _nuevasDireccionesLista.isEmpty
-              ? const Center(child: Text('No hay nuevas direcciones en la bandeja.'))
+              ? const Center(
+                  child: Text('No hay nuevas direcciones en la bandeja.'))
               : GridView.builder(
                   padding: const EdgeInsets.all(12),
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 280,
-                    mainAxisExtent: 110,
+                    mainAxisExtent: 140,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                   ),
@@ -3818,9 +4570,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                   itemBuilder: (context, i) {
                     final item = _nuevasDireccionesLista[i];
                     final String barrio = item['barrio'] ?? 'Sin barrio';
-                    final String calle = item['calle'] ??
-                        item['texto_direccion'] ??
-                        'Sin calle';
+                    final String calle =
+                        item['calle'] ?? item['texto_direccion'] ?? 'Sin calle';
                     final bool esDuplicado = _esPosibleDuplicado(item);
 
                     return Card(
@@ -3828,7 +4579,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                         side: esDuplicado
-                            ? const BorderSide(color: Colors.redAccent, width: 1.4)
+                            ? const BorderSide(
+                                color: Colors.redAccent, width: 1.4)
                             : BorderSide.none,
                       ),
                       child: Padding(
@@ -3843,7 +4595,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                                 Expanded(
                                   child: Text(
                                     barrio,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blueAccent),
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                        color: Colors.blueAccent),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -3852,21 +4607,44 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                                   onTap: () => _eliminarSugerencia(item),
                                   child: const Padding(
                                     padding: EdgeInsets.all(2.0),
-                                    child: Icon(Icons.delete_outline, size: 18, color: Colors.grey),
+                                    child: Icon(Icons.delete_outline,
+                                        size: 18, color: Colors.grey),
                                   ),
                                 ),
                               ],
                             ),
-                            Text(calle, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            Text(calle,
+                                style: const TextStyle(fontSize: 11),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
+                            if ((item['complemento'] ?? '')
+                                .toString()
+                                .trim()
+                                .isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2.0),
+                                child: Text(
+                                    'Complemento: ${item['complemento']}',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey.shade700,
+                                        fontStyle: FontStyle.italic),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
                             if (esDuplicado)
                               Padding(
                                 padding: const EdgeInsets.only(top: 2.0),
                                 child: Row(
                                   children: [
-                                    Icon(Icons.warning_amber_rounded, size: 12, color: Colors.red.shade700),
+                                    Icon(Icons.warning_amber_rounded,
+                                        size: 12, color: Colors.red.shade700),
                                     const SizedBox(width: 3),
                                     Text('Posible duplicado',
-                                        style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.red.shade700,
+                                            fontWeight: FontWeight.bold)),
                                   ],
                                 ),
                               ),
@@ -3877,7 +4655,11 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                                   onTap: () => _abrirAsignacionManual(item),
                                   child: const Padding(
                                     padding: EdgeInsets.all(4.0),
-                                    child: Text('Manual', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                                    child: Text('Manual',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey,
+                                            fontWeight: FontWeight.bold)),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -3886,15 +4668,20 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                                     backgroundColor: Colors.green,
                                     foregroundColor: Colors.white,
                                     minimumSize: const Size(60, 24),
-                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8),
                                   ),
                                   onPressed: () async {
-                                    final doc = await _firestore.collection('sugerencias').doc(item['id']).get();
+                                    final doc = await _firestore
+                                        .collection('sugerencias')
+                                        .doc(item['id'])
+                                        .get();
                                     if (doc.exists) {
                                       await _aprobarYProcesarAutomatica(doc);
                                     }
                                   },
-                                  child: const Text('Auto-Colocar', style: TextStyle(fontSize: 10)),
+                                  child: const Text('Auto-Colocar',
+                                      style: TextStyle(fontSize: 10)),
                                 ),
                               ],
                             ),
@@ -3931,12 +4718,15 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
         // Nivel de saturación por la tarjeta más cargada del territorio:
         // verde (ok, <=4), amarillo (5-8), rojo (saturada, >8).
-        final Color nivelColor =
-            maxTarjeta > 8 ? const Color(0xFFD32F2F) : (maxTarjeta >= 5 ? const Color(0xFFF9A825) : const Color(0xFF2E7D32));
-        final String nivelTexto =
-            maxTarjeta > 8 ? 'Saturada (>8)' : (maxTarjeta >= 5 ? 'Alta (5-8)' : 'OK (<=4)');
-        final double progreso =
-            (maxTarjeta / 10).clamp(0.0, 1.0).toDouble();
+        final Color nivelColor = maxTarjeta > 8
+            ? const Color(0xFFD32F2F)
+            : (maxTarjeta >= 5
+                ? const Color(0xFFF9A825)
+                : const Color(0xFF2E7D32));
+        final String nivelTexto = maxTarjeta > 8
+            ? 'Saturada (>8)'
+            : (maxTarjeta >= 5 ? 'Alta (5-8)' : 'OK (<=4)');
+        final double progreso = (maxTarjeta / 10).clamp(0.0, 1.0).toDouble();
 
         return Card(
           elevation: 2,
@@ -3986,12 +4776,15 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                   Text(
                     '$total Direcciones · $totalTarjetas Tarjetas',
                     style: const TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black87),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87),
                   ),
                   if (esProtegida)
                     Container(
                       margin: const EdgeInsets.only(top: 2, bottom: 2),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
                       decoration: BoxDecoration(
                         color: Colors.amber.shade100,
                         borderRadius: BorderRadius.circular(4),
@@ -4037,9 +4830,11 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
   /// Abre el detalle del territorio: lista sus tarjetas con la cantidad de
   /// direcciones de cada una y señala cuáles están saturadas (>8).
-  void _abrirDetalleTerritorio(BuildContext ctx, Map<String, dynamic> territorio) {
+  void _abrirDetalleTerritorio(
+      BuildContext ctx, Map<String, dynamic> territorio) {
     final tarjetas =
-        ((territorio['tarjetas'] ?? <Map<String, dynamic>>[]) as List).cast<Map<String, dynamic>>();
+        ((territorio['tarjetas'] ?? <Map<String, dynamic>>[]) as List)
+            .cast<Map<String, dynamic>>();
     final nombre = territorio['nombre'];
 
     showDialog<void>(
@@ -4064,8 +4859,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                               fontSize: 15, fontWeight: FontWeight.bold)),
                     ),
                     Text('${tarjetas.length} tarjetas',
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey[600])),
+                        style:
+                            TextStyle(fontSize: 12, color: Colors.grey[600])),
                     IconButton(
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.of(dialogCtx).pop(),
@@ -4097,64 +4892,255 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                           return Card(
                             elevation: 1,
                             margin: const EdgeInsets.only(bottom: 6),
-                            child: Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        saturada
-                                            ? Icons.warning_amber_rounded
-                                            : Icons.credit_card,
-                                        size: 18,
+                            child: InkWell(
+                              onTap: () => _abrirDireccionesDeTarjeta(ctx,
+                                  t['id'].toString(), t['nombre'].toString()),
+                              child: Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          saturada
+                                              ? Icons.warning_amber_rounded
+                                              : Icons.credit_card,
+                                          size: 18,
+                                          color: nivelColor,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            t['nombre'].toString(),
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Chip(
+                                          label: Text(
+                                            '${total} dir.',
+                                            style:
+                                                const TextStyle(fontSize: 10),
+                                          ),
+                                          backgroundColor: saturada
+                                              ? Colors.red.shade100
+                                              : Colors.teal.shade100,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: LinearProgressIndicator(
+                                        value: progreso,
+                                        minHeight: 7,
+                                        backgroundColor: Colors.grey.shade300,
                                         color: nivelColor,
                                       ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          t['nombre'].toString(),
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      Chip(
-                                        label: Text(
-                                          '${total} dir.',
-                                          style: const TextStyle(fontSize: 10),
-                                        ),
-                                        backgroundColor: saturada
-                                            ? Colors.red.shade100
-                                            : Colors.teal.shade100,
-                                        visualDensity: VisualDensity.compact,
-                                      ),
-                                    ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      saturada
+                                          ? 'SATURADA: tiene más de 8 direcciones.'
+                                          : (total >= 5
+                                              ? 'Cerca de saturar: revisar.'
+                                              : 'Con cupo disponible.'),
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: nivelColor),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Lista las direcciones reales (`direcciones_globales`) de una tarjeta
+  /// puntual, mostrando el CEP de cada una (visible para que, al abrir la
+  /// dirección en Google Maps, el geocodificador externo sea más exacto;
+  /// las coordenadas lat/lng quedan para uso interno del sistema, no se
+  /// muestran acá). Direcciones sin CEP o sin coordenadas se marcan aparte.
+  Future<void> _abrirDireccionesDeTarjeta(
+      BuildContext ctx, String tarjetaId, String tarjetaNombre) async {
+    showDialog(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Expanded(child: Text('Cargando direcciones...')),
+          ],
+        ),
+      ),
+    );
+
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+    try {
+      final snap = await _firestore
+          .collection('direcciones_globales')
+          .where('tarjeta_id', isEqualTo: tarjetaId)
+          .get();
+      docs = snap.docs;
+    } catch (_) {
+      // Se muestra el diálogo igual, con la lista vacía y un aviso.
+    }
+
+    if (!mounted) return;
+    Navigator.pop(ctx); // cierra el loader
+
+    final sinCep =
+        docs.where((d) => (d.data()['cep'] ?? '').toString().isEmpty).length;
+    final sinCoords = docs
+        .where((d) => d.data()['lat'] == null || d.data()['lng'] == null)
+        .length;
+
+    await showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    const Icon(Icons.credit_card, color: Color(0xFF1B4D2E)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(tarjetaNombre,
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.bold)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.of(dialogCtx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              if (docs.isNotEmpty && (sinCep > 0 || sinCoords > 0))
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Text(
+                    '$sinCoords sin coordenadas · $sinCep sin CEP. '
+                    'Usá "Revisar direcciones globales" en la barra superior '
+                    'para completarlas con Groq + Mapbox.',
+                    style:
+                        TextStyle(fontSize: 11, color: Colors.amber.shade900),
+                  ),
+                ),
+              const Divider(height: 1),
+              Expanded(
+                child: docs.isEmpty
+                    ? const Center(
+                        child: Text(
+                            'Esta tarjeta no tiene direcciones todavía.',
+                            style: TextStyle(color: Colors.grey)))
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: docs.length,
+                        itemBuilder: (context, i) {
+                          final data = docs[i].data();
+                          final calle = (data['calle'] ?? '').toString();
+                          final complemento =
+                              (data['complemento'] ?? '').toString();
+                          final barrio = (data['barrio'] ?? '').toString();
+                          final cep = (data['cep'] ?? '').toString();
+                          final tieneCoords =
+                              data['lat'] != null && data['lng'] != null;
+
+                          return Card(
+                            elevation: 0,
+                            color: Colors.grey.shade50,
+                            margin: const EdgeInsets.only(bottom: 6),
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    tieneCoords
+                                        ? Icons.location_on
+                                        : Icons.location_off_outlined,
+                                    size: 16,
+                                    color: tieneCoords
+                                        ? const Color(0xFF1B4D2E)
+                                        : Colors.grey,
                                   ),
-                                  const SizedBox(height: 6),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: LinearProgressIndicator(
-                                      value: progreso,
-                                      minHeight: 7,
-                                      backgroundColor: Colors.grey.shade300,
-                                      color: nivelColor,
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          [calle, complemento]
+                                              .where((s) => s.isNotEmpty)
+                                              .join(' · '),
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 12.5),
+                                        ),
+                                        if (barrio.isNotEmpty)
+                                          Text(barrio,
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey.shade600)),
+                                      ],
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    saturada
-                                        ? 'SATURADA: tiene más de 8 direcciones.'
-                                        : (total >= 5
-                                            ? 'Cerca de saturar: revisar.'
-                                            : 'Con cupo disponible.'),
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: nivelColor),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: cep.isNotEmpty
+                                          ? Colors.teal.shade50
+                                          : Colors.red.shade50,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                          color: cep.isNotEmpty
+                                              ? Colors.teal.shade200
+                                              : Colors.red.shade200),
+                                    ),
+                                    child: Text(
+                                      cep.isNotEmpty ? 'CEP $cep' : 'Sin CEP',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: cep.isNotEmpty
+                                              ? Colors.teal.shade800
+                                              : Colors.red.shade700),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -4176,9 +5162,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
   /// restringida (por cercanía, agrupándolas de a 4-6 en tarjetas de la misma
   /// zona), creando tarjetas nuevas tipo "... Zona 2" si hace falta.
   Future<void> _abrirReglasActivas([String? regla]) async {
-    final reglas = regla != null
-        ? [regla]
-        : List<String>.from(_reglasProtegidas);
+    final reglas =
+        regla != null ? [regla] : List<String>.from(_reglasProtegidas);
 
     // Contador real de direcciones pendientes por zona protegida. Coteja el string
     // `barrio` (nombre del territorio), `categoria_regla`, `territorio_destino`
@@ -4242,8 +5227,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                             elevation: 1,
                             margin: const EdgeInsets.only(bottom: 8),
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                              padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
                               child: Row(
                                 children: [
                                   const Icon(Icons.storefront,
@@ -4294,7 +5278,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     );
   }
 
-  Future<Map<String, int>> _contarPendientesProtegidas(List<String> reglas) async {
+  Future<Map<String, int>> _contarPendientesProtegidas(
+      List<String> reglas) async {
     final map = <String, int>{
       for (final r in reglas) r.toUpperCase().trim(): 0,
     };
@@ -4373,7 +5358,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       String? territorioId;
       final territorios = await _catalogo.territorios(forzar: true);
       for (final t in territorios) {
-        final nombre = t.data()['nombre']?.toString().toUpperCase().trim() ?? '';
+        final nombre =
+            t.data()['nombre']?.toString().toUpperCase().trim() ?? '';
         if (t.id.toUpperCase().trim() == zoneKey || nombre == zoneKey) {
           territorioId = t.id;
           break;
@@ -4405,8 +5391,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           'id': d.id,
           'nombre': data['nombre'] ?? 'Sin nombre',
           'territorio_id': data['territorio_id'] ?? territorioId,
-          'totalDirecciones':
-              (data['totalDirecciones'] as num?)?.toInt() ?? 0,
+          'totalDirecciones': (data['totalDirecciones'] as num?)?.toInt() ?? 0,
         };
       }).toList();
 
@@ -4465,9 +5450,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       // zona, que se usan para decidir cupo y se escriben/borran al final.
       final totales = <String, int>{
         for (final t in tarjetas)
-          t['id'].toString():
-              ((t['totalDirecciones'] as num?) ?? 0).toInt() +
-                  (movidas[t['id'].toString()] ?? 0),
+          t['id'].toString(): ((t['totalDirecciones'] as num?) ?? 0).toInt() +
+              (movidas[t['id'].toString()] ?? 0),
       };
 
       // 4. Agrupar por cercanía en grupos de 4-6 direcciones.
@@ -4505,9 +5489,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         }
         if (destino == null) {
           // Crear nueva tarjeta "$ZONA Zona N".
-          final nomExistentes = tarjetas
-              .map((t) => t['nombre'].toString().toUpperCase())
-              .toSet();
+          final nomExistentes =
+              tarjetas.map((t) => t['nombre'].toString().toUpperCase()).toSet();
           String nombreNuevo = '$zoneKey Zona $siguiente';
           while (nomExistentes.contains(nombreNuevo.toUpperCase()) ||
               tarjetasNuevas
@@ -4555,7 +5538,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         // Asignar las direcciones del grupo a la tarjeta destino.
         for (final dir in grupo) {
           batch.update(
-            firestore.collection('direcciones_globales').doc(dir['id'] as String),
+            firestore
+                .collection('direcciones_globales')
+                .doc(dir['id'] as String),
             {
               'tarjeta_id': destino['id'],
               'nombre_tarjeta': destino['id'],
@@ -4573,8 +5558,11 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       // 5b. Aplicar los totales finales: borrar tarjetas de la zona que quedaron
       // en 0 (auto-división) y actualizar el resto; descontar tarjetas externas.
       final batch2 = firestore.batch();
-      DocumentReference<Map<String, dynamic>> tarjetaRef(String id) =>
-          firestore.collection('territorios').doc(territorioId).collection('tarjetas').doc(id);
+      DocumentReference<Map<String, dynamic>> tarjetaRef(String id) => firestore
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(id);
       for (final e in totales.entries) {
         if (e.value <= 0) {
           batch2.delete(tarjetaRef(e.key));
@@ -4667,11 +5655,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     final hasGeo = lista.every((d) => d['lat'] != null && d['lng'] != null);
     if (hasGeo) {
       lista.sort((a, b) {
-        final c =
-            (a['lat'] as num).compareTo((b['lat'] as num));
-        return c != 0
-            ? c
-            : (a['lng'] as num).compareTo((b['lng'] as num));
+        final c = (a['lat'] as num).compareTo((b['lat'] as num));
+        return c != 0 ? c : (a['lng'] as num).compareTo((b['lng'] as num));
       });
     }
 
@@ -4736,14 +5721,101 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
 
   /// Carga los eventos históricos detallados de la matriz, juntando diversas
   /// fuentes para trazabilidad completa:
-  /// - `sugerencias_enviadas`/registros de envío (direcciones nuevas)
+  /// - `historial_direcciones_nuevas` (archivo permanente de direcciones ya
+  ///   agregadas a una tarjeta)
   /// - `historial_reorganizaciones` (auto-asignación y reorganización)
   /// - `historial_auditoria` (búsquedas/POI y auditoría en general)
+  /// - `sugerencias` (las que siguen en bandeja, todavía sin agregar)
   ///
   /// Cada evento incluye la dirección, territorio/tarjeta destino, fecha y
   /// usuario que la envió. Retorna la lista ordenada por fecha descendente.
-  Future<List<Map<String, dynamic>>> _cargarEventosHistoricos() async {
+  ///
+  /// NOTA sobre `sugerencias`: antes esta era la única fuente de "direcciones
+  /// nuevas", y por eso el historial era cero o casi cero. La bandeja se VACÍA
+  /// al procesar cada sugerencia (se borra el documento al agregar la dirección
+  /// a la tarjeta), así que leer el historial desde ahí Borra el historial
+  /// justo cuando la dirección quedó bien guardada. Por eso la fuente de
+  /// verdad pasó a ser `historial_direcciones_nuevas`, que es de solo
+  /// agregado; `sugerencias` queda únicamente para mostrar lo pendiente.
+  Future<_HistorialCargado> _cargarEventosHistoricos() async {
     final eventos = <Map<String, dynamic>>[];
+
+    // Contadores del archivo permanente, para poder decir "N de M" en vez de
+    // hacer creer que el historial tiene lo que se trajo.
+    int totalNuevasRegistradas = 0;
+    int nuevasDesaparecidas = 0;
+    int nuevasPendientesPredicar = 0;
+    int nuevasMostradas = 0;
+
+    // 0) Archivo permanente de direcciones nuevas agregadas a una tarjeta.
+    final paginadoNuevas = await HistorialDireccionesNuevasService.historial();
+    totalNuevasRegistradas = paginadoNuevas.total;
+    nuevasMostradas = paginadoNuevas.registros.length;
+
+    // Verificación contra `direcciones_globales`: dice si cada dirección existe
+    // hoy y en qué estado. Sin esto el historial solo afirmaría que algo se hizo.
+    final verificaciones = await HistorialDireccionesNuevasService.verificar(
+      paginadoNuevas.registros,
+    );
+    final verifPorRegistro = <String, VerificacionDireccion>{};
+    for (final v in verificaciones) {
+      verifPorRegistro[v.direccionId] = v;
+    }
+
+    for (final r in paginadoNuevas.registros) {
+      final v = verifPorRegistro[r.direccionId];
+      if (v != null) {
+        if (v.desaparecida) nuevasDesaparecidas++;
+        if (v.pendienteDePredicar) nuevasPendientesPredicar++;
+      }
+
+      // Si el territorio actual difiere del asignado, el historial lo muestra:
+      // una dirección movida de tarjeta tiene que ser rastreable.
+      final territorioMostrado = (v != null && v.territorioActual.isNotEmpty)
+          ? v.territorioActual
+          : r.territorioId;
+      final tarjetaMostrada = (v != null && v.tarjetaActual.isNotEmpty)
+          ? v.tarjetaActual
+          : r.tarjetaId;
+
+      eventos.add({
+        'id': r.id,
+        'categoria': 'direccion_nueva',
+        'icono': _iconoParaFirestore('add_location_alt'),
+        'tipo_evento': switch (r.origen) {
+          kOrigenIa => 'DIRECCION_NUEVA (IA)',
+          // Las migradas se reconstruyeron a posteriori desde
+          // `direcciones_globales`. La fecha es real, pero el registro se creó
+          // después: hay que poder distinguirlas de las anotadas en vivo.
+          kOrigenMigracion => 'DIRECCION_NUEVA (reconstruida)',
+          _ => 'DIRECCION_NUEVA',
+        },
+        'origen': r.origen,
+        'direccion_ingresada': r.calle,
+        'complemento': r.complemento,
+        'barrio': r.barrio,
+        'territorio': territorioMostrado,
+        'tarjeta_nombre': tarjetaMostrada,
+        'tarjeta_asignada_id': r.tarjetaId,
+        'direccion_id': r.direccionId,
+        'estado_actual': v?.estadoActual ?? '',
+        'estado_predicacion': v?.estadoPredicacion ?? '',
+        'verificada': v != null,
+        'existe_hoy': v?.existe,
+        'accion_tomada': v == null
+            ? 'Agregada a la tarjeta'
+            : v.desaparecida
+                ? '⚠ NO ENCONTRADA en direcciones_globales'
+                : v.pendienteDePredicar
+                    ? 'Agregada a la tarjeta · pendiente de predicar'
+                    : 'Agregada a la tarjeta · ya predicha',
+        'usuario': r.usuario,
+        'usuario_nombre': r.usuarioNombre,
+        'enviado_por': r.enviadoPor,
+        'enviado_por_nombre': r.enviadoPorNombre,
+        'fecha': r.fecha,
+      });
+    }
 
     // 1) Reorganizaciones / auto-asignación: dónde se colocó cada dirección.
     final reorg = await _firestore
@@ -4756,7 +5828,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       eventos.add({
         'id': d.id,
         'categoria': 'reorganizacion',
-        'icono': Icons.auto_awesome,
+        'icono': _iconoParaFirestore('auto_awesome'),
         'tipo_evento': data['tipo_evento'] ?? 'REORGANIZACION',
         'direccion_ingresada': data['direccion_ingresada'],
         'complemento': data['complemento'],
@@ -4790,7 +5862,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       eventos.add({
         'id': d.id,
         'categoria': esPoi ? 'busqueda' : 'auditoria',
-        'icono': esPoi ? Icons.travel_explore : Icons.rule,
+        'icono': _iconoParaFirestore(esPoi ? 'travel_explore' : 'rule'),
         'tipo_evento': tipo.isNotEmpty ? tipo : 'AUDITORIA',
         'direccion_ingresada':
             data['direccion'] ?? data['calle'] ?? data['lugar_detectado'],
@@ -4798,10 +5870,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
         'barrio': data['barrio'],
         'territorio': data['territorio'] ?? data['barrio'],
         'tarjeta_nombre': data['tarjeta_nombre'] ?? data['tarjeta_destino'],
-        'tarjeta_asignada_id':
-            data['tarjeta_id'] ?? data['tarjeta_destino_id'],
+        'tarjeta_asignada_id': data['tarjeta_id'] ?? data['tarjeta_destino_id'],
         'accion_tomada': data['accion_tomada'] ?? data['descripcion'],
         'usuario': data['usuario'] ?? data['usuario_email'],
+        'usuario_nombre': data['usuario_nombre'] ?? '',
         'razonamiento_ia': data['razonamiento_ia'],
         'lat': data['lat'],
         'lng': data['lng'],
@@ -4810,47 +5882,81 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       });
     }
 
-    // 3) Direcciones nuevas enviadas (bandeja `sugerencias` y envíos).
-    final suge = await _firestore
-        .collection('sugerencias')
-        .orderBy('creado_el', descending: true)
-        .limit(40)
-        .get();
-    for (final d in suge.docs) {
-      final data = d.data();
-      eventos.add({
-        'id': d.id,
-        'categoria': 'nueva_direccion',
-        'icono': Icons.add_location_alt,
-        'tipo_evento': 'DIRECCION_NUEVA',
-        'direccion_ingresada': data['texto_direccion'] ?? data['calle'],
-        'complemento': data['complemento'],
-        'barrio': data['barrio'],
-        'territorio': data['barrio'],
-        'tarjeta_nombre': data['tarjeta_nombre'] ?? data['tarjeta_destino'],
-        'tarjeta_asignada_id': data['tarjeta_id'] ?? data['tarjeta_destino_id'],
-        'accion_tomada':
-            data['estado'] == 'PENDIENTE_AUDITORIA' ? 'En bandeja (pendiente de revisión)' : 'Procesada',
-        'usuario': data['usuario'] ?? data['usuario_email'] ?? data['email_enviador'],
-        'razonamiento_ia': data['razonamiento_ia'],
-        'lat': data['lat'],
-        'lng': data['lng'],
-        'lugar': data['lugar_validado'],
-        'fecha': data['creado_el'] ?? data['fecha'],
-      });
+    // 3) Bandeja: direcciones PARECE que siguen sin agregar. Se muestran aparte
+    // porque no forman parte del historial: cuando se procesan desaparecen de
+    // aquí y pasan al archivo permanente del punto 0.
+    var bandejaMostradas = 0;
+    try {
+      // Los documentos de la bandeja de "Nuevas Direcciones" se escriben con
+      // `estado: 'PENDIENTE_AUDITORIA'`, `fecha_ingreso` y `enviado_por`
+      // (ver enviar_direccion_card.dart). Antes se ordenaba por `creado_el`:
+      // ese campo NO existe en estos documentos y Firestore DESCARTA del
+      // resultado cualquier doc sin el campo del orderBy, por eso la pestaña
+      // "En bandeja" salía vacía aunque la bandeja tuviera direcciones.
+      // Se filtra por estado (igual que el listener del panel) y el orden por
+      // fecha lo resuelve el ordenamiento global de más abajo.
+      final suge = await _firestore
+          .collection('sugerencias')
+          .where('estado', isEqualTo: 'PENDIENTE_AUDITORIA')
+          .get();
+      bandejaMostradas = suge.docs.length;
+      for (final d in suge.docs) {
+        final data = d.data();
+        eventos.add({
+          'id': d.id,
+          'categoria': 'bandeja',
+          'icono': _iconoParaFirestore('pending_actions'),
+          'tipo_evento': 'EN BANDEJA',
+          'direccion_ingresada': data['texto_direccion'] ?? data['calle'],
+          'complemento': data['complemento'],
+          'barrio': data['barrio'],
+          'territorio': data['barrio'],
+          'tarjeta_nombre': data['tarjeta_nombre'] ?? data['tarjeta_destino'],
+          'tarjeta_asignada_id':
+              data['tarjeta_id'] ?? data['tarjeta_destino_id'],
+          'accion_tomada': 'Sin agregar a ninguna tarjeta todavía',
+          'usuario': data['enviado_por'] ??
+              data['usuario_email'] ??
+              data['usuario'],
+          'usuario_nombre': data['enviado_por_nombre'] ?? '',
+          'razonamiento_ia': data['razonamiento_ia'],
+          'lat': data['lat'],
+          'lng': data['lng'],
+          'lugar': data['lugar_validado'],
+          'fecha': data['fecha_ingreso'] ??
+              data['creado_el'] ??
+              data['fecha'],
+        });
+      }
+    } catch (e) {
+      // Si la bandeja no se puede leer, el historial permanente sigue siendo
+      // válido: no se cae toda la pantalla por un origen auxiliar.
+      developer.log('No se pudo leer la bandeja de sugerencias',
+          name: 'auditor_historial', error: e);
     }
 
-    // Ordenar por fecha descendente (más recientes primero).
+    // Ordenar por fecha descendente (más recientes primero). Se normaliza a
+    // milisegundos porque las fuentes devuelven tipos distintos: Timestamp
+    // (reorganizaciones, auditoría y la bandeja) y DateTime (direcciones
+    // nuevas). Comparar con `dynamic.compareTo` entre ambos tipos lanzaba una
+    // excepción y rompía todo el histórico.
     eventos.sort((a, b) {
-      final fa = a['fecha'];
-      final fb = b['fecha'];
+      final fa = _fechaMillis(a['fecha']);
+      final fb = _fechaMillis(b['fecha']);
       if (fa == null && fb == null) return 0;
       if (fa == null) return 1;
       if (fb == null) return -1;
-      return (fb as dynamic).compareTo(fa as dynamic);
+      return fb.compareTo(fa);
     });
 
-    return eventos;
+    return _HistorialCargado(
+      eventos: eventos,
+      totalNuevasRegistradas: totalNuevasRegistradas,
+      nuevasMostradas: nuevasMostradas,
+      nuevasDesaparecidas: nuevasDesaparecidas,
+      nuevasPendientesPredicar: nuevasPendientesPredicar,
+      bandejaMostradas: bandejaMostradas,
+    );
   }
 
   /// Abre el diálogo de histórico detallado: muestra todos los eventos de la
@@ -4877,14 +5983,15 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
       ),
     );
 
-    List<Map<String, dynamic>> eventos;
+    _HistorialCargado historial;
     try {
-      eventos = await _cargarEventosHistoricos();
+      historial = await _cargarEventosHistoricos();
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error cargando histórico: $e'),
+          SnackBar(
+              content: Text('Error cargando histórico: $e'),
               backgroundColor: Colors.red),
         );
       }
@@ -4896,6 +6003,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     // Cerrar el diálogo de carga para abrir el detallado.
     Navigator.of(context).pop();
 
+    final eventos = historial.eventos;
     final contadores = <String, int>{};
     for (final e in eventos) {
       final cat = (e['categoria'] ?? 'otro').toString();
@@ -4931,12 +6039,21 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                           const Expanded(
                             child: Text('Histórico detallado',
                                 style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold)),
+                                    fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                           Text('${actual.length} eventos',
                               style: TextStyle(
                                   fontSize: 12, color: Colors.grey[600])),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: () async {
+                              Navigator.of(dialogCtx).pop();
+                              await _cargarConsolaDinamica();
+                            },
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Actualizar',
+                                style: TextStyle(fontSize: 11)),
+                          ),
                           IconButton(
                             icon: const Icon(Icons.close),
                             onPressed: () => Navigator.of(dialogCtx).pop(),
@@ -4952,14 +6069,53 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                         scrollDirection: Axis.horizontal,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         children: [
-                          _chipHistorial(setLocalState, () => filtro = 'todas', filtro == 'todas', 'Todas (${eventos.length})', null),
-                          _chipHistorial(setLocalState, () => filtro = 'reorganizacion', filtro == 'reorganizacion', 'Reorganización (${contadores['reorganizacion'] ?? 0})', Icons.auto_awesome),
-                          _chipHistorial(setLocalState, () => filtro = 'nueva_direccion', filtro == 'nueva_direccion', 'Nuevas (${contadores['nueva_direccion'] ?? 0})', Icons.add_location_alt),
-                          _chipHistorial(setLocalState, () => filtro = 'busqueda', filtro == 'busqueda', 'Búsquedas (${contadores['busqueda'] ?? 0})', Icons.travel_explore),
-                          _chipHistorial(setLocalState, () => filtro = 'auditoria', filtro == 'auditoria', 'Auditoría (${contadores['auditoria'] ?? 0})', Icons.rule),
+                          _chipHistorial(
+                              setLocalState,
+                              () => filtro = 'todas',
+                              filtro == 'todas',
+                              'Todas (${eventos.length})',
+                              null),
+                          _chipHistorial(
+                            setLocalState,
+                            () => filtro = 'direccion_nueva',
+                            filtro == 'direccion_nueva',
+                            historial.totalNuevasRegistradas >
+                                    historial.nuevasMostradas
+                                ? 'Nuevas agregadas (${historial.nuevasMostradas} de ${historial.totalNuevasRegistradas})'
+                                : 'Nuevas agregadas (${contadores['direccion_nueva'] ?? 0})',
+                            Icons.add_location_alt,
+                          ),
+                          _chipHistorial(
+                              setLocalState,
+                              () => filtro = 'bandeja',
+                              filtro == 'bandeja',
+                              'En bandeja (${historial.bandejaMostradas})',
+                              Icons.pending_actions),
+                          _chipHistorial(
+                              setLocalState,
+                              () => filtro = 'reorganizacion',
+                              filtro == 'reorganizacion',
+                              'Reorganización (${contadores['reorganizacion'] ?? 0})',
+                              Icons.auto_awesome),
+                          _chipHistorial(
+                              setLocalState,
+                              () => filtro = 'busqueda',
+                              filtro == 'busqueda',
+                              'Búsquedas (${contadores['busqueda'] ?? 0})',
+                              Icons.travel_explore),
+                          _chipHistorial(
+                              setLocalState,
+                              () => filtro = 'auditoria',
+                              filtro == 'auditoria',
+                              'Auditoría (${contadores['auditoria'] ?? 0})',
+                              Icons.rule),
                         ],
                       ),
                     ),
+                    // Resumen de verificación: acá se ve si las direcciones nuevas
+                    // se agregaron realmente o si alguna quedó registrada sin
+                    // existir.
+                    _resumenVerificacion(historial),
                     const Divider(height: 1),
                     Expanded(
                       child: actual.isEmpty
@@ -4980,6 +6136,88 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
           },
         );
       },
+    );
+  }
+
+  /// Franja de verificación del archivo de direcciones nuevas.
+  ///
+  /// Recuento de: cuántas hay registradas, cuántas se están mostrando, cuántas
+  /// no se encuentran hoy en `direcciones_globales` y cuántas esperan a ser
+  /// predichas. "Pendiente de predicar" NO es un error: es el estado normal de
+  /// una dirección recién agregada.
+  Widget _resumenVerificacion(_HistorialCargado h) {
+    if (h.totalNuevasRegistradas == 0 && h.bandejaMostradas == 0) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        child: Text(
+          'Todavía no hay direcciones nuevas registradas en el historial. '
+          'Se empieza a guardar automáticamente a partir de la próxima que '
+          'agregues a una tarjeta.',
+          style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+        ),
+      );
+    }
+
+    Widget cifra(String valor, String etiqueta, Color color) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(valor,
+              style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+          Text(etiqueta,
+              style: TextStyle(fontSize: 10, color: Colors.grey[700])),
+        ],
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFFF3F6F4),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              cifra('${h.totalNuevasRegistradas}', 'Registradas',
+                  const Color(0xFF1B4D2E)),
+              cifra(
+                  '${h.nuevasMostradas}', 'Mostradas', const Color(0xFF1B4D2E)),
+              cifra('${h.nuevasPendientesPredicar}', 'Sin predecir',
+                  const Color(0xFFB26A00)),
+              cifra('${h.nuevasDesaparecidas}', 'No encontradas',
+                  h.nuevasDesaparecidas > 0 ? Colors.red : Colors.grey),
+              cifra('${h.bandejaMostradas}', 'En bandeja',
+                  const Color(0xFF1565C0)),
+            ],
+          ),
+          if (h.nuevasDesaparecidas > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '⚠ ${h.nuevasDesaparecidas} dirección(es) están en el historial '
+                'pero NO existen en direcciones_globales. Revisá si se '
+                'eliminaron o nunca se crearon.',
+                style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.red,
+                    fontWeight: FontWeight.w600),
+              ),
+            )
+          else if (h.totalNuevasRegistradas > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '✓ Todas las direcciones registradas se encontraron en '
+                'direcciones_globales.',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF1B4D2E)),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -5008,19 +6246,44 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     final tarjeta = (e['tarjeta_nombre'] ?? '').toString();
     final accion = (e['accion_tomada'] ?? '').toString();
     final usuario = (e['usuario'] ?? 'sistema').toString();
+    final usuarioNombreHist = (e['usuario_nombre'] ?? '').toString();
+    final usuarioMostradoHist = usuarioNombreHist.isNotEmpty
+        ? usuarioNombreHist
+        : (usuario.contains('@') ? usuario.split('@').first : usuario);
+    // Quién ENVIÓ la dirección (distinto de quién la agregó). Solo aplica a
+    // direcciones nuevas (el envío original venía de una sugerencia).
+    final enviadoPorNombreHist = (e['enviado_por_nombre'] ?? '').toString();
+    final enviadoPorEmailHist = (e['enviado_por'] ?? '').toString();
+    final enviadoPorMostradoHist = enviadoPorNombreHist.isNotEmpty
+        ? enviadoPorNombreHist
+        : (enviadoPorEmailHist.contains('@')
+            ? enviadoPorEmailHist.split('@').first
+            : enviadoPorEmailHist);
     final razon = (e['razonamiento_ia'] ?? '').toString();
     final lugar = (e['lugar'] ?? '').toString();
-    final dinamico = e['icono'] ?? Icons.history;
+    final dinamico = _iconoDesdeFirestore(e['icono']);
 
     final timestamp = e['fecha'];
-    String horaStr = '"';
+    String horaStr = '';
     if (timestamp is Timestamp) {
       horaStr = _formatearFecha(timestamp.toDate());
+    } else if (timestamp is DateTime) {
+      horaStr = _formatearFecha(timestamp);
     } else if (timestamp != null) {
       try {
         horaStr = _formatearFecha((timestamp as dynamic).toDate());
       } catch (_) {}
     }
+
+    // Badge de verificación, solo para direcciones nuevas agregadas. Muestra si
+    // el documento existe hoy en `direcciones_globales` y su estado.
+    final esNueva = e['categoria'] == 'direccion_nueva';
+    final existeHoy = e['existe_hoy'] == true;
+    final direccionId = (e['direccion_id'] ?? '').toString();
+    final estadoActual = (e['estado_actual'] ?? '').toString();
+    final estadoPred = (e['estado_predicacion'] ?? '').toString();
+    final origen = (e['origen'] ?? '').toString();
+    final fueReconstruida = origen == kOrigenMigracion;
 
     return Card(
       elevation: 1,
@@ -5038,10 +6301,12 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                 Expanded(
                   child: Text(
                     direccion.isNotEmpty ? direccion : 'Sin dirección',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                 ),
-                Text(horaStr, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                Text(horaStr,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600])),
               ],
             ),
             Padding(
@@ -5051,19 +6316,81 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
                 children: [
                   Text(
                     'Territorio: ${territorio.isNotEmpty ? territorio : '"'}   |   Tarjeta: ${tarjeta.isNotEmpty ? tarjeta : '"'}',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1B4D2E)),
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1B4D2E)),
                   ),
                   if (complemento.isNotEmpty)
                     Text('Complemento: $complemento',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[700])),
-                  if (lugar.isNotEmpty && lugar.toLowerCase() != direccion.toLowerCase())
-                    Text('Mapbox: $lugar', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-                  if (usuario != 'sistema')
-                    Text('Enviado por: $usuario', style: TextStyle(fontSize: 11, color: Colors.black87)),
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey[700])),
+                  if (lugar.isNotEmpty &&
+                      lugar.toLowerCase() != direccion.toLowerCase())
+                    Text('Mapbox: $lugar',
+                        style:
+                            TextStyle(fontSize: 10, color: Colors.grey[600])),
+                  if (esNueva && enviadoPorMostradoHist.isNotEmpty &&
+                      enviadoPorMostradoHist != 'sistema')
+                    Text('Enviado por: $enviadoPorMostradoHist',
+                        style: TextStyle(fontSize: 11, color: Colors.black87)),
+                  if (usuarioMostradoHist != 'sistema')
+                    Text(
+                        '${esNueva ? 'Agregada por' : (accion == 'asignacion_manual' ? 'Asignada por' : 'Enviado por')}: $usuarioMostradoHist',
+                        style: TextStyle(fontSize: 11, color: Colors.black87)),
                   if (accion.isNotEmpty)
-                    Text('Acción: $accion', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                    Text('Acción: $accion',
+                        style:
+                            TextStyle(fontSize: 10, color: Colors.grey[600])),
                   if (razon.isNotEmpty)
-                    Text('Razón IA: $razon', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.grey[600])),
+                    Text('Razón IA: $razon',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontStyle: FontStyle.italic,
+                            color: Colors.grey[600])),
+                  if (esNueva) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _badgeVerificacion(
+                          existeHoy
+                              ? (estadoActual.isEmpty
+                                  ? 'Existe'
+                                  : 'Existe · ${estadoActual[0].toUpperCase()}${estadoActual.substring(1)}')
+                              : '⚠ No encontrada',
+                          existeHoy ? const Color(0xFF1B4D2E) : Colors.red,
+                          existeHoy ? Icons.check_circle : Icons.error_outline,
+                        ),
+                        if (existeHoy)
+                          _badgeVerificacion(
+                            estadoPred == 'completada'
+                                ? 'Predicha'
+                                : 'Sin predecir',
+                            estadoPred == 'completada'
+                                ? const Color(0xFF1B4D2E)
+                                : const Color(0xFFB26A00),
+                            estadoPred == 'completada'
+                                ? Icons.verified
+                                : Icons.schedule,
+                          ),
+                        if (direccionId.isNotEmpty)
+                          Text('ID: $direccionId',
+                              style: TextStyle(
+                                  fontSize: 9, color: Colors.grey[600])),
+                        // Distinguir lo reconstruido de lo registrado en vivo: la
+                        // fecha es real, pero el registro se creó después.
+                        if (fueReconstruida)
+                          _badgeVerificacion(
+                            'Reconstruida del histórico',
+                            const Color(0xFF5D4037),
+                            Icons.restore,
+                          ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -5073,18 +6400,91 @@ class _AuditorPanelPageState extends State<AuditorPanelPage> with SingleTickerPr
     );
   }
 
+  /// Etiqueta chica de estado para la tarjeta de historial.
+  Widget _badgeVerificacion(String texto, Color color, IconData icono) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icono, size: 11, color: color),
+          const SizedBox(width: 3),
+          Text(texto,
+              style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w600, color: color)),
+        ],
+      ),
+    );
+  }
+
+  /// Normaliza cualquier valor de fecha usado en el histórico a milisegundos
+  /// desde epoch, para ordenar de forma segura sin importar el tipo de origen
+  /// (Timestamp de Firestore, DateTime de Dart, o texto ISO).
+  int? _fechaMillis(dynamic v) {
+    if (v == null) return null;
+    if (v is Timestamp) return v.millisecondsSinceEpoch;
+    if (v is DateTime) return v.millisecondsSinceEpoch;
+    if (v is int) return v;
+    if (v is String) return DateTime.tryParse(v)?.millisecondsSinceEpoch;
+    return null;
+  }
+
   String _formatearFecha(DateTime dt) {
     final ahora = DateTime.now();
     final diff = ahora.difference(dt);
     if (diff.inMinutes < 1) return 'justo ahora';
     if (diff.inMinutes < 60) return 'ha ${diff.inMinutes} min';
     if (diff.inHours < 24) return 'hace ${diff.inHours} h';
-    final dd = dt.day.toString().padLeft(2, '0');
-    final mm = dt.month.toString().padLeft(2, '0');
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mi = dt.minute.toString().padLeft(2, '0');
-    return '$dd/$mm/${dt.year} $hh:$mi';
+    // `toDate()` de Firestore devuelve la fecha en UTC: hay que pasarla a hora
+    // local antes de mostrar los campos, o el día/hora salen desfasados.
+    final local = dt.toLocal();
+    final dd = local.day.toString().padLeft(2, '0');
+    final mm = local.month.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mi = local.minute.toString().padLeft(2, '0');
+    return '$dd/$mm/${local.year} $hh:$mi';
   }
+}
+
+/// Resultado de cargar el historial, con los contadores del archivo permanente
+/// de direcciones nuevas.
+///
+/// Antes la pantalla solo recibía la lista de eventos y no tenía forma de saber
+/// si lo que veía era todo: los topes de 100/60/40 hacían que una lista más
+/// larga pareciera corta. Estos contadores permiten mostrar "N de M" y avisar
+/// cuántas direcciones registradas no aparecen hoy en `direcciones_globales`,
+/// que es la única forma real de verificar que se agregaron bien.
+class _HistorialCargado {
+  final List<Map<String, dynamic>> eventos;
+
+  /// Total real de direcciones nuevas en el archivo permanente.
+  final int totalNuevasRegistradas;
+
+  /// Cuántas de esas se trajeron a la pantalla.
+  final int nuevasMostradas;
+
+  /// Registradas pero el documento ya no existe en `direcciones_globales`.
+  final int nuevasDesaparecidas;
+
+  /// Registradas y en Created, todavía no predichas.
+  final int nuevasPendientesPredicar;
+
+  /// Pendientes de revisar en la bandeja `sugerencias`.
+  final int bandejaMostradas;
+
+  const _HistorialCargado({
+    required this.eventos,
+    required this.totalNuevasRegistradas,
+    required this.nuevasMostradas,
+    required this.nuevasDesaparecidas,
+    required this.nuevasPendientesPredicar,
+    required this.bandejaMostradas,
+  });
 }
 
 /// Estado mutable compartido entre la ventana de progreso de la reorganización
