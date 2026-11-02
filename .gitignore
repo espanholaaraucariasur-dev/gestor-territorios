@@ -54,3 +54,17 @@ key.properties
 # Credenciales de servicio (nunca versionar)
 serviceAccountKey*.json
 *serviceAccount*.json
+
+# Dependencias Node (se reinstalan con npm install)
+/node_modules/
+/functions/node_modules/
+
+# Salidas de análisis/build, respaldos y artefactos
+/analysis*.txt
+/analyze_*.txt
+/build_output.txt
+/build_log.txt
+/build.log.txt
+/tool-output/
+*.bak
+*.aab
