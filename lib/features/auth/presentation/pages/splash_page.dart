@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:araucaria_sur/features/home/presentation/pages/home_page.dart';
+import '../../../../core/l10n/translation_service.dart';
 import '../../../../core/services/update_service.dart';
 import '../../../../core/services/auto_return_service.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +17,9 @@ class SplashPage extends StatefulWidget {
 }
 
 class _SplashPageState extends State<SplashPage> {
+  bool _bloqueadoPorActualizacion = false;
+  bool _verificandoActualizacion = false;
+
   @override
   void initState() {
     super.initState();
@@ -27,10 +30,36 @@ class _SplashPageState extends State<SplashPage> {
     await Future.delayed(const Duration(seconds: 1));
     if (!mounted) return;
 
-    // Verificar actualización forzada (solo Android con Play Store)
-    await UpdateService.verificarActualizacion(context);
+    final resultado = await UpdateService.verificarActualizacion();
     if (!mounted) return;
 
+    if (resultado == UpdateCheckResult.bloqueado) {
+      setState(() => _bloqueadoPorActualizacion = true);
+      return;
+    }
+
+    await _continuarConSesion();
+  }
+
+  Future<void> _reintentarActualizacion() async {
+    if (_verificandoActualizacion) return;
+    setState(() => _verificandoActualizacion = true);
+
+    final resultado = await UpdateService.verificarActualizacion();
+    if (!mounted) return;
+
+    if (resultado == UpdateCheckResult.continuar) {
+      setState(() {
+        _verificandoActualizacion = false;
+        _bloqueadoPorActualizacion = false;
+      });
+      await _continuarConSesion();
+    } else {
+      setState(() => _verificandoActualizacion = false);
+    }
+  }
+
+  Future<void> _continuarConSesion() async {
     // La verificación global de vencidas se ejecuta SOLO tras autenticación y
     // para roles con acceso global (es_admin / es_auditor), evitando
     // permission-denied en web al arrancar como usuario sin permisos.
@@ -132,6 +161,92 @@ class _SplashPageState extends State<SplashPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_bloqueadoPorActualizacion) {
+      return PopScope(
+        canPop: false,
+        child: Scaffold(
+          backgroundColor: const Color(0xFF1B5E20),
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.system_update_outlined,
+                      size: 80,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      context.t('update_required_title'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      context.t('update_required_message'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      context.t('update_required_hint'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    FilledButton.icon(
+                      onPressed: _verificandoActualizacion
+                          ? null
+                          : _reintentarActualizacion,
+                      icon: _verificandoActualizacion
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.download_outlined),
+                      label: Text(
+                        _verificandoActualizacion
+                            ? context.t('update_checking')
+                            : context.t('update_now'),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF1B5E20),
+                        disabledBackgroundColor: Colors.white24,
+                        disabledForegroundColor: Colors.white70,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return const Scaffold(
       backgroundColor: Color(0xFF1B5E20),
       body: Center(
@@ -142,7 +257,9 @@ class _SplashPageState extends State<SplashPage> {
             SizedBox(height: 20),
             Text(
               'Cargando...',
-              style: TextStyle(color: Colors.white, fontSize: 20,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
                   fontWeight: FontWeight.w300),
             ),
           ],

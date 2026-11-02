@@ -5,6 +5,13 @@
       'app_name': 'Araucária Sur',
       'app_subtitle': 'Congregación de Español · Gestión Territorial',
       'loading': 'Cargando...',
+      'update_required_title': 'Actualización obligatoria',
+      'update_required_message':
+          'Hay una nueva versión disponible. Debes actualizar para continuar.',
+      'update_required_hint':
+          'Si cancelaste la actualización, pulsa el botón para volver a intentarlo.',
+      'update_now': 'Actualizar ahora',
+      'update_checking': 'Comprobando actualización...',
       'error': 'Error',
       'success': 'Éxito',
       'cancel': 'Cancelar',
@@ -605,6 +612,13 @@
       'app_name': 'Território Sul',
       'app_subtitle': 'Congregação Espanhola · Gestão Territorial',
       'loading': 'Carregando...',
+      'update_required_title': 'Atualização obrigatória',
+      'update_required_message':
+          'Há uma nova versão disponível. Você precisa atualizar para continuar.',
+      'update_required_hint':
+          'Se você cancelou a atualização, toque no botão para tentar novamente.',
+      'update_now': 'Atualizar agora',
+      'update_checking': 'Verificando atualização...',
       'error': 'Erro',
       'success': 'Sucesso',
       'cancel': 'Cancelar',
