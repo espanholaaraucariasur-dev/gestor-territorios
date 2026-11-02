@@ -84,9 +84,7 @@ class AlgoliaService {
       if (response.hits.isNotEmpty) {
         // El hit viene como Object (JSON deserializado)
         final hit = response.hits.first;
-        if (hit is Map<String, dynamic>) {
-          return hit;
-        }
+        return hit;
       }
       return null;
     } catch (_) {
@@ -103,7 +101,7 @@ class AlgoliaService {
   static Future<Map<String, dynamic>> sincronizarTodas() async {
     // 1. Verificar conectividad primero
     final check = await verificarConexion();
-    if (!check['ok'] as bool) {
+    if (!check['ok']) {
       return {'exito': false, 'mensaje': 'Pre-check falló: ${check['mensaje']}'};
     }
 

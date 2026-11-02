@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main(List<String> arguments) async {
   print('🔧 Iniciando Auditoría Automatizada de Araucaria Sur');
@@ -10,7 +8,7 @@ void main(List<String> arguments) async {
 
   // Inicializar Firebase
   try {
-    final app = await Firebase.initializeApp();
+    await Firebase.initializeApp();
     print('✅ Firebase inicializado correctamente');
   } catch (e) {
     print('❌ Error al inicializar Firebase:');
@@ -18,10 +16,6 @@ void main(List<String> arguments) async {
     print('   Ejemplo: dart run bin/auditor_cli.dart');
     exit(1);
   }
-
-  // Obtener referencia a Firestore
-  final db = FirebaseFirestore.instance;
-  final dirColl = db.collection('direcciones_globales');
 
   try {
     // PASO 1: Limpieza de datos dinámicos

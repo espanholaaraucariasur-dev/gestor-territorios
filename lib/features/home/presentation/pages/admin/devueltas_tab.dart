@@ -434,7 +434,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         final Map<String, String> tarjetaATer = {};
         final Map<String, String> tarjetaATerNombre = {};
         for (final dir in dirs.docs) {
-          final d = dir.data() as Map<String, dynamic>;
+          final d = dir.data();
           final dLat = (d['lat'] as num?)?.toDouble();
           final dLng = (d['lng'] as num?)?.toDouble();
           final tarjetaId = d['tarjeta_id'] as String?;
@@ -468,7 +468,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           final Map<String, String> tarjetaATer = {};
           final Map<String, String> tarjetaATerNombre = {};
           for (final dir in snap.docs) {
-            final d = dir.data() as Map<String, dynamic>;
+            final d = dir.data();
             final tarjetaId = d['tarjeta_id'] as String?;
             final territorioId = d['territorio_id'] as String?;
             if (tarjetaId == null || territorioId == null) continue;

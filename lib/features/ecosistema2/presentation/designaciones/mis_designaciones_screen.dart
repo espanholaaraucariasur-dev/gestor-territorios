@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../../core/l10n/translation_service.dart';
 import '../../data/arreglo_service.dart';
-import '../../data/funcion_service.dart';
 import '../../data/notificacion_service.dart';
 import '../../models/arreglo_model.dart';
-import '../../models/funcion_model.dart';
 
 class MisDesignacionesScreen extends StatefulWidget {
   final String usuarioUid;

@@ -8,7 +8,6 @@ class MapboxService {
   static const String _token = AppSecrets.mapboxToken;
   static const String _baseUrl =
       'https://api.mapbox.com/geocoding/v5/mapbox.places';
-  static const String _bbox = '';
 
   /// Valida que una dirección sea REAL antes de guardarla.
   ///

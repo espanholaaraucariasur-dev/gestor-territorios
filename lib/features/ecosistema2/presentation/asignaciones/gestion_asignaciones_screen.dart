@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/l10n/translation_service.dart';
 import '../../data/funcion_service.dart';
 import '../../data/usuario_eco2_service.dart';
@@ -24,7 +23,6 @@ class GestionDeAsignacionesScreen extends StatefulWidget {
 class _GestionDeAsignacionesScreenState
     extends State<GestionDeAsignacionesScreen> {
   static const Color _fondo = Color(0xFFF8F9FA);
-  static const Color _textoPrincipal = Color(0xFF1F2937);
 
   // Paleta de acento para el borde izquierdo de cada tarjeta (por índice)
   static const List<Color> _paleta = [
@@ -37,14 +35,6 @@ class _GestionDeAsignacionesScreenState
   ];
 
   Color _colorTarjeta(int indice) => _paleta[indice % _paleta.length];
-
-  Color _colorFuncion(String colorHex) {
-    try {
-      return Color(int.parse(colorHex.replaceFirst('#', '0xFF')));
-    } catch (_) {
-      return const Color(0xFF1B5E20);
-    }
-  }
 
   IconData _iconoFuncion(String icono) {
     switch (icono) {

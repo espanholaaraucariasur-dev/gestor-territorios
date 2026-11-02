@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../models/arreglo_model.dart';
-import '../models/notificacion_model.dart';
 import 'arreglo_service.dart';
 import 'notificacion_service.dart';
 
