@@ -50,3 +50,7 @@ key.properties
 
 # Firebase Hosting deploy cache
 .firebase/
+
+# Credenciales de servicio (nunca versionar)
+serviceAccountKey*.json
+*serviceAccount*.json
