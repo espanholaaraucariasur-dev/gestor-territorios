@@ -2285,6 +2285,15 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final complemento = (data['complemento'] as String?) ?? '';
         final territorioNombre = territorioNombreGlobal;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
+        // Las direcciones que salen de la tarjeta (`no_hispano` se borra,
+        // `comercio_cerrado` pierde su `tarjeta_id`) deben descontarse de
+        // ambos contadores; antes quedaban inflados para siempre.
+        final tarjetaParaDescontar =
+            tarjetaIdOriginal.isNotEmpty ? tarjetaIdOriginal : tarjetaId;
+        final territorioParaDescontar =
+            (data['territorio_id'] as String?)?.isNotEmpty == true
+                ? data['territorio_id'] as String
+                : territorioId;
 
         // ── Verificar campañas activas (no aplican a comercios) ──
         List<QueryDocumentSnapshot<Map<String, dynamic>>> campanasActivas = [];
@@ -2405,6 +2414,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
             'reportado_por': widget.usuarioData['nombre'] ?? '',
             'reportado_por_email': widget.usuarioData['email'] ?? '',
           });
+          batch.update(
+            db
+                .collection('territorios')
+                .doc(territorioParaDescontar)
+                .collection('tarjetas')
+                .doc(tarjetaParaDescontar),
+            {
+              'cantidad_direcciones': FieldValue.increment(-1),
+              'totalDirecciones': FieldValue.increment(-1),
+            },
+          );
         } else if (estado == 'no_hispano') {
           batch.set(
             db.collection('direcciones_removidas').doc(dir.id),
@@ -2440,6 +2460,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
           // todos los campos necesarios y el botón "Restaurar" del panel
           // recrea la dirección en `direcciones_globales` con `doc_id_original`.
           batch.delete(dir.reference);
+          batch.update(
+            db
+                .collection('territorios')
+                .doc(territorioParaDescontar)
+                .collection('tarjetas')
+                .doc(tarjetaParaDescontar),
+            {
+              'cantidad_direcciones': FieldValue.increment(-1),
+              'totalDirecciones': FieldValue.increment(-1),
+            },
+          );
         }
       }
 

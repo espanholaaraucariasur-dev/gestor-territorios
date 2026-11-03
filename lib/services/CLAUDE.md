@@ -74,6 +74,6 @@ lib/features/home/presentation/pages/
 ## Notas Importantes
 - El ID del documento en `direcciones_globales` sigue el patrón: `Territorio_Tarjeta_Dirección_timestamp`
 - Las tarjetas en Firestore usan su nombre como ID (ej: `D02`, `A01`)
-- `cantidad_direcciones` en tarjetas NO es confiable — siempre contar desde `direcciones_globales`
+- `cantidad_direcciones` y `totalDirecciones` deben ser iguales y reflejar los documentos reales de `direcciones_globales`; usar `ContadorTarjetasService.sincronizar` al crear, mover o eliminar direcciones
 - No usar `withOpacity()` — usar `withValues(alpha: x)`
 - No usar `RadioListTile` con `groupValue/onChanged` deprecated — usar `RadioGroup`

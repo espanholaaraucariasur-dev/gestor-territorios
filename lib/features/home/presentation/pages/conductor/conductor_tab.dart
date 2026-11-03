@@ -323,8 +323,10 @@ class _ConductorTabState extends State<ConductorTab> {
         'disponible_para_publicadores': false,
         'territorio_nombre': territorioNombre,
         'enviado_tipo': 'publicador',
-        if (direccionesSnapshot != null)
+        if (direccionesSnapshot != null) ...{
           'cantidad_direcciones': direccionesSnapshot.size,
+          'totalDirecciones': direccionesSnapshot.size,
+        },
         // Limpiar estado stale de un dueño anterior (igual que el admin).
         'tomado_en': null,
         'tomado_por': null,

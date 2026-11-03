@@ -104,6 +104,7 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
         // Reiniciar contador y limpiar array local de la tarjeta
         subBatch.update(tarjetaDoc.reference, {
           'totalDirecciones': 0,
+          'cantidad_direcciones': 0,
           'direcciones': [],
           'ultimocambio': FieldValue.serverTimestamp(),
         });
@@ -135,6 +136,7 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
           }
           subBatch.update(tarjetaDoc.reference, {
             'totalDirecciones': 0,
+            'cantidad_direcciones': 0,
             'direcciones': [],
             'ultimocambio': FieldValue.serverTimestamp(),
           });

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'groq_territory_service.dart';
+import 'historial_direcciones_nuevas_service.dart';
 import 'mapbox_service.dart';
 import 'notificacion_service.dart' as notif;
 
@@ -10,9 +11,11 @@ import 'notificacion_service.dart' as notif;
 /// Flujo completo:
 /// 1. IA decide la mejor tarjeta destino para cada dirección.
 /// 2. Si no hay tarjeta con cupo » crea una nueva (y territorio si no existe).
-/// 3. Guarda en `direcciones_globales` con `tarjeta_id` vinculada.
-/// 4. Actualiza el contador `totalDirecciones` de la tarjeta.
-/// 5. Registra en `historial_reorganizaciones`.
+/// 3. Guarda en `direcciones_globales` con `tarjeta_id` vinculada, ya predicada
+///    (la sugerencia viene de un publicador que estuvo en la puerta).
+/// 4. Actualiza los contadores de la tarjeta.
+/// 5. Registra en `historial_reorganizaciones` y en
+///    `historial_direcciones_nuevas`.
 /// 6. Emite notificación in-app (NotificacionService).
 class AutoAsignadorService {
   static final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -27,6 +30,7 @@ class AutoAsignadorService {
   static Future<Map<String, dynamic>> procesarDireccionNueva({
     required Map<String, dynamic> nuevaDireccion,
     required String usuarioEmail,
+    String usuarioNombre = '',
   }) async {
     // ─────────────────── VALIDACIÓN DE REALIDAD (Mapbox) ───────────────────
     // Antes de gastar tokens de IA y de guardar, exigimos que Mapbox confirme
@@ -185,6 +189,12 @@ class AutoAsignadorService {
     String tarjetaFinalId = resuelta['id']!;
     String tarjetaFinalNombre = resuelta['nombre']!;
     String tarjetaFinalTerritorioId = resuelta['territorio_id']!;
+    final barrioFinal = _barrioDe(
+      (nuevaDireccion['barrio'] ?? '').toString().trim(),
+      tarjetaFinalTerritorioId,
+    );
+    final ahora = DateTime.now();
+    final mesActual = '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
 
     // Guardar la dirección vinculada en direcciones_globales.
     final batch = _db.batch();
@@ -205,11 +215,16 @@ class AutoAsignadorService {
       // de más abajo). Un documento sin `barrio` además queda fuera de las tres
       // consultas que filtran por ese campo. Van después del spread para ganar.
       'complemento': (nuevaDireccion['complemento'] ?? '').toString().trim(),
-      'barrio': _barrioDe(
-        (nuevaDireccion['barrio'] ?? '').toString().trim(),
-        tarjetaFinalTerritorioId,
-      ),
-      'estado_predicacion': 'pendiente',
+      'barrio': barrioFinal,
+      // La sugerencia la envía un publicador que ESTUVO en la puerta, igual que
+      // en la asignación manual del auditor. Por eso la dirección nace predicada
+      // y no "pendiente": el trabajo de campo ya se hizo. Escribir 'pendiente'
+      // la dejaba invisible para el progreso y el historial la mostraba como
+      // "pendiente de predicar" aunque nadie tuviera que volver.
+      'estado_predicacion': 'completada',
+      'predicado': true,
+      'fecha_predicacion': FieldValue.serverTimestamp(),
+      'mes_predicacion': mesActual,
       // 'estado': 'asignada' (no un valor custom) porque el publicador
       // filtra con .where('estado', isNotEqualTo: 'removida') — y además
       // así queda consistente con lo que escribe el admin y el auditor.
@@ -254,6 +269,27 @@ class AutoAsignadorService {
 
     await batch.commit();
 
+    // Archivo permanente de la dirección nueva. Sin esto, el modo automático
+    // agregaba la dirección pero Auditor » Nuevas Direcciones no la mostraba:
+    // `sugerencias` se borra al procesarla y nadie escribía en
+    // `historial_direcciones_nuevas`. Va después del commit para no anotar en
+    // el historial algo que finalmente no se guardó.
+    await HistorialDireccionesNuevasService.registrar(
+      direccionId: globalRef.id,
+      calle: calleNormalizada,
+      complemento: (nuevaDireccion['complemento'] ?? '').toString().trim(),
+      barrio: barrioFinal,
+      tarjetaId: tarjetaFinalId,
+      territorioId: tarjetaFinalTerritorioId,
+      origen: kOrigenIa,
+      usuario: usuarioEmail,
+      usuarioNombre: usuarioNombre,
+      enviadoPor: (nuevaDireccion['enviado_por'] ?? '').toString(),
+      enviadoPorNombre:
+          (nuevaDireccion['enviado_por_nombre'] ?? '').toString(),
+      sugerenciaId: (nuevaDireccion['id_sugerencia'] ?? '').toString(),
+    );
+
     // Notificar al auditor que una dirección fue colocada.
     try {
       final calle = (nuevaDireccion['calle'] ?? nuevaDireccion['texto_direccion'] ?? '').toString();
@@ -288,6 +324,7 @@ class AutoAsignadorService {
   static Future<Map<String, dynamic>> procesarLoteDirecciones({
     required List<Map<String, dynamic>> direcciones,
     required String usuarioEmail,
+    String usuarioNombre = '',
     Function(int procesados, int total)? onProgress,
   }) async {
     final resultados = <Map<String, dynamic>>[];
@@ -301,6 +338,7 @@ class AutoAsignadorService {
         final resultado = await procesarDireccionNueva(
           nuevaDireccion: dir,
           usuarioEmail: usuarioEmail,
+          usuarioNombre: usuarioNombre,
         );
         // Dirección que no pudo colocarse (no real según Mapbox, o sin ningún
         // territorio existente) NO se considera colocada: va al resumen.
@@ -455,6 +493,7 @@ class AutoAsignadorService {
       'nombre': nombreTarjeta,
       'territorio_id': territorioId,
       'totalDirecciones': 0,
+      'cantidad_direcciones': 0,
       'creado_por_ia': true,
       'created_at': FieldValue.serverTimestamp(),
     });

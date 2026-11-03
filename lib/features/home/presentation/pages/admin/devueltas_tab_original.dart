@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:araucaria_sur/core/services/contadores_tarjetas_service.dart';
 
 class RemovidasTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -215,6 +216,19 @@ class _RemovidasTabState extends State<RemovidasTab> {
       batch.delete(doc.reference);
 
       await batch.commit();
+
+      // La dirección vuelve a una tarjeta: recalcular ambos contadores desde
+      // los documentos reales. Si la tarjeta ya no existe, se ignora.
+      if (tarjetaIdOrigen.isNotEmpty && territorioId.isNotEmpty) {
+        try {
+          await ContadorTarjetasService.sincronizar(
+            territorioId: territorioId,
+            tarjetaId: tarjetaIdOrigen,
+          );
+        } catch (error) {
+          debugPrint('No se pudo recalcular $tarjetaIdOrigen: $error');
+        }
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

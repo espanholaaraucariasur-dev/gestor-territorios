@@ -7,6 +7,7 @@ import 'auditor_panel_page.dart';
 import 'mantenimiento_tab.dart';
 import '../../../../../core/services/csv_upload.dart';
 import '../../../../../core/services/algolia_service.dart';
+import '../../../../../core/services/contadores_tarjetas_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 import '../../../../../core/utils/direccion_utils.dart';
@@ -289,7 +290,6 @@ class _AdminTabState extends State<AdminTab> {
           'nombre': nombreTarjeta,
           'territorio_id': territorioId,
           'estado': 'disponible',
-          'cantidad_direcciones': direcciones.length,
           'barrio': '',
           'created_at': FieldValue.serverTimestamp(),
           'bloqueado': true,
@@ -364,6 +364,13 @@ class _AdminTabState extends State<AdminTab> {
         for (final entry in direccionesParaAlgolia.entries) {
           await AlgoliaService.sincronizarUna(entry.key, entry.value);
         }
+
+        // Los duplicados se omitieron, así que el total real puede ser menor
+        // que el CSV. Se recalculan ambos contadores desde Firestore.
+        await ContadorTarjetasService.sincronizar(
+          territorioId: territorioId,
+          tarjetaId: nombreTarjeta,
+        );
 
         totalTarjetas++;
       }
@@ -1222,6 +1229,7 @@ Future<void> _mostrarDialogoCrearTerritorio() async {
                               'territorio_id': terId,
                               'estado': 'disponible',
                               'cantidad_direcciones': 0,
+                              'totalDirecciones': 0,
                               'barrio': '',
                               'created_at': FieldValue.serverTimestamp(),
                               'bloqueado': true,
@@ -1508,6 +1516,11 @@ Future<void> _mostrarDialogoCrearTerritorio() async {
                   'tipo': 'manual',
                   'created_at': FieldValue.serverTimestamp(),
                 });
+
+                await ContadorTarjetasService.sincronizar(
+                  territorioId: terId,
+                  tarjetaId: tarjetaId,
+                );
 
                 calleCtrl.clear();
                 complementoCtrl.clear();
@@ -2113,6 +2126,13 @@ Future<void> _mostrarDialogoCrearTerritorio() async {
           for (final entry in direccionesParaAlgolia.entries) {
             await AlgoliaService.sincronizarUna(entry.key, entry.value);
           }
+
+          // Se omitieron duplicados: el total real se recalcula desde Firestore
+          // y se escribe en ambos contadores de la tarjeta.
+          await ContadorTarjetasService.sincronizar(
+            territorioId: terId,
+            tarjetaId: tarjetaId,
+          );
 
           if (context.mounted) {
             Navigator.pop(context);

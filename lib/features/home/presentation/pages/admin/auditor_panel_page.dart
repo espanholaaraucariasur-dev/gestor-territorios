@@ -10,6 +10,7 @@ import 'package:araucaria_sur/core/services/auto_asignador_service.dart';
 import 'package:araucaria_sur/core/services/notificacion_service.dart';
 import 'package:araucaria_sur/core/services/geocoding_backfill_service.dart';
 import 'package:araucaria_sur/core/services/historial_direcciones_nuevas_service.dart';
+import 'package:araucaria_sur/core/services/contadores_tarjetas_service.dart';
 import 'whatsapp_ingestion_dialog.dart';
 
 class AuditorPanelPage extends StatefulWidget {
@@ -375,10 +376,12 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
     }
 
     final email = (widget.usuarioData?['email'] as String?) ?? 'sistema';
+    final nombre = (widget.usuarioData?['nombre'] as String?) ?? '';
     try {
       final resumen = await AutoAsignadorService.procesarLoteDirecciones(
         direcciones: direcciones,
         usuarioEmail: email,
+        usuarioNombre: nombre,
       );
 
       // Eliminar de la bandeja SOLO las direcciones efectivamente colocadas.
@@ -930,7 +933,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
               .doc(tTerId)
               .collection('tarjetas')
               .doc(tarjetaRealId),
-          {'totalDirecciones': FieldValue.increment(1)},
+          {
+            'totalDirecciones': FieldValue.increment(1),
+            'cantidad_direcciones': FieldValue.increment(1),
+          },
         );
         ops++;
       }
@@ -2999,6 +3005,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
       final batch = _firestore.batch();
       final ref = _firestore.collection('direcciones_globales').doc();
       final esComercialDir = item['es_comercial'] == true;
+      final ahora = DateTime.now();
+      final mesActual =
+          '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}';
       final dataDir = <String, dynamic>{
         'calle': item['calle'] ?? item['texto_direccion'] ?? '',
         'complemento': item['complemento'] ?? '',
@@ -3017,6 +3026,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
         'estado_predicacion': 'completada',
         'predicado': true,
         'fecha_predicacion': FieldValue.serverTimestamp(),
+        // Sin el mes, "Este mes" y Estadísticas no cuentan una dirección
+        // agregada como predicada, aunque el resto de la app sí la vea
+        // completada. Publicador lo escribe siempre al predicar.
+        'mes_predicacion': mesActual,
         if (item['lat'] != null) 'lat': item['lat'],
         if (item['lng'] != null) 'lng': item['lng'],
         'origen': 'Asignación manual (Auditor)',
@@ -3137,6 +3150,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
     final String complemento = (data['complemento'] as String?) ?? '';
 
     final email = (widget.usuarioData?['email'] as String?) ?? 'sistema';
+    final nombre = (widget.usuarioData?['nombre'] as String?) ?? '';
 
     // Procesar la dirección con el AutoAsignadorService: IA decide la tarjeta
     // óptima, crea tarjeta/territorio si hace falta, guarda en
@@ -3150,8 +3164,14 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
           'texto_direccion': textoDireccion,
           'categoria': data['categoria'] ?? '',
           'es_comercial': data['es_comercial'] ?? false,
+          // Mismos datos que el flujo en lote: sin ellos el archivo de
+          // direcciones nuevas no puede decir quién envió la dirección.
+          'id_sugerencia': doc.id,
+          'enviado_por': data['enviado_por'] ?? '',
+          'enviado_por_nombre': data['enviado_por_nombre'] ?? '',
         },
         usuarioEmail: email,
+        usuarioNombre: nombre,
       );
       // Si la dirección no pudo colocarse (no es real según Mapbox, o no hay
       // ningún territorio existente donde ubicarla), NO se borra de la bandeja:
@@ -3520,6 +3540,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
             'barrio': d['barrio'] ?? '',
             'complemento': complemento,
             'motivo': 'Duplicado (mismo domicilio y complemento)',
+            // Necesarios para recalcular los contadores de la tarjeta que
+            // pierde la dirección duplicada.
+            'tarjeta_id': d['tarjeta_id'] ?? '',
+            'territorio_id': d['territorio_id'] ?? '',
           });
         }
       } else {
@@ -3735,6 +3759,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
     /// se agregaron, así que no había forma de verificarlo.
     final nuevasCreadas = <Map<String, String>>[];
 
+    /// Tarjetas cuyo contenido cambia con este plan (id -> territorio). Al
+    /// final se recalculan ambos contadores desde `direcciones_globales`,
+    /// porque `direccionesCount` del plan no es un delta y no sirve para
+    /// incrementar contadores existentes.
+    final tarjetasParaRecalcular = <String, String>{};
+    final tarjetasEliminadas = <String>{};
+
     /// Nombre -> (id, territorio) de las tarjetas ya existentes en la
     /// subcolección canónica, para actualizar en vez de crear duplicados
     /// (la IA puede inventar IDs ficticios).
@@ -3775,6 +3806,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
           ? terPlan
           : (tarjetasExistentesPorNombre[nombre]?['territorio_id'] ?? '');
       if (terr.isEmpty) continue;
+      tarjetasEliminadas.add(nombre);
       batch.delete(
         firestore
             .collection('territorios')
@@ -3790,6 +3822,11 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
     final duplicados = (plan['direcciones_duplicadas'] as List?) ?? [];
     for (var d in duplicados) {
       if (d is Map && d['id'] != null) {
+        final tarjetaDuplicado = d['tarjeta_id']?.toString() ?? '';
+        final territorioDuplicado = d['territorio_id']?.toString() ?? '';
+        if (tarjetaDuplicado.isNotEmpty && territorioDuplicado.isNotEmpty) {
+          tarjetasParaRecalcular[tarjetaDuplicado] = territorioDuplicado;
+        }
         final ref = firestore
             .collection('direcciones_globales')
             .doc(d['id'].toString());
@@ -3805,13 +3842,13 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
     for (var t in tarjetasNuevas) {
       if (t is! Map || t['nombre'] == null) continue;
       final nombre = t['nombre'].toString();
-      final dirs = (t['direccionesCount'] is num) ? t['direccionesCount'] : 0;
       final terPlan =
           (t['territorioId'] ?? t['territorio_id'])?.toString() ?? '';
       final territorio = terPlan.isNotEmpty
           ? terPlan
           : (tarjetasExistentesPorNombre[nombre]?['territorio_id'] ?? '');
       if (territorio.isEmpty) continue;
+      tarjetasParaRecalcular[nombre] = territorio;
 
       final ref = firestore
           .collection('territorios')
@@ -3822,8 +3859,9 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
       // Si ya existe una tarjeta con ese nombre, actualízala en vez de crear.
       final existia = tarjetasExistentesPorNombre.containsKey(nombre);
       if (existia) {
+        // Los contadores se recalculan después del commit: el plan no trae el
+        // delta real de cada tarjeta, solo su composición final.
         batch.update(ref, {
-          'totalDirecciones': FieldValue.increment(dirs is int ? dirs : 0),
           'sugerencia_auditor': sugerenciaUsuario ?? '',
           'actualizado_por_ia': true,
           'updated_at': FieldValue.serverTimestamp(),
@@ -3832,7 +3870,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
         batch.set(ref, {
           'nombre': nombre,
           'territorio_id': territorio,
-          'totalDirecciones': dirs,
+          'totalDirecciones': 0,
+          'cantidad_direcciones': 0,
           'creado_por_ia': true,
           'sugerencia_auditor': sugerenciaUsuario ?? '',
           'created_at': FieldValue.serverTimestamp(),
@@ -3868,6 +3907,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
       final territorioDestino =
           tarjetasExistentesPorNombre[haciaTarjeta]?['territorio_id'] ?? '';
       if (territorioDestino.isEmpty) continue; // tarjeta destino no resuelta
+      tarjetasParaRecalcular[haciaTarjeta] = territorioDestino;
 
       // Datos completos de la sugerencia original (complemento, lat/lng),
       // con fallback a lo que trae el propio movimiento del plan.
@@ -3923,6 +3963,23 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
 
     try {
       await batch.commit();
+
+      // Los contadores de cada tarjeta afectada se recalculan desde
+      // `direcciones_globales`; las tarjetas eliminadas por el plan ya no
+      // tienen documento y se omiten.
+      for (final entry in tarjetasParaRecalcular.entries) {
+        if (tarjetasEliminadas.contains(entry.key)) continue;
+        try {
+          await ContadorTarjetasService.sincronizar(
+            territorioId: entry.value,
+            tarjetaId: entry.key,
+          );
+        } catch (error) {
+          debugPrint(
+              'No se pudo recalcular la tarjeta ${entry.key}: $error');
+        }
+      }
+
       // El plan pudo crear, editar o eliminar tarjetas: invalidar la caché
       // compartida de territorios/tarjetas.
       _catalogo.invalidar();
@@ -5507,6 +5564,7 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
             'nombre': nombreNuevo,
             'territorio_id': territorioId,
             'totalDirecciones': grupo.length,
+            'cantidad_direcciones': grupo.length,
             'creado_por_ia': true,
             'origen_reorganizacion_local': zoneKey,
             'created_at': FieldValue.serverTimestamp(),
@@ -5566,7 +5624,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
         if (e.value <= 0) {
           batch2.delete(tarjetaRef(e.key));
         } else {
-          batch2.update(tarjetaRef(e.key), {'totalDirecciones': e.value});
+          batch2.update(tarjetaRef(e.key), {
+            'totalDirecciones': e.value,
+            'cantidad_direcciones': e.value,
+          });
         }
       }
       // Descontar tarjetas EXTERNAS (de otras zonas) por el territorio que
@@ -5587,7 +5648,10 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
               .doc(terDeCard)
               .collection('tarjetas')
               .doc(e.key),
-          {'totalDirecciones': FieldValue.increment(e.value)},
+          {
+            'totalDirecciones': FieldValue.increment(e.value),
+            'cantidad_direcciones': FieldValue.increment(e.value),
+          },
         );
       }
       await batch2.commit();

@@ -1107,6 +1107,7 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                 'disponible_para_publicadores': false,
                 'estatus_envio': 'disponible',
                 'cantidad_direcciones': 0,
+                'totalDirecciones': 0,
               });
               if (context.mounted) Navigator.pop(c);
             },
@@ -1262,7 +1263,10 @@ class _TerritoriosTabState extends State<TerritoriosTab> {
                     .doc(terId)
                     .collection('tarjetas')
                     .doc(tarjetaId)
-                    .update({'cantidad_direcciones': count.count ?? 0});
+                    .update({
+                  'cantidad_direcciones': count.count ?? 0,
+                  'totalDirecciones': count.count ?? 0,
+                });
 
                 calleCtrl.clear();
                 complementoCtrl.clear();

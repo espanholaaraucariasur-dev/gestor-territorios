@@ -271,6 +271,7 @@ class _WhatsAppIngestionDialogState extends State<WhatsAppIngestionDialog> {
     // Actualizar contador de la tarjeta destino
     batch.update(tarjetaRef, {
       'totalDirecciones': FieldValue.increment(incremento),
+      'cantidad_direcciones': FieldValue.increment(incremento),
     });
 
     // Registrar el evento en historial_reorganizaciones
