@@ -37,12 +37,7 @@ service cloud.firestore {
     match /territorios/{terId}/tarjetas/{tarjetaId} {
       allow read, write: if sesionReal();
     }
-    
-    // Tarjetas temporales
-    match /territorios/temporales/tarjetas/{tarjetaId} {
-      allow read, write: if sesionReal();
-    }
-    
+
     // Direcciones globales
     match /direcciones_globales/{doc} {
       allow read, write: if sesionReal();

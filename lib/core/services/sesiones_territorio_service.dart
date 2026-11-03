@@ -58,17 +58,12 @@ class ProgresoTerritorio {
   final String territorioId;
   final String territorioNombre;
 
-  /// Direcciones del territorio que siguen "en juego": pendientes, en la
-  /// bandeja de temporales o ya predicadas. Es el denominador de la barra.
+  /// Direcciones del territorio que siguen "en juego": pendientes o ya
+  /// predicadas. Es el denominador de la barra.
   final List<String> idsEnJuego;
 
   /// Subconjunto de [idsEnJuego] con `estado_predicacion == 'completada'`.
   final List<String> idsPredicadas;
-
-  /// Subconjunto de [idsEnJuego] que está en la bandeja de temporales. Salió de
-  /// la tarjeta pero sigue siendo del territorio y hay que volver a predicarla,
-  /// así que continúa en el denominador.
-  final List<String> idsEnTemporal;
 
   /// Direcciones que dejaron el territorio de forma permanente (comercio
   /// cerrado, no hispano, borradas). NO cuentan en el denominador: si contaran,
@@ -99,7 +94,6 @@ class ProgresoTerritorio {
     required this.territorioNombre,
     required this.idsEnJuego,
     required this.idsPredicadas,
-    required this.idsEnTemporal,
     required this.retiradas,
     required this.retiradasSinRastro,
     required this.primeraPredicacion,
@@ -397,12 +391,11 @@ class ProgresoGeneral {
 ///
 /// POR QUÉ UNA LISTA DE IDs Y NO UN CONTADOR
 ///
-/// El problema que ya se corrigió en las estadísticas de temporales fue
-/// exactamente un contador desincronizado. Acá se evita la clase entera del
-/// problema: el alcance se guarda como la lista concreta de direcciones y el
-/// progreso sale de contar cuántas de esas están `completada` hoy. No hay nada
-/// que sumar ni que restar, así que ninguna reparación, borrado o proceso masivo
-/// puede descuadrar el número.
+/// El problema clásico de un contador desincronizado se evita entero: el
+/// alcance se guarda como la lista concreta de direcciones y el progreso sale
+/// de contar cuántas de esas están `completada` hoy. No hay nada que sumar ni
+/// que restar, así que ninguna reparación, borrado o proceso masivo puede
+/// descuadrar el número.
 class SesionesTerritorioService {
   SesionesTerritorioService._();
 
@@ -412,7 +405,6 @@ class SesionesTerritorioService {
   /// Colecciones que comparten nombre con datos reales pero no son territorios
   /// de campo.
   static const Set<String> _pseudoTerritorios = {
-    'temporales',
     'removidas',
     'estadisticas',
     'campanas',
@@ -497,7 +489,6 @@ class SesionesTerritorioService {
               d['direccion_normalizada']?.toString() ??
               '',
           completada: _esPredicada(d),
-          enTemporal: _esTemporal(d),
           cerrada: _esComercioCerrado(d),
           fechaPredicacion: _leerFecha(d['fecha_predicacion']),
           creadaEn: _leerFecha(d['created_at'] ?? d['creado_el']),
@@ -632,9 +623,7 @@ class SesionesTerritorioService {
   ) {
     for (final campo in const [
       'territorio_id',
-      'territorio_origen_id',
       'territorio_nombre',
-      'territorio_origen_nombre',
       'barrio',
     ]) {
       if (idBasePorNorm.containsKey(_norm(d[campo]?.toString()))) return true;
@@ -713,7 +702,6 @@ class SesionesTerritorioService {
     // ── Recalcular el alcance de la sesión ───────────────────────────
     final alcance = <String>{...alcanceInicial, ...llegados};
     final preds = <String>[];
-    final temps = <String>[];
     final retiradasIds = <String>{};
     var sinRastro = 0;
     DateTime? inicio;
@@ -739,10 +727,8 @@ class SesionesTerritorioService {
         retiradasIds.add(idDir);
         continue;
       }
-      if (info.enTemporal) temps.add(idDir);
       if (info.completada) {
-        preds.add(idDir);
-        final f = info.fechaPredicacion;
+        preds.add(idDir);        final f = info.fechaPredicacion;
         if (f != null) {
           if (inicio == null || f.isBefore(inicio)) inicio = f;
           if (cierre == null || f.isAfter(cierre)) cierre = f;
@@ -845,8 +831,8 @@ class SesionesTerritorioService {
       if (existente == null || existente['estado'] != estadoFinal) {
         cambios['estado'] = estadoFinal;
         if (existente?['estado'] == kSesionCerrada) {
-          // El ciclo se rompió: entraron direcciones nuevas o volvió una de
-          // temporales. Se reabre, pero el cierre original se conserva.
+          // El ciclo se rompió: entraron direcciones nuevas. Se reabre, pero el
+          // cierre original se conserva.
           reaperturas++;
           cambios['reaperturas'] = reaperturas;
         }
@@ -879,7 +865,6 @@ class SesionesTerritorioService {
         alcanceVivo: alcanceVivo.length,
         idsEnJuego: bruto.idsEnJuego,
         preds: bruto.idsPredicadas,
-        temps: bruto.idsEnTemporal,
         retiradas: retiradasDeAmbito,
         sinRastro: sinRastro + bruto.retiradasSinRastro,
         inicioPred: bruto.primeraPredicacion,
@@ -941,7 +926,6 @@ class SesionesTerritorioService {
       alcanceVivo: alcanceVivo.length,
       idsEnJuego: bruto.idsEnJuego,
       preds: bruto.idsPredicadas,
-      temps: bruto.idsEnTemporal,
       retiradas: retiradasDeAmbito,
       sinRastro: sinRastro + bruto.retiradasSinRastro,
       inicioPred: bruto.primeraPredicacion,
@@ -970,7 +954,6 @@ class SesionesTerritorioService {
     required int alcanceVivo,
     required List<String> idsEnJuego,
     required List<String> preds,
-    required List<String> temps,
     required int retiradas,
     required int sinRastro,
     required DateTime? inicioPred,
@@ -1015,7 +998,6 @@ class SesionesTerritorioService {
         // con ese criterio.
         idsEnJuego: idsEnJuego,
         idsPredicadas: preds,
-        idsEnTemporal: temps,
         retiradas: retiradas,
         retiradasSinRastro: sinRastro,
         primeraPredicacion: inicioPred,
@@ -1034,7 +1016,6 @@ class SesionesTerritorioService {
     required List<DatosTarjetaSesion> tarjetas,
   }) {
     final preds = <String>[];
-    final temps = <String>[];
     // El denominador de la barra son las direcciones del territorio que SIGUEN
     // vivas. Los comercios cerrados salen: si contaran, una barra nunca podría
     // llegar a 100% y el cierre de la sesión no llegaría nunca.
@@ -1051,7 +1032,6 @@ class SesionesTerritorioService {
       }
       if (info.cerrada) continue;
       vivos.add(id);
-      if (info.enTemporal) temps.add(id);
       if (info.completada) {
         preds.add(id);
         final f = info.fechaPredicacion;
@@ -1067,7 +1047,6 @@ class SesionesTerritorioService {
       territorioNombre: territorioNombre,
       idsEnJuego: vivos,
       idsPredicadas: preds,
-      idsEnTemporal: temps,
       // En el paso bruto solo se detectan los cierros de comercio; las bajas y
       // mudanzas de territorio se recalculan por sesión en `_sincronizar`.
       retiradas: idsEnJuego.length - vivos.length,
@@ -1133,20 +1112,14 @@ class SesionesTerritorioService {
   /// Determina a qué territorio de campo pertenece una dirección, cortando en
   /// el primer acierto para que nunca cuente en dos denominadores.
   ///
-  /// El orden de los campos ES la prioridad. `territorio_id` manda; después
-  /// `territorio_origen_id`, que es lo que sobrevive cuando la dirección fue
-  /// mandada a la bandeja de temporales; y al final los nombres.
-  ///
-  /// `territorio_id = "temporales"` no está en el índice a propósito, así que
-  /// cae solo hacia el territorio de origen, que es el correcto.
+  /// El orden de los campos ES la prioridad. `territorio_id` manda y después
+  /// quedan los nombres.
   static String? _resolverTerritorio(
     Map<String, dynamic> d, {
     required Map<String, String> idTerritorioPorNorm,
   }) {
     for (final campo in const [
       'territorio_id',
-      'territorio_origen_id',
-      'territorio_origen_nombre',
       'barrio',
       'territorio_nombre',
     ]) {
@@ -1158,11 +1131,6 @@ class SesionesTerritorioService {
 
   static bool _esPredicada(Map<String, dynamic> d) =>
       d['estado_predicacion'] == 'completada' || d['predicado'] == true;
-
-  static bool _esTemporal(Map<String, dynamic> d) {
-    final e = d['estado']?.toString() ?? '';
-    return e == 'temporal' || e == 'temporal_asignada';
-  }
 
   static bool _esComercioCerrado(Map<String, dynamic> d) =>
       d['estado'] == 'comercio_cerrado' ||
@@ -1186,7 +1154,6 @@ class _DirInfo {
   final String id;
   final String calle;
   final bool completada;
-  final bool enTemporal;
   final bool cerrada;
   final DateTime? fechaPredicacion;
   final DateTime? creadaEn;
@@ -1195,7 +1162,6 @@ class _DirInfo {
     required this.id,
     required this.calle,
     required this.completada,
-    required this.enTemporal,
     required this.cerrada,
     required this.fechaPredicacion,
     required this.creadaEn,

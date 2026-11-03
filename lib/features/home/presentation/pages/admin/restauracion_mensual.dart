@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// El import de `historial_temporales_service` se fue con el PASO 4: era el
-// único uso que tenía en este archivo. El servicio sigue vivo para
-// `temporales_tab.dart`.
 
 /// Servicio de reinicio automático del primer día de cada mes.
 class RestauracionMensual {
@@ -46,7 +43,7 @@ class RestauracionMensual {
   ) {
     final porNorm = <String, String>{};
     for (final d in docs) {
-      if (const ['temporales', 'removidas', 'estadisticas', 'campanas']
+      if (const ['removidas', 'estadisticas', 'campanas']
           .contains(d.id)) {
         continue;
       }
@@ -65,8 +62,6 @@ class RestauracionMensual {
   ) {
     for (final campo in const [
       'territorio_id',
-      'territorio_origen_id',
-      'territorio_origen_nombre',
       'barrio',
       'territorio_nombre',
     ]) {
@@ -169,11 +164,9 @@ class RestauracionMensual {
       // todavía está en la calle.
       //
       // Regla de avance: cuenta como predicha la que tiene
-      // `estado_predicacion == 'completada'` o `predicado == true`. Las que
-      // están en la bandeja de temporales, las que se dejaron como no
-      // predicadas y las que se retiraron NO cuentan. Las retiradas
-      // (`comercio_cerrado`) ni siquiera entran en el denominador, porque si no
-      // un territorio descartado nunca llegaría al 100%.
+      // `estado_predicacion == 'completada'` o `predicado == true`. Las
+      // retiradas (`comercio_cerrado`) no cuentan ni entran en el denominador:
+      // si no, un territorio descartado nunca llegaría al 100%.
       final territoryDocs =
           (await FirebaseFirestore.instance.collection('territorios').get()).docs;
       final porNorm = _indexTerritorios(territoryDocs);
@@ -223,7 +216,6 @@ class RestauracionMensual {
           'estado_predicacion': 'pendiente',
           'fecha_predicacion': null,
           'mes_predicacion': null,
-          'motivo_temporal': null,
           'prioridad_mes_anterior': !predicada,
           if (!predicada) 'mes_pendiente': mesAnterior,
 
@@ -277,7 +269,7 @@ class RestauracionMensual {
       // paso 2 les reinició el avance.
       int territoriesPreserved = 0;
       for (final territorio in territoryDocs) {
-        if (const ['temporales', 'removidas', 'estadisticas', 'campanas']
+        if (const ['removidas', 'estadisticas', 'campanas']
             .contains(territorio.id)) {
           continue;
         }
@@ -296,7 +288,6 @@ class RestauracionMensual {
         b = FirebaseFirestore.instance.batch();
         for (final tarjeta in tarjetasSnap.docs) {
           final td = tarjeta.data();
-          if (td['es_temporal'] == true) continue;
           final incompleta = td['completada'] != true &&
               ((td['asignado_a'] as String? ?? '').isNotEmpty ||
                   // También tarjetas nunca enviadas que tenían dirs sin predicar
@@ -348,28 +339,7 @@ class RestauracionMensual {
         '$territoriesPreserved',
       );
 
-      // PASO 4 (eliminado)
-      //
-      // Antes acá se devolvían las direcciones de las tarjetas temporales a su
-      // territorio de origen y después se borraban las tarjetas `T-`.
-      //
-      // Ese código no funcionaba y no hacía falta arreglarlo:
-      //
-      //   - Leía `territorio_id_origen`, campo que nadie escribe. El código
-      //     que arma las temporales escribe `territorio_origen_id`. Como el
-      //     valor llegaba siempre vacío, la condición de adentro nunca se
-      //     cumplía y la restauración no ocurría nunca.
-      //   - Lo que sí ocurría, siempre, era el borrado de las tarjetas `T-`.
-      //     Firestore no borra en cascada, así que cada mes quedaban las
-      //     direcciones de la subcolección `direcciones` apuntando a una
-      //     tarjeta que ya no existía.
-      //   - Además era una lectura por tarjeta dentro de un bucle, que es
-      //     justo lo que llevó el proyecto a las 57k lecturas diarias.
-      //
-      // La lógica temporal deja de usarse y sus documentos se borran con
-      // `eliminar-temporales.js`. No hay nada que devolver a ningún lado.
-
-      // PASO 5: Limpiar datos basura
+      // PASO 4: Limpiar datos basura
       final hace30dias =
           Timestamp.fromDate(DateTime.now().subtract(const Duration(days: 30)));
 

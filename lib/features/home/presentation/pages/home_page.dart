@@ -1026,8 +1026,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                               final terData =
                                   terDoc.data() as Map<String, dynamic>;
                               final terNombre = terData['nombre'] ?? terDoc.id;
-                              if (terDoc.id == 'temporales' ||
-                                  terDoc.id == 'campanas')
+                              if (terDoc.id == 'campanas')
                                 return const SizedBox.shrink();
                               if (terData['tipo'] == 'base')
                                 return const SizedBox.shrink();
@@ -1156,8 +1155,7 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                                                       final est = (dd['estado']
                                                               as String?) ??
                                                           '';
-                                                      if (est == 'removida' ||
-                                                          est == 'temporal')
+                                                      if (est == 'removida')
                                                         return false;
                                                       final hecha = dd[
                                                                   'predicado'] ==
@@ -1410,9 +1408,6 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     final calle = (d['calle'] as String?) ?? '';
     final numero = (d['numero'] as String?) ?? '';
     final complemento = (d['complemento'] as String?) ?? '';
-    final motivo = (d['motivo_temporal'] as String?) ?? '';
-    final tieneMotivo =
-        motivo.isNotEmpty && motivo != 'no_predicado' && motivo != 'no_hispano';
     final texto = [
       if (numero.isNotEmpty) numero,
       if (calle.isNotEmpty) calle,
@@ -1424,10 +1419,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: tieneMotivo ? Colors.orange.shade50 : Colors.grey.shade100,
+          color: Colors.grey.shade100,
           borderRadius: BorderRadius.circular(6),
-          border:
-              tieneMotivo ? Border.all(color: Colors.orange.shade300) : null,
         ),
         child: Text(
           texto.isNotEmpty ? texto : calle,
@@ -1437,150 +1430,8 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     );
   }
 
-  Widget _tileTarjetasTemporales({required bool paraConductor}) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('territorios')
-          .doc('temporales')
-          .collection('tarjetas')
-          .where('bloqueado', isEqualTo: false)
-          .snapshots(),
-      builder: (context, snapshot) {
-        final docs = (snapshot.data?.docs ?? []).where((d) {
-          final data = d.data() as Map<String, dynamic>;
-          if (data['tipo'] == 'folder_temporal') return false;
-          if (data['completada'] == true) return false;
-          final asignado = data['asignado_a']?.toString() ?? '';
-          if (asignado.isNotEmpty) return false;
-          final enviado = data['enviado_a']?.toString() ?? '';
-          if (enviado.isNotEmpty) return false;
-          if (!paraConductor && (data['solo_conductores'] as bool?) == true) {
-            return false;
-          }
-          return true;
-        }).toList();
-
-        return docs.isEmpty
-            ? const SizedBox.shrink()
-            : Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ExpansionTile(
-                  leading: const Icon(Icons.timer, color: Color(0xFF4A148C)),
-                  title: const Text('Tarjetas temporales',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('${docs.length} disponibles'),
-                  children: docs.map((tarjetaDoc) {
-                    final data = tarjetaDoc.data() as Map<String, dynamic>;
-                    final tarjetaNombre = data['nombre'] ?? tarjetaDoc.id;
-                    final soloConductores =
-                        (data['solo_conductores'] as bool?) ?? false;
-                    return StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('direcciones_globales')
-                          .where('tarjeta_id', isEqualTo: tarjetaDoc.id)
-                          .snapshots(),
-                      builder: (context, dirSnap) {
-                        final dirs = dirSnap.data?.docs ?? [];
-                        final cantDir = dirs.length;
-                        return ExpansionTile(
-                          tilePadding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 0),
-                          leading: Icon(
-                            Icons.lock_open,
-                            color: const Color(0xFF1B5E20),
-                          ),
-                          title: Text(tarjetaNombre,
-                              style: const TextStyle(fontSize: 13)),
-                          subtitle: Text(
-                            soloConductores
-                                ? '$cantDir direcciones · Solo conductores'
-                                : '$cantDir direcciones',
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          childrenPadding:
-                              const EdgeInsets.only(left: 16, right: 16),
-                          children: [
-                            ...dirs.map((dirDoc) {
-                              final d = dirDoc.data() as Map<String, dynamic>;
-                              final calle = (d['calle'] as String?) ?? '';
-                              final numero = (d['numero'] as String?) ?? '';
-                              final motivo =
-                                  (d['motivo_temporal'] as String?) ?? '';
-                              final tieneMotivo = motivo.isNotEmpty &&
-                                  motivo != 'no_predicado' &&
-                                  motivo != 'no_hispano';
-                              return Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 2),
-                                child: Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: tieneMotivo
-                                        ? Colors.orange.shade50
-                                        : Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: tieneMotivo
-                                        ? Border.all(
-                                            color: Colors.orange.shade300)
-                                        : null,
-                                  ),
-                                  child: Text(
-                                    numero.isNotEmpty
-                                        ? '$calle $numero'
-                                        : calle,
-                                    style: const TextStyle(
-                                        fontSize: 11.5, color: Colors.black87),
-                                  ),
-                                ),
-                              );
-                            }),
-                            const SizedBox(height: 6),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 40,
-                              child: ElevatedButton(
-                                onPressed: cantDir > 0
-                                    ? () async {
-                                        Navigator.pop(context);
-                                        if (paraConductor) {
-                                          await _asignarTarjetaAConductor(
-                                            'temporales',
-                                            tarjetaDoc.id,
-                                            tarjetaNombre,
-                                          );
-                                        } else {
-                                          await _asignarTarjetaAPublicador(
-                                            'temporales',
-                                            tarjetaDoc.id,
-                                            tarjetaNombre,
-                                          );
-                                        }
-                                      }
-                                    : null,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: cantDir > 0
-                                      ? const Color(0xFF1B5E20)
-                                      : Colors.grey.shade400,
-                                  foregroundColor: Colors.white,
-                                ),
-                                child: const Text('Tomar tarjeta'),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    );
-                  }).toList(),
-                ),
-              );
-      },
-    );
-  }
-
   Future<void> _mostrarDialogoSolicitarTerritorioPublicador() async {
-    const especiales = ['temporales', 'removidas', 'estadisticas', 'campanas'];
+    final especiales = ['removidas', 'estadisticas', 'campanas'];
 
     // Carga los territorios SIN orderBy (evita que Firestore excluya
     // documentos con caracteres especiales como Ç, tildes, ñ)
@@ -1643,12 +1494,9 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    itemCount: territorios.length + 1,
+                    itemCount: territorios.length,
                     itemBuilder: (ctx2, index) {
-                      if (index == 0) {
-                        return _tileTarjetasTemporales(paraConductor: false);
-                      }
-                      final terDoc = territorios[index - 1];
+                      final terDoc = territorios[index];
                       final terData = terDoc.data();
                       final terNombre =
                           (terData['nombre'] as String?) ?? terDoc.id;

@@ -3,7 +3,6 @@ import '../../../../../core/services/notificacion_service.dart';
 import '../../../../../core/utils/campanas_utils.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../../core/services/gemini_service.dart';
-import '../../../../../core/services/historial_temporales_service.dart';
 import '../../../../../core/l10n/translation_service.dart';
 
 class ComunicacionTab extends StatefulWidget {
@@ -88,8 +87,6 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   }) async {
     final db = FirebaseFirestore.instance;
     final nombre = (campanaData['nombre'] as String?) ?? slot;
-    final mensajePendiente = (campanaData['mensaje_pendiente'] as String?) ??
-        'Falta entregar material de campaña';
     final mes =
         '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
 
@@ -109,7 +106,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
       int totalFaltantes = 0;
       final Map<String, int> porTerritorio = {};
 
-      // 2. Mover faltantes a temporales y contar
+      // 2. Contar entregadas y faltantes de la carpeta de campaña
       for (final dirDoc in carpetaSnap.docs) {
         final data = (dirDoc.data() as Map<String, dynamic>?) ?? {};
         final estadoCampana =
@@ -120,32 +117,6 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           totalDejadas++;
         } else {
           totalFaltantes++;
-          // Mover a temporales con mensaje de campaña
-          final ref = await db.collection('direcciones_globales').add({
-            'calle': data['calle'] ?? '',
-            'complemento': data['complemento'] ?? '',
-            'direccion_normalizada': data['direccion_normalizada'] ?? '',
-            'territorio_id': data['territorio_origen_id'] ?? '',
-            'territorio_nombre': territorioOrigen,
-            'tarjeta_id': data['tarjeta_origen'] ?? '',
-            'barrio': territorioOrigen,
-            'estado': 'temporal',
-            'estado_predicacion': 'temporal',
-            'motivo_temporal': mensajePendiente,
-            'fecha_temporal': FieldValue.serverTimestamp(),
-            'origen_campana': nombre,
-            'reportado_por': widget.usuarioData['nombre'] ?? '',
-            'reportado_por_email': widget.usuarioData['email'] ?? '',
-          });
-          await registrarMovimientoTemporal(
-            tipo: 'entrada',
-            direccionId: ref.id,
-            territorioOrigenId: data['territorio_origen_id']?.toString() ?? '',
-            territorioOrigenNombre: territorioOrigen,
-            calle: data['calle']?.toString(),
-            motivo: 'campana_cierre',
-            por: widget.usuarioData['nombre']?.toString(),
-          );
         }
 
         // Contar por territorio
@@ -182,7 +153,7 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                '✅ Campaña "$nombre" cerrada — $totalFaltantes direcciones a temporales'),
+                '✅ Campaña "$nombre" cerrada — $totalFaltantes sin entregar'),
             backgroundColor: _verde,
           ),
         );

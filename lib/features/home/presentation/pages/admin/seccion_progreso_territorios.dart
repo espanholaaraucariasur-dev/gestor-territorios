@@ -17,10 +17,9 @@ import 'package:flutter/material.dart';
 ///
 /// Qué mide
 ///
-/// SOLO las direcciones marcadas como `completada` ("se predicó"). Las que
-/// están en la bandeja de temporales, las que se dejaron como no predicadas y
-/// las que se retiraron NO cuentan como avance, por pedido explícito: la barra
-/// responde "cuántas se predicaron", no "cuántas se visitaron".
+/// SOLO las direcciones marcadas como `completada` ("se predicó"). Las que se
+/// retiraron NO cuentan como avance, por pedido explícito: la barra responde
+/// "cuántas se predicaron", no "cuántas se visitaron".
 ///
 /// Territorio dinámico
 ///
@@ -367,15 +366,6 @@ class _SeccionProgresoTerritoriosState
           context.t('ses_arrived', args: ['${s.idsLlegados.length}']),
           pend > 0 ? Colors.orange : _verde,
           icon: Icons.call_received,
-        ),
-      );
-    }
-    if ((p?.idsEnTemporal.length ?? 0) > 0) {
-      chips.add(
-        _chip(
-          context.t('ses_in_temporal', args: ['${p!.idsEnTemporal.length}']),
-          Colors.blueGrey,
-          icon: Icons.schedule,
         ),
       );
     }

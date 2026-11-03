@@ -152,7 +152,7 @@ class _RemovidasTabState extends State<RemovidasTab> {
     try {
       final data = (doc.data() as Map<String, dynamic>?) ?? {};
       final docIdOriginal = (data['doc_id_original'] as String?) ?? doc.id;
-      final tarjetaIdOrigen = (data['tarjeta_id_origen'] as String?) ?? '';
+      final tarjetaIdOrigen = (data['tarjeta_id'] as String?) ?? '';
       final territorioId = (data['territorio_id'] as String?) ?? '';
       final territorioNombre = (data['territorio_nombre'] as String?) ?? '';
       final mes =
@@ -564,7 +564,7 @@ class _RemovidasTabState extends State<RemovidasTab> {
                         final complemento =
                             (data['complemento'] as String?) ?? '';
                         final tarjetaOrigen =
-                            (data['tarjeta_id_origen'] as String?) ?? '';
+                            (data['tarjeta_id'] as String?) ?? '';
                         final removidaPor =
                             (data['removida_por'] as String?) ?? '';
                         final removidaEn = data['removida_en'] as Timestamp?;

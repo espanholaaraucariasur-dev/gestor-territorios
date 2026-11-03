@@ -20,13 +20,6 @@ class ComentariosTab extends StatefulWidget {
 class _ComentariosTabState extends State<ComentariosTab> {
   static const Color _morado = Color(0xFF4A148C);
 
-  static const List<String> _marcadores = [
-    'no_predicado',
-    'no_hispano',
-    'comercio_cerrado',
-    'otro',
-  ];
-
   String _texto(Map<String, dynamic> d, List<String> keys) {
     for (final k in keys) {
       final v = d[k];
@@ -37,11 +30,7 @@ class _ComentariosTabState extends State<ComentariosTab> {
 
   /// Texto de comentario efectivo de una dirección (cadena vacía si no tiene).
   String _comentarioDe(Map<String, dynamic> d) {
-    final c = _texto(d, ['comentario', 'comentario_cierre']);
-    if (c.isNotEmpty) return c;
-    final mt = (d['motivo_temporal'] as String?)?.trim() ?? '';
-    if (mt.isNotEmpty && !_marcadores.contains(mt)) return mt;
-    return '';
+    return _texto(d, ['comentario', 'comentario_cierre']);
   }
 
   DateTime _fecha(Map<String, dynamic> d) {
@@ -50,7 +39,6 @@ class _ComentariosTabState extends State<ComentariosTab> {
       'fecha_confirmacion',
       'fecha_actualizacion',
       'fecha_cierre',
-      'fecha_temporal',
       'created_at',
     ]) {
       final v = d[k];
@@ -143,11 +131,9 @@ class _ComentariosTabState extends State<ComentariosTab> {
     final calle = _texto(d, ['calle', 'direccion_normalizada']);
     final complemento = (d['complemento'] as String?)?.trim() ?? '';
     final direccion = complemento.isEmpty ? calle : '$calle, $complemento';
-    final tarjeta = _texto(
-        d, ['tarjeta_id', 'tarjeta_nombre', 'tarjeta_id_origen']);
+    final tarjeta = _texto(d, ['tarjeta_id', 'tarjeta_nombre']);
     final territorio = _texto(d, [
       'territorio_nombre',
-      'territorio_origen_nombre',
       'barrio',
       'territorio_id',
     ]);

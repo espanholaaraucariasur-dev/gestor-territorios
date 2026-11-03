@@ -1548,7 +1548,6 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
         final esCompletadaAud = data['predicado'] == true ||
             data['estado_predicacion'] == 'completada';
         final esPendiente = !esCompletadaAud &&
-            data['estado_predicacion'] != 'temporal' &&
             data['estado_predicacion'] != 'comercio_cerrado';
         if (esPendiente) pendientesProgreso++;
 

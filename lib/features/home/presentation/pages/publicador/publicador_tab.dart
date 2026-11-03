@@ -14,7 +14,6 @@ import 'navegacion_screen.dart';
 
 import '../../../../../core/services/auto_return_service.dart';
 import '../../../../../core/services/offline_sync_service.dart';
-import '../../../../../core/services/historial_temporales_service.dart';
 // Traducciones
 import '../../../../../core/l10n/translation_service.dart';
 import 'enviar_direccion_card.dart';
@@ -257,7 +256,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
           .get();
       completadas += snap.docs.where((doc) {
         final d = _safeData(doc);
-        if (d['estado'] == 'temporal') return false;
         return _esDirPredicada(d);
       }).length;
     }
@@ -397,62 +395,32 @@ class _PublicadorTabState extends State<PublicadorTab> {
     final nombre =
         widget.usuarioData['nombre'] as String? ?? widget.usuarioEmail;
     try {
-      late final Future<void> write;
-      if (territorioId == 'temporales') {
-        // Tarjeta temporal → liberarla para que vuelva a estar disponible
-        write = FirebaseFirestore.instance
-            .collection('territorios')
-            .doc('temporales')
-            .collection('tarjetas')
-            .doc(tarjetaId)
-            .update({
-          'asignado_a': null,
-          'asignado_en': null,
-          'conductor_email': null,
-          'publicador_email': null,
-          'publicador_nombre': null,
-          'enviado_a': null,
-          'enviado_nombre': null,
-          'enviado_en': null,
-          'enviado_tipo': null,
-          'tomado_por': null,
-          'tomado_en': null,
-          'completada': false,
-          'bloqueado': false,
-          'disponible_para_publicadores': true,
-          'estatus_envio': 'devuelto',
-          'devuelto_por': nombre,
-          'devuelto_en': Timestamp.now(),
-        });
-      } else {
-        // Actualizar tarjeta con estado devuelta
-        write = FirebaseFirestore.instance
-            .collection('territorios')
-            .doc(territorioId)
-            .collection('tarjetas')
-            .doc(tarjetaId)
-            .update({
-          'asignado_a': null,
-          'asignado_en': null,
-          'enviado_a': null,
-          'enviado_nombre': null,
-          'enviado_en': null,
-          'enviado_tipo': null,
-          'conductor_email': null,
-          'publicador_email': null,
-          'publicador_nombre': null,
-          'tomado_por': null,
-          'tomado_en': null,
-          'estatus_envio': 'disponible',
-          // Devolver NO bloquea la tarjeta: mientras tenga direcciones
-          // pendientes y la campaña siga activa, vuelve a estar disponible.
-          'bloqueado': false,
-          'disponible_para_publicadores': true,
-          'devuelta_por': nombre,
-          'devuelta_en': Timestamp.now(),
-          'completada': false,
-        });
-      }
+      final write = FirebaseFirestore.instance
+          .collection('territorios')
+          .doc(territorioId)
+          .collection('tarjetas')
+          .doc(tarjetaId)
+          .update({
+        'asignado_a': null,
+        'asignado_en': null,
+        'enviado_a': null,
+        'enviado_nombre': null,
+        'enviado_en': null,
+        'enviado_tipo': null,
+        'conductor_email': null,
+        'publicador_email': null,
+        'publicador_nombre': null,
+        'tomado_por': null,
+        'tomado_en': null,
+        'estatus_envio': 'disponible',
+        // Devolver NO bloquea la tarjeta: mientras tenga direcciones
+        // pendientes y la campaña siga activa, vuelve a estar disponible.
+        'bloqueado': false,
+        'disponible_para_publicadores': true,
+        'devuelta_por': nombre,
+        'devuelta_en': Timestamp.now(),
+        'completada': false,
+      });
 
       // Las escrituras de Firestore se reflejan localmente y se sincronizan en
       // segundo plano; no esperar la confirmación de red para cerrar la acción.
@@ -828,8 +796,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                             ? 'completada'
                             : ((data['estado_predicacion'] as String?) ??
                                 'pendiente');
-                    _textosPorTarjeta[tarjetaId]![dir.id] =
-                        (data['motivo_temporal'] as String?) ?? '';
+                    _textosPorTarjeta[tarjetaId]![dir.id] = '';
                     _modificadosPorTarjeta[tarjetaId]![dir.id] = false;
                     for (final campDoc in campanasActivas) {
                       final cd =
@@ -988,18 +955,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
                       if (estadoLocal == 'completada') {
                         accentColor = const Color(0xFF2E7D32);
                         estadoIcon = Icons.check_circle;
-                      } else if (estadoLocal == 'no_predicado') {
-                        accentColor = const Color(0xFFE65100);
-                        estadoIcon = Icons.hourglass_empty;
                       } else if (estadoLocal == 'comercio_cerrado') {
                         accentColor = const Color(0xFFC62828);
                         estadoIcon = Icons.store_mall_directory_outlined;
                       } else if (estadoLocal == 'no_hispano') {
                         accentColor = const Color(0xFF1565C0);
                         estadoIcon = Icons.public_off;
-                      } else if (estadoLocal == 'otro') {
-                        accentColor = const Color(0xFF6A1B9A);
-                        estadoIcon = Icons.edit_note;
                       }
 
                       return Container(
@@ -1689,10 +1650,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                                                   'pendiente');
                                       _estadosPorTarjeta[tarjetaId]![
                                           'comentario_${dir.id}'] = 'false';
-                                      _textosPorTarjeta[tarjetaId]![dir.id] =
-                                          (data['motivo_temporal']
-                                                  as String?) ??
-                                              '';
+                                      _textosPorTarjeta[tarjetaId]![dir.id] = '';
                                       _modificadosPorTarjeta[tarjetaId]![
                                           dir.id] = false;
                                     }
@@ -2116,10 +2074,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
   /// Confirmar UNA dirección (Fase 2 del plan, §5.2).
   ///
   /// Reutiliza el mismo camino de escritura que la confirmación de tarjeta
-  /// entera, y por eso no duplica ninguna de las reglas: los mismos cinco
-  /// destinos (`completada`, `no_predicado`, `comercio_cerrado`, `no_hispano`,
-  /// `otro`), la misma escritura doble de campos viejos y nuevos, el mismo
-  /// registro de movimientos temporales y el mismo aviso a administración.
+  /// entera, y por eso no duplica ninguna de las reglas: los mismos destinos
+  /// (`completada`, `comercio_cerrado`, `no_hispano`), la misma escritura doble
+  /// de campos viejos y nuevos y el mismo aviso a administración.
   ///
   /// Lo que cambia es el alcance: se pasa una lista de una sola dirección, así
   /// que la validación "todas o nada" de la línea 1599 pasa a validar solo esa,
@@ -2247,34 +2204,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
       // Las direcciones ya predicadas no se cuentan: solo se les guardó la
       // campaña y su destino de predicación no cambió.
       if (_esDirPredicada(data)) continue;
-      final tarjetaActual = (data['tarjeta_id'] as String?) ?? tarjetaId;
-      final origenEnData =
-          (data['tarjeta_id_origen'] as String?)?.isNotEmpty == true;
       String destinoKey;
 
       if (estadoDir == 'completada') {
-        // Mismo criterio que la escritura: vuelve a su origen solo si hay una
-        // tarjeta de origen real (no temporal) distinta de la actual. Si no,
-        // se queda marcada como predicha en la tarjeta donde está.
-        final origenReal = origenEnData
-            ? (data['tarjeta_id_origen'] as String).trim()
-            : tarjetaActual.trim();
-        final esTemporalCard = (String c) =>
-            c.isNotEmpty &&
-            (c.startsWith('T-') || c.toLowerCase() == 'temporales');
-        if (origenReal.isNotEmpty &&
-            !esTemporalCard(origenReal) &&
-            origenReal != tarjetaActual) {
-          destinoKey = 'origen';
-        } else {
-          destinoKey = 'queda';
-        }
+        destinoKey = 'queda';
       } else if (estadoDir == 'comercio_cerrado') {
         destinoKey = 'cerrado';
-      } else if (estadoDir == 'no_hispano') {
-        destinoKey = 'removidas';
       } else {
-        destinoKey = 'temporal';
+        destinoKey = 'removidas';
       }
 
       conteoDestinos[destinoKey] = (conteoDestinos[destinoKey] ?? 0) + 1;
@@ -2288,10 +2225,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
             esIndividual ? 'Confirmar dirección' : 'Confirmar procesamiento'),
         // Solo confirmación. El publicador no necesita un desglose de a dónde
         // va cada dirección: ese detalle ya queda guardado por dirección en
-        // `motivo` / `motivo_temporal` / `estado` / `reportado_por`, y es el
-        // admin quien lo revisa desde su pestaña. Mostrarlo acá solo retrasaba
-        // el trabajo de campo y arrastraba los caracteres que la fuente del
-        // navegador no tenía.
+        // `motivo` / `estado` / `reportado_por`, y es el admin quien lo revisa
+        // desde su pestaña. Mostrarlo acá solo retrasaba el trabajo de campo y
+        // arrastraba los caracteres que la fuente del navegador no tenía.
         content: Text(esIndividual
             ? '¿Confirmar esta dirección?'
                 '${calleIndividual.isEmpty ? '' : '\n\n$calleIndividual'}'
@@ -2334,32 +2270,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
         }
       } catch (_) {}
 
-      // Mapa de folders ya verificados: nombre_territorio → {id, existe}
-      final Map<String, String> folderIdPorTerritorio = {};
-
-      // Reutilizar IDs conocidos de la caché; si el query aún no se había
-      // almacenado, se usa el ID determinista del territorio y se escribe con
-      // merge para crear/actualizar el folder sin una lectura de servidor.
-      try {
-        final qFolders = db
-            .collection('territorios')
-            .doc('temporales')
-            .collection('tarjetas');
-        final foldersExistentes = OfflineSyncService.instance.isOffline
-            ? await qFolders.get(const GetOptions(source: Source.cache))
-            : await qFolders.get();
-        for (final f in foldersExistentes.docs) {
-          final fData = f.data();
-          final nombre = (fData['nombre_grupo'] as String?) ?? '';
-          final terId = (fData['territorio_id'] as String?) ?? '';
-          if (nombre.isNotEmpty) folderIdPorTerritorio[nombre] = f.id;
-          if (terId.isNotEmpty) folderIdPorTerritorio[terId] = f.id;
-        }
-      } catch (_) {
-        // La creación con merge abajo no requiere esta consulta.
-      }
-      final Set<String> foldersEscritosEnEsteBatch = {};
-
       for (final dir in direcciones) {
         final data = _safeData(dir);
         // Dirección ya predicada dentro de la tarjeta recibida: no se reescribe
@@ -2375,71 +2285,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
         final complemento = (data['complemento'] as String?) ?? '';
         final territorioNombre = territorioNombreGlobal;
         final tarjetaIdOriginal = (data['tarjeta_id'] as String?) ?? tarjetaId;
-        // Si la dirección ya es temporal, preservar el origen original
-        String origenReal =
-            (data['tarjeta_id_origen'] as String?)?.trim().isNotEmpty == true
-                ? (data['tarjeta_id_origen'] as String).trim()
-                : tarjetaIdOriginal.trim();
-
-        // El origen NO se descarta cuando la tarjeta actual es temporal. Si una
-        // dirección se movió de una temporal a otra, `origenReal` queda con la
-        // temporal de la que vino: ese es el rastro de la cadena y hay que
-        // conservarlo. Vaciarlo acá terminaba escribiendo
-        // `tarjeta_id_origen: null` más abajo y rompía el encadenado, que es
-        // justamente lo que hay que poder reconstruir después.
-        //
-        // Lo que sí se evita, más abajo, es tratar una temporal como destino de
-        // restauración: eso lo decide `_origenEsTarjetaReal`, no este bloque.
-        final _esTemporalCard = (String c) =>
-            c.isNotEmpty &&
-            (c.startsWith('T-') || c.toLowerCase() == 'temporales');
-
-        // Territorio de origen REAL — el al que pertenece de verdad.
-        //
-        // Antes, si la dirección venía de una tarjeta temporal y no traía
-        // `territorio_origen_id`, el valor se quedaba en 'temporales' (o
-        // quedaba vacío y se usaba el id de la tarjeta, que tampoco servía).
-        // Como el folder del temporal se crea con este id como nombre de
-        // documento, el resultado era una carpeta fantasma llamada
-        // "temporales" con direcciones que sí pertenencen a un territorio
-        // real, y la dirección no aparecía bajo su territorio.
-        //
-        // Ahora se recorren los candidatos en orden de confianza y se toma el
-        // PRIMERO que sea un territorio de verdad. 'temporales' no es un
-        // territorio: es la bandeja, así que nunca puede ser el destino.
-        String territorioOrigenId = _primerTerritorioReal([
-          (data['territorio_origen_id'] as String?) ?? '',
-          (data['territorio_id'] as String?) ?? '',
-          territorioId,
-        ]);
-        String territorioOrigenNombre = _primerTerritorioReal([
-          (data['territorio_origen_nombre'] as String?) ?? '',
-          (data['territorio_nombre'] as String?) ?? '',
-          territorioNombre,
-        ]);
-
-        // Si de verdad no se conoce el territorio de origen (direcciones viejas
-        // sin ningún dato), se agrupan bajo "Sin territorio" en vez de crear
-        // una carpeta con un id que no corresponde a ningún territorio.
-        if (territorioOrigenId.isEmpty) {
-          territorioOrigenId = _SIN_TERRITORIO;
-        }
-        if (territorioOrigenNombre.isEmpty) {
-          territorioOrigenNombre = _SIN_TERRITORIO;
-        }
-
-        // Buscar si ya existe un folder para este territorio
-        // Primero por ID, luego por nombre — evita duplicados
-        String folderDocId = folderIdPorTerritorio[territorioOrigenId] ??
-            folderIdPorTerritorio[territorioOrigenNombre] ??
-            territorioOrigenId;
-
-        // El folder siempre usa el ID del territorio de origen como documento
-        final folderRef = db
-            .collection('territorios')
-            .doc('temporales')
-            .collection('tarjetas')
-            .doc(folderDocId);
 
         // ── Verificar campañas activas (no aplican a comercios) ──
         List<QueryDocumentSnapshot<Map<String, dynamic>>> campanasActivas = [];
@@ -2535,153 +2380,23 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
         // ── Procesar estado de predicación ─────────────────
         if (estado == 'completada') {
-          // Volver a la tarjeta de origen SOLO si hay un origen real
-          // (tarjeta_id_origen no vacío y no temporal). Antes esta condición
-          // era solo `origenReal != tarjetaIdOriginal`, lo que dejaba fijas
-          // direcciones que ya estaban en la temporal sin origen real: nunca
-          // se restauraban y quedaban con territorio/tarjeta inválidos.
-          final _origenEsTarjetaReal = origenReal.isNotEmpty &&
-              !_esTemporalCard(origenReal) &&
-              origenReal != tarjetaIdOriginal;
-          if (_origenEsTarjetaReal) {
-            // Mover de vuelta a la tarjeta de origen
-            batch.update(dir.reference, {
-              'tarjeta_id': origenReal,
-              'tarjeta_id_origen': null,
-              'territorio_id': territorioOrigenId,
-              'territorio_nombre': territorioOrigenNombre,
-              'territorio_origen_id': null,
-              'territorio_origen_nombre': null,
-              'estado': 'activa',
-              'estado_predicacion': 'completada',
-              'predicado': true,
-              'fecha_predicacion': marcaLocal,
-              'mes_predicacion': mesActual,
-              ..._camposResultadoNuevo(
-                  'predicado', widget.usuarioData['nombre'] ?? ''),
-              if (comentarioTexto.isNotEmpty) 'comentario': comentarioTexto,
-            });
-          } else {
-            // Sin tarjeta de origen real.
-            //
-            // Si la dirección estaba en una temporal, no puede quedarse
-            // apuntando a esa temporal: ya no es una dirección en curso de la
-            // bandeja. Si además se conoce el territorio de verdad, se lo
-            // devuelve y suelta la tarjeta para que el admin la ubique. Si el
-            // territorio tampoco se conoce, se la suelta igual: una dirección
-            // sin tarjeta es visible y el admin la puede asignar, mientras
-            // que colgada de una temporal no aparece en ningún conteo.
-            //
-            // Cuando la tarjeta es REAL no se toca el vínculo: es el caso
-            // normal de una dirección que se predica donde ya estaba.
-            final veniaDeTemporal = _esTemporalCard(tarjetaIdOriginal.trim());
-            batch.update(dir.reference, {
-              'estado': 'activa',
-              'estado_predicacion': 'completada',
-              'predicado': true,
-              'fecha_predicacion': marcaLocal,
-              'mes_predicacion': mesActual,
-              ..._camposResultadoNuevo(
-                  'predicado', widget.usuarioData['nombre'] ?? ''),
-              if (veniaDeTemporal) ...{
-                'tarjeta_id': '',
-                'territorio_id': territorioOrigenId,
-                'territorio_nombre': territorioOrigenNombre,
-                'tarjeta_id_origen': null,
-                'territorio_origen_id': null,
-                'territorio_origen_nombre': null,
-                'motivo_temporal': null,
-                'fecha_temporal': null,
-              },
-              if (comentarioTexto.isNotEmpty) 'comentario': comentarioTexto,
-            });
-          }
-        } else if (estado == 'no_predicado' || estado == 'otro') {
-          if (foldersEscritosEnEsteBatch.add(folderDocId)) {
-            batch.set(
-                folderRef,
-                {
-                  'nombre_grupo': territorioOrigenNombre,
-                  'territorio_id': territorioOrigenId,
-                  'tipo': 'folder_temporal',
-                  'created_at': marcaLocal,
-                },
-                SetOptions(merge: true));
-            // Registrar para que otras dirs del mismo territorio lo encuentren
-            folderIdPorTerritorio[territorioOrigenNombre] = folderDocId;
-            folderIdPorTerritorio[territorioOrigenId] = folderDocId;
-          }
-
-          batch.set(folderRef.collection('direcciones').doc(dir.id), {
-            'calle': calle,
-            'complemento': complemento,
-            'direccion_normalizada':
-                _normalizarDireccion('$calle $complemento'),
-            'territorio_id': territorioOrigenId,
-            'territorio_nombre': territorioOrigenNombre,
-            'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
-            'motivo': !comentarioTexto.isEmpty
-                ? comentarioTexto
-                : (estado == 'otro' ? motivo : 'no_predicado'),
-            'created_at': marcaLocal,
-          });
-
           batch.update(dir.reference, {
-            'estado': 'temporal',
-            'estado_predicacion': 'temporal',
-            'tarjeta_id': '',
-            'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
-            'territorio_origen_id': territorioOrigenId,
-            'territorio_origen_nombre': territorioOrigenNombre,
-            // La dirección sí se trabajó: alguien estuvo ahí y no la predicó.
-            // Por eso el avance queda en `trabajada` aunque el resultado sea
-            // negativo. Lo que la saca de la tarjeta es `tarjeta_id: ''`, no el
-            // avance.
+            'estado': 'activa',
+            'estado_predicacion': 'completada',
+            'predicado': true,
+            'fecha_predicacion': marcaLocal,
+            'mes_predicacion': mesActual,
             ..._camposResultadoNuevo(
-                'no_predicado', widget.usuarioData['nombre'] ?? ''),
-            'motivo_temporal': !comentarioTexto.isEmpty
-                ? comentarioTexto
-                : (estado == 'otro' ? motivo : 'no_predicado'),
-            'fecha_temporal': marcaLocal,
-            // Quién la reportó: el publicador que la marcó como no predicada.
-            // Se muestra en la pestaña "Temporales > Direcciones" del admin.
-            'reportado_por': widget.usuarioData['nombre'] ?? '',
-            'reportado_por_email': widget.usuarioData['email'] ?? '',
+                'predicado', widget.usuarioData['nombre'] ?? ''),
+            if (comentarioTexto.isNotEmpty) 'comentario': comentarioTexto,
           });
         } else if (estado == 'comercio_cerrado') {
-          // 🚫 El comercio ya no existe — NO va a temporales. Se registra
-          // en una carpeta de "cerrados" para que el admin lo confirme.
-          batch.set(
-            db
-                .collection('territorios')
-                .doc('temporales')
-                .collection('tarjetas')
-                .doc('comercios_cerrados')
-                .collection('direcciones')
-                .doc(dir.id),
-            {
-              'calle': calle,
-              'complemento': complemento,
-              'direccion_normalizada':
-                  _normalizarDireccion('$calle $complemento'),
-              'territorio_id': territorioOrigenId,
-              'territorio_nombre': territorioOrigenNombre,
-              'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
-              'motivo': 'comercio_cerrado',
-              'comentario': comentarioTexto,
-              'confirmed': false,
-              'reportado_por': widget.usuarioData['nombre'] ?? '',
-              'reportado_por_email': widget.usuarioData['email'] ?? '',
-              'created_at': marcaLocal,
-            },
-          );
+          // 🚫 El comercio ya no existe. La dirección sale de la tarjeta y
+          // queda registrada para revisión del administrador.
           batch.update(dir.reference, {
             'estado': 'comercio_cerrado',
             'estado_predicacion': 'comercio_cerrado',
             'tarjeta_id': '',
-            'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
-            'territorio_origen_id': territorioOrigenId,
-            'territorio_origen_nombre': territorioOrigenNombre,
             ..._camposResultadoNuevo(
                 'comercio_cerrado', widget.usuarioData['nombre'] ?? ''),
             if (comentarioTexto.isNotEmpty)
@@ -2698,9 +2413,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
               'complemento': complemento,
               'direccion_normalizada':
                   _normalizarDireccion('$calle $complemento'),
-              'territorio_id': territorioOrigenId,
-              'territorio_nombre': territorioOrigenNombre,
-              'tarjeta_id_origen': origenReal.isEmpty ? null : origenReal,
+              'territorio_id': territorioId,
+              'territorio_nombre': territorioNombre,
+              'tarjeta_id': tarjetaIdOriginal,
               'motivo': 'no_hispano',
               'removida_por': widget.usuarioData['nombre'] ?? '',
               'removida_en': marcaLocal,
@@ -2719,7 +2434,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
           // (el total de "Existentes" del home, por ejemplo) lo seguían
           // contando. Una dirección removida inflaba el total real.
           //
-          // La rama equivalente del admin (`temporales_tab` → "Mover a
+          // La rama equivalente del admin (`devueltas_tab` → "Mover a
           // devueltas") ya borra el documento, así que esto también la deja
           // consistente. No se pierde nada: `direcciones_removidas` guarda
           // todos los campos necesarios y el botón "Restaurar" del panel
@@ -2752,89 +2467,14 @@ class _PublicadorTabState extends State<PublicadorTab> {
         debugPrint('Confirmación pendiente/no confirmada: $error');
       }));
 
-      // Registrar entradas a temporales para el histórico de estadísticas
-      for (final dir in direcciones) {
-        final estadoDir = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? 'pendiente';
-        final d = dir.data() as Map<String, dynamic>;
-        // Las direcciones ya predicadas no registran movimientos de temporales:
-        // su entrada/salida ya quedó registrada cuando se predicaron.
-        if (_esDirPredicada(d)) continue;
-        final origenDir = (d['tarjeta_id_origen'] as String?) ?? '';
-        // ¿Esta dirección estaba en la bandeja de temporales?
-        //
-        // Antes bastaba con `origenDir.isNotEmpty && origenDir != destinoDir`,
-        // y por eso "Salidas" no quadraba: si `tarjeta_id_origen` venía vacío
-        // (direcciones viejas, o movidas por la reparación o por la
-        // restauración mensual, que no lo graban) la dirección igual salía de
-        // la bandeja pero NO se registraba la salida. El contador de salidas
-        // perdía esos casos.
-        //
-        // Ahora basta con que la dirección tenga CUALQUIER marca de haber sido
-        // traída de otro lado (tarjeta de origen o territorio de origen), sin
-        // exigir que difieran entre sí: la salida es un hecho de la bandeja,
-        // no una comparación de nombres.
-        //
-        // `territorio_id` NO sirve como señal: está presente en todas las
-        // direcciones (es el territorio donde vive), así que usarlo como
-        // fallback hacía que TODA dirección normal contara como temporal y
-        // registrara una salida falsa en cuanto el publicador la completaba.
-        //
-        // La señal fiable es `estado`, que además es la MISMA definición que
-        // usa `estadisticas_tab` para contar las temporales, de modo que
-        // entradas y salidas se miden sobre el mismo conjunto.
-        //
-        // `d` es el snapshot leído ANTES del batch de este mismo método, así
-        // que `estado` conserva el valor previo al procesamiento.
-        final estadoDoc = d['estado']?.toString() ?? '';
-        final territorioIdDoc = (d['territorio_id']?.toString() ?? '').trim();
-        final eraTemporal = estadoDoc == 'temporal' ||
-            estadoDoc == 'temporal_asignada' ||
-            origenDir.trim().isNotEmpty ||
-            territorioIdDoc == 'temporales';
-        if (estadoDir == 'no_predicado' || estadoDir == 'otro') {
-          final origenId =
-              (d['territorio_id'] ?? d['territorio_origen_id'])?.toString() ??
-                  '';
-          final origenNombre =
-              (d['territorio_nombre'] ?? d['territorio_origen_nombre'])
-                      ?.toString() ??
-                  '';
-          unawaited(registrarMovimientoTemporal(
-            tipo: 'entrada',
-            direccionId: dir.id,
-            territorioOrigenId: origenId,
-            territorioOrigenNombre: origenNombre,
-            calle: d['calle']?.toString(),
-            motivo: estadoDir,
-            por: widget.usuarioData['nombre']?.toString(),
-          ));
-        } else if (estadoDir == 'completada' && eraTemporal) {
-          // Dirección temporal que se predicó y volvió a su tarjeta de
-          // origen → cuenta como salida de la bandeja de temporales.
-          final origenId = (d['territorio_origen_id'] as String?) ?? '';
-          final origenNombre = (d['territorio_origen_nombre'] as String?) ?? '';
-          unawaited(registrarMovimientoTemporal(
-            tipo: 'salida',
-            direccionId: dir.id,
-            territorioOrigenId: origenId,
-            territorioOrigenNombre: origenNombre,
-            calle: d['calle']?.toString(),
-            motivo: estadoDir,
-            por: widget.usuarioData['nombre']?.toString(),
-          ));
-        }
-      }
-
       // Cancelar timer de devolución automática
       AutoReturnService().cancelarTimer(tarjetaId);
 
-      // Notificar al admin de territorios si hay "no_predicado", "no_hispano" o
+      // Notificar al admin de territorios si hay "no_hispano" o
       // "comercio_cerrado"
       final dirNoPredicadas = direcciones.where((dir) {
         final estado = _estadosPorTarjeta[tarjetaId]?[dir.id] ?? 'pendiente';
-        return estado == 'no_predicado' ||
-            estado == 'no_hispano' ||
-            estado == 'comercio_cerrado';
+        return estado == 'no_hispano' || estado == 'comercio_cerrado';
       }).toList();
 
       if (dirNoPredicadas.isNotEmpty) {
@@ -2845,9 +2485,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
           final calle = data['calle']?.toString() ?? '';
           final motivo = estado == 'no_hispano'
               ? 'No vive hispanohablante'
-              : estado == 'comercio_cerrado'
-                  ? 'Comercio ya no existe'
-                  : 'No se predicó';
+              : 'Comercio ya no existe';
           return '$calle — $motivo';
         }).join('\n');
 
@@ -2860,100 +2498,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
           extra: {'tarjeta_id': tarjetaId, 'territorio_id': territorioId},
         ).catchError((Object error) {
           debugPrint('Notificación de resultado pendiente: $error');
-        }));
-      }
-      // Las direcciones temporales no deben persistir en la BD.
-      //
-      // Solo con la confirmación de tarjeta entera. Este bloque reescribe TODAS
-      // las direcciones de la tarjeta y borra el documento de la tarjeta, así
-      // que con la confirmación individual no puede correr: tocaría direcciones
-      // que el publicador todavía no confirmó. El `&&` va primero a propósito,
-      // para no gastar la lectura del doc de la tarjeta cuando no hace falta.
-      bool esTemporal = cerrarTarjeta && territorioId == 'temporales';
-      if (cerrarTarjeta && !esTemporal) {
-        try {
-          final tarjetaCache = await db
-              .collection('territorios')
-              .doc(territorioId)
-              .collection('tarjetas')
-              .doc(tarjetaId)
-              .get(const GetOptions(source: Source.cache));
-          esTemporal = tarjetaCache.data()?['es_temporal'] == true;
-        } catch (_) {}
-      }
-
-      if (esTemporal) {
-        QuerySnapshot<Map<String, dynamic>>? dirsTemporales;
-        try {
-          dirsTemporales = await db
-              .collection('direcciones_globales')
-              .where('tarjeta_id', isEqualTo: tarjetaId)
-              .get(const GetOptions(source: Source.cache));
-        } catch (_) {}
-        if (dirsTemporales != null && dirsTemporales.docs.isNotEmpty) {
-          final batchClean = db.batch();
-          for (final d in dirsTemporales.docs) {
-            final dData = d.data();
-            final estadoDir = dData['estado_predicacion'] as String? ?? '';
-            final origenId = dData['tarjeta_id_origen'] as String? ?? '';
-            final terOrigenId = dData['territorio_origen_id'] as String? ?? '';
-            final terOrigenNombre =
-                dData['territorio_origen_nombre'] as String? ?? '';
-
-            if (estadoDir == 'completada' && origenId.isNotEmpty) {
-              // Restaurar completamente a tarjeta y territorio de origen
-              batchClean.update(d.reference, {
-                'tarjeta_id': origenId,
-                'tarjeta_id_origen': null,
-                'territorio_id': terOrigenId.isNotEmpty
-                    ? terOrigenId
-                    : dData['territorio_id'],
-                'territorio_nombre': terOrigenNombre.isNotEmpty
-                    ? terOrigenNombre
-                    : dData['territorio_nombre'],
-                'territorio_origen_id': null,
-                'territorio_origen_nombre': null,
-                'estado': 'activa',
-                'estado_predicacion': 'completada',
-              });
-            } else if (estadoDir == 'completada') {
-              // Completada y sin origen. Antes se eliminaba el documento.
-              //
-              // Es el mismo problema que tenía la rama de `no_hispano`: una
-              // operación de la pantalla destruía un dato del que no hay otra
-              // copia enlazada. Y acá el caso es más fácil de llegar sin
-              // querer, porque la tarjeta es temporal: por definición se
-              // borra al terminar, así que cualquier dirección que haya
-              // quedado sin origen se perdía en silencio.
-              //
-              // Se suelta en vez de borrarse: `tarjeta_id` vacío la deja
-              // visible y el admin la puede asignar. Colgada de una temporal no
-              // aparece en ningún conteo, y borrada no existe.
-              batchClean.update(d.reference, {
-                'tarjeta_id': '',
-                'tarjeta_id_origen': null,
-                'territorio_origen_id': null,
-                'territorio_origen_nombre': null,
-                'estado': 'activa',
-                'estado_predicacion': 'completada',
-                'soltada_por_sin_origen': true,
-                'fecha_soltada': marcaLocal,
-              });
-            }
-            // Las que van a temporal/removidas ya tienen su destino — no tocar
-          }
-          unawaited(batchClean.commit().catchError((Object error) {
-            debugPrint('Limpieza de temporal pendiente: $error');
-          }));
-        }
-        unawaited(db
-            .collection('territorios')
-            .doc(territorioId)
-            .collection('tarjetas')
-            .doc(tarjetaId)
-            .delete()
-            .catchError((Object error) {
-          debugPrint('Eliminación de tarjeta temporal pendiente: $error');
         }));
       }
 
@@ -2970,14 +2514,9 @@ class _PublicadorTabState extends State<PublicadorTab> {
         unawaited(_programarMensajeMotivacional());
 
         // Resumen final del destino de las direcciones procesadas
-        final volvieron = conteoDestinos['origen'] ?? 0;
-        final temporal = conteoDestinos['temporal'] ?? 0;
         final cerrados = conteoDestinos['cerrado'] ?? 0;
         final removidas = conteoDestinos['removidas'] ?? 0;
         final partesResumen = <String>[
-          if (volvieron > 0) '✔ $volvieron volvieron a su tarjeta',
-          if (temporal > 0)
-            '⏳ $temporal quedaron en la carpeta temporal del territorio',
           if (cerrados > 0) '🏬 $cerrados quedaron en comercios cerrados',
           if (removidas > 0) '🗑️ $removidas se removieron',
         ];
@@ -3043,26 +2582,6 @@ class _PublicadorTabState extends State<PublicadorTab> {
   // ─────────────────────────────────────────────────
   // BUILD
   // ─────────────────────────────────────────────────
-
-  /// Id/nombre usado para agrupar direcciones cuyo territorio real se
-  /// desconocía, para no inventar un territorio ni usar 'temporales'.
-  static const String _SIN_TERRITORIO = 'Sin territorio';
-
-  /// Devuelve el primer candidato que sea un territorio de verdad.
-  ///
-  /// Se descartan los vacíos y también 'temporales', porque 'temporales' es el
-  /// nombre de la BANDEJA, no un territorio: usarlo como destino metía
-  /// direcciones reales dentro de una carpeta llamada "temporales".
-  static String _primerTerritorioReal(List<String> candidatos) {
-    for (final c in candidatos) {
-      final v = c.trim();
-      if (v.isEmpty) continue;
-      if (v.toLowerCase() == 'temporales') continue;
-      if (v.toLowerCase() == _SIN_TERRITORIO.toLowerCase()) continue;
-      return v;
-    }
-    return '';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -3325,26 +2844,17 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   // sumando en "Existentes" aunque ya estuviera en removidas.
                   // Se filtra en memoria y no en la query para no excluir por
                   // error documentos sin el campo `estado`.
-                  //
-                  // Las copias "temporal" (bandeja de temporales: direcciones
-                  // devueltas/liberadas que se reasignan) TAMPOCO son
-                  // direcciones nuevas: son copias de una dirección que ya
-                  // existe como 'activa'. Si se contaban, inflaban el total de
-                  // "Existentes" (p. ej. 214 en vez de 202).
                   final todos = snapTotal.data?.docs ?? [];
                   bool esRemovida(QueryDocumentSnapshot doc) =>
                       (_safeData(doc)['estado'] as String?) == 'removida';
-                  bool esTemporal(QueryDocumentSnapshot doc) =>
-                      (_safeData(doc)['estado'] as String?) == 'temporal';
-                  final totalExistentes = todos
-                      .where((doc) => !esRemovida(doc) && !esTemporal(doc))
-                      .length;
+                  final totalExistentes =
+                      todos.where((doc) => !esRemovida(doc)).length;
                   // Criterio único de "completada": `predicado == true` o
                   // `estado_predicacion == 'completada'`. Antes solo se miraba
                   // `predicado`, por lo que las direcciones completadas por
                   // otras vías quedaban contadas como pendientes.
                   final completadasGlobal = todos.where((doc) {
-                    if (esRemovida(doc) || esTemporal(doc)) return false;
+                    if (esRemovida(doc)) return false;
                     final d = _safeData(doc);
                     return d['predicado'] == true ||
                         d['estado_predicacion'] == 'completada';
@@ -3369,7 +2879,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
                   // `fecha_predicacion` solo existe en registros antiguos, por
                   // eso se usa únicamente como respaldo.
                   final predActualGlobal = snapTotal.data?.docs.where((doc) {
-                        if (esRemovida(doc) || esTemporal(doc)) return false;
+                        if (esRemovida(doc)) return false;
                         final d = _safeData(doc);
                         if (d['predicado'] != true &&
                             d['estado_predicacion'] != 'completada') {

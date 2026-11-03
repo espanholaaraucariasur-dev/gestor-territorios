@@ -519,7 +519,6 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
     // Por territorio
     final Map<String, _DatosTerritorio> porTerritorio = {};
     for (final ter in terSnap.docs) {
-      if (ter.id == 'temporales') continue;
       final terData = (ter.data() as Map<String, dynamic>?) ?? {};
       // Los territorios BASE solo almacenan direcciones en el directorio
       // global; no se cuentan en las estadísticas.
@@ -623,7 +622,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       eliminadasPorMes: eliminadasPorMes,
       totalTerritorios: terSnap.docs.where((d) {
         final dd = (d.data() as Map<String, dynamic>?) ?? {};
-        return d.id != 'temporales' && dd['tipo'] != 'base';
+        return dd['tipo'] != 'base';
       }).length,
       campanas: campanas,
     );
@@ -1359,7 +1358,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        '${context.t('stat_temp_range')}: '
+                        '${context.t('stat_period')}: '
                         '${_fmtFecha(c.fechaInicio)} – ${_fmtFecha(c.fechaFin)}',
                         style:
                             TextStyle(fontSize: 11, color: Colors.grey[600]),

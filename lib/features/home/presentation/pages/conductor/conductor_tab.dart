@@ -1390,8 +1390,6 @@ class _ConductorTabState extends State<ConductorTab> {
                                           ),
                                         );
                                         if (confirmar == true) {
-                                          final temporal =
-                                              terId == 'temporales';
                                           final tarjetaRef = FirebaseFirestore
                                               .instance
                                               .collection('territorios')
@@ -1416,11 +1414,8 @@ class _ConductorTabState extends State<ConductorTab> {
                                             'devuelto_por':
                                                 widget.usuarioData['nombre'] ??
                                                     widget.usuarioEmail,
-                                            if (temporal) 'completada': false,
-                                            if (!temporal) ...{
-                                              'tomado_por': null,
-                                              'tomado_en': null,
-                                            },
+                                            'tomado_por': null,
+                                            'tomado_en': null,
                                           });
                                           unawaited(
                                               write.catchError((Object error) {

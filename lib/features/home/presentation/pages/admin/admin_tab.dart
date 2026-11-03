@@ -301,9 +301,9 @@ class _AdminTabState extends State<AdminTab> {
 
         // El id del documento lleva un timestamp, así que el mismo `batch.set`
         // NUNCA colisiona: cargar dos veces el mismo archivo crea un documento
-        // duplicado por dirección y eso infla el conteo de temporales. Se
-        // comprueba antes qué direcciones ya existen en esta tarjeta para
-        // saltarlas en vez de duplicarlas.
+        // duplicado por dirección y eso infla los conteos. Se comprueba antes
+        // qué direcciones ya existen en esta tarjeta para saltarlas en vez de
+        // duplicarlas.
         final yaExistentes = await _direccionesNormalizadasDeTarjeta(
           nombreTarjeta,
           territorioId,

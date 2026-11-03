@@ -1,7 +1,5 @@
 ﻿import 'package:flutter/material.dart';
 import 'territorios_tab.dart';
-// PUNTO 3: la pestaña de temporales queda oculta (código comentado, no visible).
-// import 'temporales_tab.dart';
 import 'comentarios_tab.dart';
 import 'devueltas_tab_original.dart';
 import 'estadisticas_tab.dart';
@@ -74,11 +72,6 @@ class _AdminTerritoriosTabState extends State<AdminTerritoriosTab> {
                     icon: Icon(Icons.map, color: Color(0xFF4A148C)),
                     text: 'Territorios',
                   ),
-                  // PUNTO 3: pestaña "Temporales" oculta (comentada, no visible).
-                  // const Tab(
-                  //   icon: Icon(Icons.timer, color: Color(0xFF4A148C)),
-                  //   text: 'Temporales',
-                  // ),
                   const Tab(
                     icon: Icon(Icons.comment, color: Color(0xFF4A148C)),
                     text: 'Comentarios',
@@ -99,8 +92,6 @@ class _AdminTerritoriosTabState extends State<AdminTerritoriosTab> {
                 physics: const NeverScrollableScrollPhysics(), // Deshabilita el Swipe
                 children: [
                   TerritoriosTab(usuarioData: widget.usuarioData),
-                  // PUNTO 3: TemporalesTab oculta (comentada, no visible).
-                  // TemporalesTab(usuarioData: widget.usuarioData),
                   ComentariosTab(usuarioData: widget.usuarioData),
                   RemovidasTab(usuarioData: widget.usuarioData),
                   EstadisticasTab(usuarioData: widget.usuarioData),

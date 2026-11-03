@@ -435,26 +435,6 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                 _limpiarDireccionesHuerfanas,
               ),
             ),
-            _buildCardButton(
-              icon: Icons.delete_forever,
-              title: 'Eliminar Temporales',
-              description: 'Elimina registros y datos expirados en la colección temporal.',
-              isDestructive: true,
-              onTap: () => _ejecutarAccion(
-                'Eliminar Temporales',
-                () async {
-                  final snap = await FirebaseFirestore.instance
-                      .collection('temp_data')
-                      .limit(100)
-                      .get();
-                  final batch = FirebaseFirestore.instance.batch();
-                  for (var doc in snap.docs) {
-                    batch.delete(doc.reference);
-                  }
-                  await batch.commit();
-                },
-              ),
-            ),
           ],
         ],
       ),
