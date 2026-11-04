@@ -48,13 +48,18 @@ class _ConductorTabState extends State<ConductorTab> {
 
   /// Una tarjeta pertenece al período si se envió o se asignó este mes.
   /// Los documentos antiguos sin fecha se mantienen para no perderlos.
-  bool _tarjetaDelMes(Map<String, dynamic> data, String mesClave) {
+  bool _tarjetaDelMes(
+    Map<String, dynamic> data,
+    String mesClave, {
+    DateTime? fechaRespaldo,
+  }) {
     final enviado = data['enviado_en'];
     final asignado = data['asignado_en'];
     final Timestamp? fecha =
         enviado is Timestamp ? enviado : (asignado is Timestamp ? asignado : null);
-    if (fecha == null) return true;
-    final f = fecha.toDate();
+    final f = fecha?.toDate() ?? fechaRespaldo;
+    // Documentos antiguos sin ninguna fecha se mantienen para no perderlos.
+    if (f == null) return true;
     return '${f.year}-${f.month.toString().padLeft(2, '0')}' == mesClave;
   }
 
@@ -377,6 +382,230 @@ class _ConductorTabState extends State<ConductorTab> {
     }
   }
 
+  /// Una dirección sigue pendiente si no fue removida y no se predicó.
+  /// Mismo criterio que el selector "Solicitar tarjeta".
+  bool _direccionPendiente(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data();
+    if (d['estado'] == 'removida') return false;
+    return !(d['predicado'] == true ||
+        d['estado_predicacion'] == 'completada');
+  }
+
+  String _textoDireccion(Map<String, dynamic> d) {
+    final directa =
+        (d['direccion'] ?? d['texto_direccion'] ?? '').toString().trim();
+    if (directa.isNotEmpty) return directa;
+    final partes = [d['calle'], d['numero'], d['complemento']]
+        .map((v) => (v ?? '').toString().trim())
+        .where((v) => v.isNotEmpty)
+        .toList();
+    return partes.isEmpty ? '(sin texto)' : partes.join(' ');
+  }
+
+  /// Atajo bajo "Solicitar tarjeta": muestra solo la dirección (o las dos)
+  /// pendiente de tarjetas del conductor que ya casi están completas. Al
+  /// enviar se usa el flujo normal de tarjeta completa, así que si el
+  /// publicador no la completa vuelve a aparecer aquí.
+  Widget _buildAccesosRapidos() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream:
+            FirebaseFirestore.instance.collection('territorios').snapshots(),
+        builder: (context, terSnap) {
+          final nombresTerritorio = <String, String>{};
+          final territoriosBase = <String>{};
+          final territoriosAjenos = <String>{};
+          if (terSnap.hasData) {
+            for (final ter in terSnap.data!.docs) {
+              final td = (ter.data() as Map<String, dynamic>?) ?? const {};
+              if (td['tipo'] == 'base') {
+                territoriosBase.add(ter.id);
+                continue;
+              }
+              nombresTerritorio[ter.id] = (td['nombre'] as String?) ?? ter.id;
+              // Territorio asignado a otro conductor: no se ofrece aquí.
+              final duenoTerritorio =
+                  (td['conductor_email'] ?? td['enviado_a'] ?? '').toString();
+              if (duenoTerritorio.isNotEmpty &&
+                  duenoTerritorio != widget.usuarioEmail) {
+                territoriosAjenos.add(ter.id);
+              }
+            }
+          }
+
+          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collectionGroup('tarjetas')
+                .snapshots(),
+            builder: (context, tarSnap) {
+              if (!tarSnap.hasData) return const SizedBox.shrink();
+
+              final candidatas = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+              for (final tarjetaDoc in tarSnap.data!.docs) {
+                final d = tarjetaDoc.data();
+                final terId = tarjetaDoc.reference.parent.parent?.id ?? '';
+                if (territoriosBase.contains(terId)) continue;
+                if (territoriosAjenos.contains(terId)) continue;
+                if (d['completada'] == true || d['bloqueado'] == true) {
+                  continue;
+                }
+                if (d['programado_para'] != null) continue;
+                // Con un publicador u otro conductor: no es un envío directo.
+                if ((d['asignado_a'] as String?)?.isNotEmpty == true) continue;
+                if ((d['publicador_email'] as String?)?.isNotEmpty == true) {
+                  continue;
+                }
+                final duenoTarjeta =
+                    (d['conductor_email'] ?? d['enviado_a'] ?? '').toString();
+                if (duenoTarjeta.isNotEmpty &&
+                    duenoTarjeta != widget.usuarioEmail) {
+                  continue;
+                }
+                candidatas.add(tarjetaDoc);
+              }
+
+              if (candidatas.isEmpty) return const SizedBox.shrink();
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: candidatas
+                    .map(
+                      (tarjetaDoc) =>
+                          _accesoRapidoTarjeta(tarjetaDoc, nombresTerritorio),
+                    )
+                    .toList(),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _accesoRapidoTarjeta(
+    QueryDocumentSnapshot<Map<String, dynamic>> tarjetaDoc,
+    Map<String, String> territorios,
+  ) {
+    final d = tarjetaDoc.data();
+    final terId = tarjetaDoc.reference.parent.parent?.id ?? '';
+    final terNombre = territorios[terId] ??
+        (d['territorio_nombre'] as String?) ??
+        terId;
+    final tarjetaNombre = (d['nombre'] as String?) ?? tarjetaDoc.id;
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('direcciones_globales')
+          .where('tarjeta_id', isEqualTo: tarjetaDoc.id)
+          .snapshots(),
+      builder: (context, dirSnap) {
+        if (!dirSnap.hasData) return const SizedBox.shrink();
+        final pendientes =
+            dirSnap.data!.docs.where(_direccionPendiente).toList();
+        // Solo tarjetas con una o dos direcciones pendientes.
+        if (pendientes.isEmpty || pendientes.length > 2) {
+          return const SizedBox.shrink();
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: const Color(0xFF1B5E20).withValues(alpha: 0.35),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.bolt,
+                      size: 13, color: Color(0xFF1B5E20)),
+                  const SizedBox(width: 3),
+                  Text(
+                    'Lista para enviar',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.6,
+                      color: Colors.green.shade800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              ...pendientes.map((dirDoc) {
+                final texto = _textoDireccion(dirDoc.data());
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.location_on,
+                          size: 16, color: Color(0xFF1B5E20)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          texto,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Tarjeta $tarjetaNombre · Territorio $terNombre',
+                      style: TextStyle(fontSize: 10.5, color: Colors.grey[600]),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () => _enviarTarjetaConductorAPublicador(
+                      terId,
+                      tarjetaDoc.id,
+                      tarjetaNombre,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B5E20),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Enviar',
+                        style: TextStyle(fontSize: 11)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -498,18 +727,33 @@ class _ConductorTabState extends State<ConductorTab> {
                             .snapshots(),
                         builder: (context, terSnap) {
                           final territoriosBase = <String>{};
+                          final territoriosDelConductor = <String>{};
+                          // Fecha en que el territorio llegó al conductor: las
+                          // tarjetas del territorio no llevan fecha propia.
+                          final fechaTerritorio = <String, DateTime>{};
                           if (terSnap.hasData) {
                             for (final ter in terSnap.data!.docs) {
                               final td =
                                   (ter.data() as Map<String, dynamic>?) ?? {};
                               if (td['tipo'] == 'base') {
                                 territoriosBase.add(ter.id);
+                                continue;
+                              }
+                              if (td['enviado_a'] == widget.usuarioEmail ||
+                                  td['conductor_email'] ==
+                                      widget.usuarioEmail) {
+                                territoriosDelConductor.add(ter.id);
+                                final ts =
+                                    td['enviado_en'] ?? td['asignado_en'];
+                                if (ts is Timestamp) {
+                                  fechaTerritorio[ter.id] = ts.toDate();
+                                }
                               }
                             }
                           }
 
-                          // Solo tarjetas del conductor este mes, excluyendo
-                          // las de territorios BASE
+                          // Tarjetas del conductor este mes: enviadas
+                          // directamente o pertenecientes a sus territorios.
                           final delConductor = todas.where((t) {
                             final d = (t.data() as Map<String, dynamic>?) ?? {};
                             final territorioId =
@@ -519,21 +763,31 @@ class _ConductorTabState extends State<ConductorTab> {
                             }
                             final esSuyo = d['conductor_email'] ==
                                     widget.usuarioEmail ||
-                                d['enviado_a'] == widget.usuarioEmail;
-                            return esSuyo && _tarjetaDelMes(d, mesActual);
+                                d['enviado_a'] == widget.usuarioEmail ||
+                                territoriosDelConductor.contains(territorioId);
+                            return esSuyo &&
+                                _tarjetaDelMes(
+                                  d,
+                                  mesActual,
+                                  fechaRespaldo:
+                                      fechaTerritorio[territorioId],
+                                );
                           }).toList();
 
                           final total = delConductor.length;
                           final enviadas = delConductor.where((t) {
                             final d = (t.data() as Map<String, dynamic>?) ?? {};
-                            return (d['asignado_a'] as String?)?.isNotEmpty ==
-                                true;
+                            return d['completada'] != true &&
+                                (d['asignado_a'] as String?)?.isNotEmpty ==
+                                    true &&
+                                d['enviado_tipo'] == 'publicador';
                           }).length;
                           final completadas = delConductor.where((t) {
                             final d = (t.data() as Map<String, dynamic>?) ?? {};
                             return d['completada'] == true;
                           }).length;
-                          final disponibles = total - enviadas;
+                          // Las completadas ya no están disponibles para enviar.
+                          final disponibles = total - enviadas - completadas;
 
                           final pctEnviadas =
                               total > 0 ? enviadas / total : 0.0;
@@ -639,6 +893,9 @@ class _ConductorTabState extends State<ConductorTab> {
               ),
             ),
           ),
+
+          // Atajo: direcciones de tarjetas con 1–2 pendientes
+          SliverToBoxAdapter(child: _buildAccesosRapidos()),
 
           // Territories Section
           SliverToBoxAdapter(
