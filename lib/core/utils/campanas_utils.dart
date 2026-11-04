@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 /// Utilidades para las carpetas de campana.
 ///
 /// POR QUE EXISTE ESTO
@@ -66,6 +68,37 @@ class CampanasUtils {
     }
 
     return s;
+  }
+
+  /// `true` si la direccion registra una entrega de la campana [nombre].
+  ///
+  /// [desde] descarta marcas anteriores al inicio de la campana: protege el
+  /// conteo cuando se reutiliza un nombre. [exigirFecha] se activa en campanas
+  /// creadas con `iniciada_en`; una marca sin fecha no puede ser de esa
+  /// campana. Las campanas viejas no tienen fechas por nombre y se siguen
+  /// contando como antes.
+  static bool esEntregaDeCampana(
+    Map<String, dynamic> data,
+    String nombre, {
+    DateTime? desde,
+    bool exigirFecha = false,
+  }) {
+    final porNombre = data['campana_invitacion_$nombre'] == true;
+    final generico = data['campana_nombre'] == nombre &&
+        data['campana_estado'] == 'entregada';
+    if (!porNombre && !generico) return false;
+
+    final propia = data['campana_invitacion_fecha_$nombre'];
+    final generica = data['campana_nombre'] == nombre
+        ? (data['campana_invitacion_fecha'] ?? data['fecha_campana'])
+        : null;
+    final fecha = propia is Timestamp
+        ? propia.toDate()
+        : (generica is Timestamp ? generica.toDate() : null);
+
+    if (fecha == null) return !exigirFecha;
+    if (desde == null) return true;
+    return !fecha.isBefore(DateTime(desde.year, desde.month, desde.day));
   }
 
   /// `true` si el nombre se puede usar tal cual como ID de coleccion.

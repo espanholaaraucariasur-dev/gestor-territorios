@@ -56,10 +56,11 @@ Reglas:
 1. Responde SOLO con el texto del informe, sin títulos de sección en mayúsculas largas, sin viñetas con guiones ni emojis.
 2. Extensión: 3 a 5 párrafos breves; un máximo de 220 palabras. Sé conciso.
 3. Debe incluir, en prosa natural:
-   - El total de direcciones activas, el piso inicial (direcciones de inicio del período) y cuántas fueron predicadas en el período.
-   - El crecimiento del período en porcentaje calculado como (total activas - piso inicial) / piso inicial * 100, y el desglose: direcciones nuevas, restauradas y removidas.
+   - El cierre del período (direcciones al final del período) y el piso inicial (direcciones de inicio del período).
+   - La cobertura de predicación: direcciones completadas y direcciones pendientes sobre el total de direcciones, usando el porcentaje de cobertura provisto.
+   - El crecimiento del período en porcentaje calculado como (cierre del período - piso inicial) / piso inicial * 100, y el desglose: direcciones nuevas, restauradas y removidas.
    - Interpretación del crecimiento (¿positivo, estable o en contracción?) con tono constructivo y de servicio.
-   - Mención del progreso de predicación y del trabajo pendiente.
+   - Mención del trabajo pendiente a partir de las direcciones pendientes.
    - Un cierre animador y profesional orientado a la predicación.
 4. Usa cifras exactas proporcionadas. No inventes datos.
 5. El tono debe ser de informe ejecutivo: claro, sobrio, positivo y útil para la toma de decisiones.

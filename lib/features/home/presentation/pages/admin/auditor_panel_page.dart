@@ -3056,6 +3056,8 @@ class _AuditorPanelPageState extends State<AuditorPanelPage>
                 (widget.usuarioData?['email'] as String?) ??
                 'auditor';
             dataDir['campana_invitacion_$campNombre'] = true;
+            dataDir['campana_invitacion_fecha_$campNombre'] =
+                FieldValue.serverTimestamp();
             dataDir['campana_invitacion_fecha'] = FieldValue.serverTimestamp();
             dataDir['campana_estado'] = 'entregada';
             dataDir['campana_nombre'] = campNombre;

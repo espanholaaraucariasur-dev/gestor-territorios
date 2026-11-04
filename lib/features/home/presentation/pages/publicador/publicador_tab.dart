@@ -2363,6 +2363,7 @@ class _PublicadorTabState extends State<PublicadorTab> {
             // ✅ Marcó invitación — guardar en dirección
             batch.update(dir.reference, {
               'campana_invitacion_$campNombre': true,
+              'campana_invitacion_fecha_$campNombre': marcaLocal,
               'campana_invitacion_fecha': marcaLocal,
               // El modelo nuevo lleva un estado de campaña por dirección, con
               // clave fija. El campo de arriba es el que renombra la

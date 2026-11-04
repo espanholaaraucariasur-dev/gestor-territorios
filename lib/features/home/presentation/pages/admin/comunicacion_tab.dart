@@ -87,8 +87,12 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
   }) async {
     final db = FirebaseFirestore.instance;
     final nombre = (campanaData['nombre'] as String?) ?? slot;
+    // La foto se guarda bajo el mes del período, no bajo el mes en que alguien
+    // abrió la app: así el cierre sigue siendo localizable aunque sea tardío.
+    final fechaFin = (campanaData['fecha_fin'] as Timestamp?)?.toDate();
+    final fechaFoto = fechaFin ?? DateTime.now();
     final mes =
-        '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
+        '${fechaFoto.year}-${fechaFoto.month.toString().padLeft(2, '0')}';
 
     try {
       // 1. Obtener direcciones de la carpeta de campaña
@@ -102,35 +106,48 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
           .collection(campId)
           .get();
 
-      int totalDejadas = 0;
       int totalFaltantes = 0;
       final Map<String, int> porTerritorio = {};
 
-      // 2. Contar entregadas y faltantes de la carpeta de campaña
+      // 2. Contar faltantes de la carpeta de campaña
       for (final dirDoc in carpetaSnap.docs) {
         final data = (dirDoc.data() as Map<String, dynamic>?) ?? {};
-        final estadoCampana =
-            (data['estado_campana'] as String?) ?? 'pendiente';
         final territorioOrigen = (data['territorio_origen'] as String?) ?? '';
 
-        if (estadoCampana == 'completada') {
-          totalDejadas++;
-        } else {
-          totalFaltantes++;
-        }
+        // La carpeta solo guarda pendientes: `estado_campana` se escribe como
+        // 'pendiente' y ninguna parte de la app lo pasa a 'completada'. Antes
+        // se contaban las 'completada' de acá, así que la foto de cierre
+        // guardaba `total_invitaciones_dejadas: 0` siempre.
+        totalFaltantes++;
 
         // Contar por territorio
         porTerritorio[territorioOrigen] =
             (porTerritorio[territorioOrigen] ?? 0) + 1;
       }
 
+      // Las entregas se marcan en la dirección, no en la carpeta. Se leen del
+      // directorio para que el cierre guarde el trabajo real de la campaña,
+      // descartando marcas anteriores al inicio (nombres reutilizados) y, en
+      // campañas nuevas, marcas sin fecha de una corrida anterior.
+      final inicio = (campanaData['fecha_inicio'] as Timestamp?)?.toDate();
+      final exigirFecha = campanaData['iniciada_en'] != null;
+      final dirSnap = await db.collection('direcciones_globales').get();
+      final totalEntregadas = dirSnap.docs.where((d) {
+        return CampanasUtils.esEntregaDeCampana(
+          d.data(),
+          nombre,
+          desde: inicio,
+          exigirFecha: exigirFecha,
+        );
+      }).length;
+
       // 3. Guardar estadísticas
       await db.collection('estadisticas').doc('campana_${nombre}_$mes').set({
         'nombre_campana': nombre,
         'mes': mes,
-        'total_invitaciones_dejadas': totalDejadas,
+        'total_invitaciones_dejadas': totalEntregadas,
         'total_faltantes': totalFaltantes,
-        'total_direcciones': carpetaSnap.docs.length,
+        'total_direcciones': totalEntregadas + totalFaltantes,
         'por_territorio': porTerritorio,
         'cerrada_en': FieldValue.serverTimestamp(),
         'cierre_automatico': autoCierre,
@@ -348,6 +365,20 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
               onPressed: () async {
                 final nombre = nombreCtrl.text.trim();
                 if (nombre.isEmpty) return;
+                // Congela la base del período al crear: si el directorio
+                // cambia durante la campaña, el porcentaje no se mueve solo.
+                int? baseDirecciones;
+                if (datos == null) {
+                  try {
+                    final dirSnap = await FirebaseFirestore.instance
+                        .collection('direcciones_globales')
+                        .get();
+                    baseDirecciones = dirSnap.docs.where((d) {
+                      final dd = (d.data() as Map<String, dynamic>?) ?? {};
+                      return dd['estado'] != 'removida';
+                    }).length;
+                  } catch (_) {}
+                }
                 await FirebaseFirestore.instance
                     .collection('configuracion')
                     .doc(slot)
@@ -361,6 +392,10 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                   'fecha_inicio': Timestamp.fromDate(fechaInicio),
                   'fecha_fin': Timestamp.fromDate(fechaFin),
                   'creada_por': widget.usuarioData['nombre'] ?? '',
+                  if (datos == null)
+                    'iniciada_en': FieldValue.serverTimestamp(),
+                  if (baseDirecciones != null)
+                    'base_direcciones': baseDirecciones,
                   'created_at': FieldValue.serverTimestamp(),
                 }, SetOptions(merge: true));
                 if (context.mounted) Navigator.pop(c);
@@ -1532,11 +1567,20 @@ class _ComunicacionTabState extends State<ComunicacionTab> {
                           : 'material entregado';
 
                   final dirs = snap.data?.docs ?? [];
-                  final total = dirs.length;
+                  final fechaInicio =
+                      (data['fecha_inicio'] as Timestamp?)?.toDate();
                   final conInvitacion = dirs.where((d) {
                     final dd = (d.data() as Map<String, dynamic>?) ?? {};
-                    return dd['campana_invitacion_$nombre'] == true;
+                    return CampanasUtils.esEntregaDeCampana(
+                      dd,
+                      nombre,
+                      desde: fechaInicio,
+                      exigirFecha: data['iniciada_en'] != null,
+                    );
                   }).length;
+                  final base =
+                      (data['base_direcciones'] as num?)?.toInt() ?? dirs.length;
+                  final total = base > conInvitacion ? base : conInvitacion;
                   final pct = total > 0
                       ? (conInvitacion / total * 100).clamp(0, 100).toDouble()
                       : 0.0;

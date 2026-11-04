@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:araucaria_sur/core/l10n/translation_service.dart';
 import 'package:araucaria_sur/core/services/groq_reporte_service.dart';
+import 'package:araucaria_sur/core/utils/campanas_utils.dart';
 import 'package:araucaria_sur/features/home/presentation/pages/admin/seccion_progreso_territorios.dart';
 
 class EstadisticasTab extends StatefulWidget {
@@ -38,6 +39,27 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
   static const Color _morado = Color(0xFF4A148C);
   static const Color _verde = Color(0xFF1B5E20);
 
+  /// Datos cargados a mano para campañas cuyo trabajo no quedó registrado por
+  /// dirección en Firestore. `completadas: null` conserva el conteo de la
+  /// base. `mesInicio` evita heredar el dato en una campaña futura con el
+  /// mismo nombre.
+  static const Map<String, ({int total, int? completadas, String mesInicio})>
+      _datosHistoricosCampana = {
+    'campaña especial ( folleto)': (
+      total: 187,
+      completadas: 27,
+      mesInicio: '2026-09',
+    ),
+    'invitación asamblea regional': (
+      total: 187,
+      completadas: null,
+      mesInicio: '2026-09',
+    ),
+  };
+
+  static String _claveCampana(String nombre) =>
+      nombre.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
   // ─────────────────────────────────────────────────────────
   // HELPERS DE FECHA
   // ─────────────────────────────────────────────────────────
@@ -70,6 +92,26 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
 
   String _claveMes(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}';
+
+  /// Meses donde puede estar guardada la foto de cierre de una campaña.
+  ///
+  /// `_cerrarCampana` nombra esa foto con el mes del día de cierre, que puede
+  /// caer después de `fecha_fin` (cierre automático o manual). Se recorre
+  /// desde el inicio hasta dos meses después del fin para no depender de que
+  /// el cierre haya sido puntual.
+  List<String> _mesesCierreCampana(DateTime? inicio, DateTime? fin) {
+    final desdeBase = inicio ?? fin ?? DateTime.now();
+    var hastaBase = fin ?? DateTime.now();
+    if (hastaBase.isBefore(desdeBase)) hastaBase = desdeBase;
+    final limite = DateTime(hastaBase.year, hastaBase.month + 2, 1);
+    final out = <String>[];
+    var d = DateTime(desdeBase.year, desdeBase.month, 1);
+    while (!d.isAfter(limite) && out.length < 18) {
+      out.add(_claveMes(d));
+      d = DateTime(d.year, d.month + 1, 1);
+    }
+    return out;
+  }
 
   String _nombreMes(String mesStr) {
     final partes = mesStr.split('-');
@@ -107,6 +149,16 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       default:
         return '';
     }
+  }
+
+  /// Etiqueta del período REALMENTE cargado en los datos. Se deriva de
+  /// `datos.meses` y no del selector: si el usuario cambia de vista o la
+  /// carga se cachea, el encabezado nunca puede decir "trimestral" mientras
+  /// las cifras son de un solo mes (el bug que ocultaba octubre).
+  String _labelPeriodoDatos(_DatosEstadisticas datos) {
+    if (datos.meses.isEmpty) return '';
+    if (datos.meses.length == 1) return _nombreMes(datos.meses.first);
+    return '${_nombreMes(datos.meses.first)} - ${_nombreMes(datos.meses.last)}';
   }
 
   // ─────────────────────────────────────────────────────────
@@ -317,7 +369,9 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Resumen global ───────────────────────────
-              _seccionTitulo(context.t('stat_section_global_summary'), _labelPeriodo()),
+              _seccionTitulo(
+                  context.t('stat_section_global_summary'),
+                  _labelPeriodoDatos(datos)),
               const SizedBox(height: 12),
               _buildResumenGlobal(datos),
               const SizedBox(height: 12),
@@ -332,9 +386,9 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                 const SizedBox(height: 20),
               ],
 
-              // ── Fecha de movimiento de direcciones ──────
-              _seccionTitulo(context.t('stat_section_movement'),
-                  _fechaMesActual()),
+              // ── Distribución del directorio ─────────────
+              _seccionTitulo(context.t('stat_pdf_address_distribution'),
+                  _labelPeriodoDatos(datos)),
               const SizedBox(height: 20),
 
               // ── Gráfico de torta ────────────────────────
@@ -342,7 +396,8 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
               const SizedBox(height: 20),
 
               // ── Campañas ─────────────────────────────────
-              _seccionTitulo(context.t('stat_section_campanas'), ''),
+              _seccionTitulo(context.t('stat_section_campanas'),
+                  _labelPeriodoDatos(datos)),
               const SizedBox(height: 12),
               _buildSeccionCampanas(datos),
               const SizedBox(height: 20),
@@ -352,10 +407,6 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
               const SizedBox(height: 12),
               ...datos.porTerritorio.entries
                   .map((e) => _buildTarjetaTerritorio(e.key, e.value, datos)),
-              const SizedBox(height: 20),
-
-              // ── Removidas / restauradas / eliminadas ────
-              _buildResumenMovimientos(datos),
               const SizedBox(height: 20),
 
               // ── Progreso de territorio: se predicó (sección extra) ──
@@ -391,8 +442,27 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
     // Territorios
     final terSnap = await db.collection('territorios').get();
 
-    // Estadísticas mensuales guardadas
-    final statsFutures = meses.map(
+    // Rango extendido de movimiento: desde el primer mes del período
+    // seleccionado hasta el mes actual. Para un mes cerrado (p. ej. octubre
+    // visto en noviembre) el piso hay que rebajarlo con TODO lo que entró y
+    // salió desde entonces, no solo dentro del mes; si no, el "piso inicial"
+    // sería el cierre del mes y no su arranque, y el "total" mostraría el
+    // directorio de hoy junto a un piso de otro fecha.
+    final mesActualClave = _claveMes(DateTime.now());
+    final mesesMovimiento = <String>[];
+    {
+      final p = meses.first.split('-');
+      var d = DateTime(int.parse(p[0]), int.parse(p[1]), 1);
+      while (mesesMovimiento.length < 240) {
+        final clave = _claveMes(d);
+        mesesMovimiento.add(clave);
+        if (clave == mesActualClave) break;
+        d = DateTime(d.year, d.month + 1, 1);
+      }
+    }
+
+    // Estadísticas mensuales guardadas (por mes del rango extendido)
+    final statsFutures = mesesMovimiento.map(
         (mes) => db.collection('estadisticas').doc('removidas_$mes').get());
     final statsSnaps = await Future.wait(statsFutures);
 
@@ -404,51 +474,14 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       return data['estado'] != 'removida';
     }).length;
 
-    // Piso inicial (direcciones que había al comienzo del período).
-    // Se guarda en configuracion/estadisticas para poder editarlo sin
-    // recompilar. Rollover automático: al cambiar de mes, el piso del nuevo
-    // mes pasa a ser el total con el que cerró el mes anterior
-    // (cierre_ultimo), reiniciando así la cuenta de nuevas direcciones.
-    // Sin configuración previa, el período arranca con el total actual
-    // (crecimiento 0) en vez de un número fijo histórico.
-    final int pisoPorDefecto = totalActivas;
+    // El piso ya no se calcula acá: se DERIVA del movimiento real después de
+    // armar los mapas por mes (ver `pisoInicial` más abajo). La foto guardada
+    // (`cierre_ultimo`) quedaba congelada en la última apertura de la pestaña
+    // y cualquier salida sin registro mensual (p. ej. la limpieza de
+    // noviembre de 2026) la dejaba inflada: el período mostraba crecimiento
+    // negativo aunque el mes hubiera sumado direcciones.
     final pisoDoc = await db.collection('configuracion').doc('estadisticas').get();
     final pisoData = pisoDoc.data() ?? {};
-
-    final mesActual = _claveMes(DateTime.now());
-    final pisoMesGuardado = pisoData['piso_mes']?.toString();
-    final pisoRegistrado = (pisoData['piso_inicial'] as num?)?.toInt();
-    final cierreUltimo = (pisoData['cierre_ultimo'] as num?)?.toInt();
-
-    int pisoInicial;
-    if (pisoMesGuardado != null && pisoMesGuardado != mesActual) {
-      // Cambió el mes: el piso pasa a ser el total con el que cerró el mes anterior
-      pisoInicial = cierreUltimo ?? pisoRegistrado ?? pisoPorDefecto;
-    } else {
-      // Mismo mes (o primera vez): usar el piso guardado o el predeterminado
-      pisoInicial = pisoRegistrado ??
-          (pisoData['total_inicial'] as num?)?.toInt() ??
-          pisoPorDefecto;
-    }
-
-    // Persistir solo cuando cambió: abrir la pestaña no debe escribir Firestore.
-    final requiereGuardar =
-        (pisoData['piso_inicial'] as num?)?.toInt() != pisoInicial ||
-            pisoData['piso_mes']?.toString() != mesActual ||
-            (pisoData['cierre_ultimo'] as num?)?.toInt() != totalActivas;
-    if (requiereGuardar) {
-      await db.collection('configuracion').doc('estadisticas').set({
-        'piso_inicial': pisoInicial,
-        'piso_mes': mesActual,
-        'cierre_ultimo': totalActivas,
-      }, SetOptions(merge: true));
-    }
-
-    final predicadasPeriodo = dirs.where((d) {
-      final data = (d.data() as Map<String, dynamic>?) ?? {};
-      final mes = data['mes_predicacion']?.toString();
-      return data['predicado'] == true && mes != null && meses.contains(mes);
-    }).length;
 
     final totalRemovidas = removidasSnap.docs.length;
 
@@ -466,7 +499,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
     // siempre que NO sea una restauración (las restauradas traen
     // `restaurada_en` y no deben contarse como nuevas).
     final Map<String, int> nuevasPorMes = {};
-    for (final mes in meses) {
+    for (final mes in mesesMovimiento) {
       nuevasPorMes[mes] = dirs.where((d) {
         final data = (d.data() as Map<String, dynamic>?) ?? {};
         final ts = (data['creado_el'] ?? data['created_at']) as Timestamp?;
@@ -478,9 +511,34 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       }).length;
     }
 
+    // Altas que ya salieron del directorio: si una dirección se creó y se
+    // removió dentro del período, en `direcciones_globales` ya no está y sin
+    // esto desaparecería de "Nuevas". La copia en `direcciones_removidas`
+    // conserva su fecha de creación cuando el motivo la guardó.
+    final idsVivos = dirs.map((d) => d.id).toSet();
+    for (final d in removidasSnap.docs) {
+      if (idsVivos.contains(d.id)) continue;
+      final data = (d.data() as Map<String, dynamic>?) ?? {};
+      final ts = (data['creado_el'] ?? data['created_at']) as Timestamp?;
+      if (ts == null) continue;
+      final fecha = ts.toDate();
+      final mes = '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}';
+      if (!mesesMovimiento.contains(mes)) continue;
+      nuevasPorMes[mes] = (nuevasPorMes[mes] ?? 0) + 1;
+    }
+
+    // Overrides del auditor: cuando la importación inicial no tiene
+    // `creado_el` (septiembre 2026), el conteo automático confunde altas con
+    // el backfill. `nuevas_manual_$mes` reemplaza el mes completo y alimenta
+    // igual los totales y la derivación del piso.
+    for (final mes in mesesMovimiento) {
+      final manual = (pisoData['nuevas_manual_$mes'] as num?)?.toInt();
+      if (manual != null) nuevasPorMes[mes] = manual;
+    }
+
     // Removidas por mes (fecha de remoción en direcciones_removidas).
     final Map<String, int> removidasPorMes = {};
-    for (final mes in meses) {
+    for (final mes in mesesMovimiento) {
       removidasPorMes[mes] = removidasSnap.docs.where((d) {
         final data = (d.data() as Map<String, dynamic>?) ?? {};
         final ts = data['removida_en'] as Timestamp?;
@@ -504,17 +562,75 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       }
     }
 
-    // Estadísticas de removidas/restauradas por mes
-    int totalRestauradas = 0;
-    int totalEliminadasPermanente = 0;
-    for (final snap in statsSnaps) {
-      if (snap.exists) {
-        final data = snap.data() ?? {};
-        totalRestauradas += ((data['restauradas'] ?? 0) as num).toInt();
-        totalEliminadasPermanente +=
-            ((data['eliminadas_permanente'] ?? 0) as num).toInt();
-      }
+    // Ajuste manual de restauradas: el contador mensual puede incluir
+    // restauraciones de la carga inicial (septiembre 2026) que ya están
+    // contempladas en el piso y en las altas manuales. Sin este ajuste el
+    // cierre del trimestre superaba el directorio real (212 vs 210).
+    for (final mes in mesesMovimiento) {
+      final manual = (pisoData['restauradas_manual_$mes'] as num?)?.toInt();
+      if (manual != null) restauradasPorMes[mes] = manual;
     }
+
+    // Totales del PERÍODO mostrado (solo los meses seleccionados): alimentan
+    // las tarjetas "Nuevas/Restauradas/Removidas/Eliminadas" y el cierre.
+    int nuevasPeriodoTotal = 0;
+    int removidasPeriodoTotal = 0;
+    int restauradasPeriodoTotal = 0;
+    int eliminadasPeriodoTotal = 0;
+    for (final mes in meses) {
+      nuevasPeriodoTotal += nuevasPorMes[mes] ?? 0;
+      removidasPeriodoTotal += removidasPorMes[mes] ?? 0;
+      restauradasPeriodoTotal += restauradasPorMes[mes] ?? 0;
+      eliminadasPeriodoTotal += eliminadasPorMes[mes] ?? 0;
+    }
+
+    // Piso inicial y cierre del período, derivados del movimiento real:
+    //   piso   = total de hoy − altas − restauradas + bajas DESDE el arranque
+    //            del período hasta hoy (rango extendido);
+    //   cierre = piso + movimiento del período.
+    //
+    // Así la pareja que se muestra es coherente en el tiempo: para un mes
+    // cerrado, "piso inicial" es el directorio al 1º de ese mes y "cierre del
+    // período" es el directorio al terminar ese mes, no el de hoy. Si el
+    // período incluye el mes actual, cierre == total de hoy. Las salidas sin
+    // registro mensual (limpiezas directas) quedan absorbidas por el piso:
+    // existían antes de que el período empezara.
+    int nuevasMovTotal = 0;
+    int removidasMovTotal = 0;
+    int restauradasMovTotal = 0;
+    for (final mes in mesesMovimiento) {
+      nuevasMovTotal += nuevasPorMes[mes] ?? 0;
+      removidasMovTotal += removidasPorMes[mes] ?? 0;
+      restauradasMovTotal += restauradasPorMes[mes] ?? 0;
+    }
+    final int pisoDerivado = (totalActivas -
+            nuevasMovTotal -
+            restauradasMovTotal +
+            removidasMovTotal)
+        .clamp(0, totalActivas);
+
+    // Ajuste manual del auditor (lápiz en la tarjeta de crecimiento). Se
+    // guarda por mes de INICIO del período para no pisar otros períodos.
+    final int pisoInicial = (pisoData['piso_manual_${meses.first}'] as num?)
+            ?.toInt() ??
+        pisoDerivado;
+    final int cierrePeriodo = pisoInicial +
+        nuevasPeriodoTotal +
+        restauradasPeriodoTotal -
+        removidasPeriodoTotal;
+
+    // Cobertura: las direcciones completadas son un estado ACUMULADO del
+    // directorio, no un movimiento del mes. Se cuentan las predicadas que
+    // seguían en el directorio al cierre (sin mes de predicación = se
+    // completaron en la carga inicial).
+    final int completadasCierre = dirs.where((d) {
+      final data = (d.data() as Map<String, dynamic>?) ?? {};
+      if (data['estado'] == 'removida' || data['predicado'] != true) {
+        return false;
+      }
+      final mes = data['mes_predicacion']?.toString();
+      return mes == null || mes.compareTo(meses.last) <= 0;
+    }).length.clamp(0, cierrePeriodo).toInt();
 
     // Por territorio
     final Map<String, _DatosTerritorio> porTerritorio = {};
@@ -533,10 +649,15 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             data['territorio_nombre'] == terNombre;
       }).toList();
 
-      final predicadasTer = dirsTer.where((d) {
+      // Completadas acumuladas: mismo criterio que el total global, para que
+      // la suma de los territorios cierre con la cobertura del informe.
+      final completadasTer = dirsTer.where((d) {
         final data = (d.data() as Map<String, dynamic>?) ?? {};
+        if (data['estado'] == 'removida' || data['predicado'] != true) {
+          return false;
+        }
         final mes = data['mes_predicacion']?.toString();
-        return data['predicado'] == true && mes != null && meses.contains(mes);
+        return mes == null || mes.compareTo(meses.last) <= 0;
       }).length;
 
       final removidasTer = removidasSnap.docs.where((d) {
@@ -559,17 +680,32 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
 
       porTerritorio[terNombre] = _DatosTerritorio(
         totalDirecciones: dirsTer.length,
-        predicadas: predicadasTer,
+        completadas: completadasTer,
         removidas: removidasTer,
         totalTarjetas: totalTarjetas,
         tarjetasCompletadas: tarjetasCompletadas,
       );
     }
 
+    // Orden estable por volumen: la tabla del informe se lee de mayor a menor
+    // en vez del orden arbitrario en que Firestore devuelve los territorios.
+    final porTerritorioOrdenado = Map<String, _DatosTerritorio>.fromEntries(
+      porTerritorio.entries.toList()
+        ..sort((a, b) {
+          final porDir =
+              b.value.totalDirecciones.compareTo(a.value.totalDirecciones);
+          return porDir != 0 ? porDir : a.key.compareTo(b.key);
+        }),
+    );
+
     // ── Estadísticas de campañas ───────────────────────────────────
-    // El progreso se cuenta sobre el directorio global completo: cada
-    // dirección con 'campana_invitacion_{nombre}' == true recibió el
-    // material (folleto/invitación). El total = todas las direcciones.
+    // El alcance de una campaña NO es el directorio de hoy: se compone de las
+    // direcciones que la campaña registró. `completadas` sale de las marcas
+    // por campaña (`campana_invitacion_{nombre}` y el estado genérico
+    // `campana_estado` de esa misma campaña); `pendientes` sale de la foto
+    // que deja `_cerrarCampana` (`total_faltantes`) o de la carpeta mientras
+    // la campaña siga activa. Usar `dirs.length` hacía que una campaña de
+    // septiembre midiera contra el directorio de noviembre (210).
     final List<_DatosCampana> campanas = [];
     for (final slot in ['campana_1', 'campana_2']) {
       try {
@@ -585,11 +721,92 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                 ? (cd['etiqueta_entrega'] as String).trim()
                 : 'material entregado';
 
-        final totalDirecciones = dirs.length;
-        final completadas = dirs.where((d) {
+        // Marcas de entrega de ESTA campaña. Se descartan las anteriores al
+        // inicio del período y, en campañas nuevas (`iniciada_en`), las marcas
+        // sin fecha, que solo pueden venir de una campaña homónima anterior.
+        var entregadas = dirs.where((d) {
           final dd = (d.data() as Map<String, dynamic>?) ?? {};
-          return dd['campana_invitacion_$nombre'] == true;
+          return CampanasUtils.esEntregaDeCampana(
+            dd,
+            nombre,
+            desde: fechaInicio,
+            exigirFecha: cd['iniciada_en'] != null,
+          );
         }).length;
+
+        // Pendientes al cierre. La campaña cerrada guarda su foto en
+        // `estadisticas/campana_{nombre}_{mes}` y borra la carpeta; la activa
+        // todavía tiene la carpeta con la lista viva.
+        var pendientes = 0;
+        var hayCierre = false;
+        if (!activa) {
+          for (final mes in _mesesCierreCampana(fechaInicio, fechaFin)) {
+            final snap = await db
+                .collection('estadisticas')
+                .doc('campana_${nombre}_$mes')
+                .get();
+            if (!snap.exists) continue;
+            final sd = snap.data() ?? {};
+            pendientes = (sd['total_faltantes'] as num?)?.toInt() ?? 0;
+            // La foto es el registro histórico: si las marcas por dirección
+            // se perdieron después del cierre, sigue diciendo cuántas se
+            // entregaron. Se toma el mayor para no pisar marcas más nuevas.
+            final enFoto =
+                (sd['total_invitaciones_dejadas'] as num?)?.toInt() ?? 0;
+            if (enFoto > entregadas) entregadas = enFoto;
+            hayCierre = true;
+          }
+        }
+        if (activa || !hayCierre) {
+          final campId = CampanasUtils.idColeccionCampana(nombre);
+          if (campId.isNotEmpty) {
+            final carpeta = await db
+                .collection('territorios')
+                .doc('campanas')
+                .collection(campId)
+                .get();
+            pendientes = carpeta.docs.where((d) {
+              final dd = (d.data() as Map<String, dynamic>?) ?? {};
+              return dd['estado_campana'] != 'completada';
+            }).length;
+          }
+        }
+
+        // Base y completadas de campañas que no tienen registro por dirección.
+        // Se cargan acá (estático) en lugar de escribir datos inventados en
+        // Firestore; `mesInicio` impide que una campaña futura con el mismo
+        // nombre herede estas cifras.
+        final historico = _datosHistoricosCampana[_claveCampana(nombre)];
+        final aplicaHistorico = historico != null &&
+            fechaInicio != null &&
+            _claveMes(fechaInicio) == historico.mesInicio;
+
+        var totalDirecciones = entregadas + pendientes;
+
+        // Base congelada al crear la campaña: manda sobre el alcance
+        // reconstruido para que el denominador no cambie si el directorio
+        // crece o se depura durante el período.
+        final baseGuardada = (cd['base_direcciones'] as num?)?.toInt();
+        if (baseGuardada != null) {
+          totalDirecciones =
+              baseGuardada > entregadas ? baseGuardada : entregadas;
+          pendientes = totalDirecciones - entregadas;
+        }
+
+        if (historico != null && aplicaHistorico) {
+          final completadas = historico.completadas ?? entregadas;
+          entregadas =
+              completadas > historico.total ? historico.total : completadas;
+          totalDirecciones = historico.total;
+          pendientes = totalDirecciones - entregadas;
+        }
+
+        // Campaña cerrada con pendientes pero sin una sola marca de entrega:
+        // la app nunca guardó esas entregas. Mostrar "0 de N" afirmaría que no
+        // hubo trabajo; el informe muestra las direcciones trabajadas y avisa
+        // que las entregas no están registradas.
+        final sinRegistro =
+            !aplicaHistorico && !activa && entregadas == 0 && pendientes > 0;
 
         campanas.add(_DatosCampana(
           slot: slot,
@@ -598,8 +815,9 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
           fechaInicio: fechaInicio,
           fechaFin: fechaFin,
           totalDirecciones: totalDirecciones,
-          completadas: completadas,
+          completadas: entregadas,
           etiqueta: etiqueta,
+          sinRegistro: sinRegistro,
         ));
       } catch (_) {
         // Si el doc no existe, no hay campaña en ese slot.
@@ -608,14 +826,17 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
 
     return _DatosEstadisticas(
       totalActivas: totalActivas,
+      cierrePeriodo: cierrePeriodo,
       pisoInicial: pisoInicial,
-      predicadasPeriodo: predicadasPeriodo,
+      completadasCierre: completadasCierre,
       totalRemovidas: totalRemovidas,
       predicadasPorMes: predicadasPorMes,
       meses: meses,
-      porTerritorio: porTerritorio,
-      totalRestauradas: totalRestauradas,
-      totalEliminadasPermanente: totalEliminadasPermanente,
+      porTerritorio: porTerritorioOrdenado,
+      nuevasPeriodo: nuevasPeriodoTotal,
+      removidasPeriodo: removidasPeriodoTotal,
+      restauradasPeriodo: restauradasPeriodoTotal,
+      eliminadasPeriodo: eliminadasPeriodoTotal,
       nuevasPorMes: nuevasPorMes,
       removidasPorMes: removidasPorMes,
       restauradasPorMes: restauradasPorMes,
@@ -665,11 +886,12 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
   }
 
   Widget _buildResumenGlobal(_DatosEstadisticas datos) {
-    final porcentaje = datos.totalActivas > 0
-        ? (datos.predicadasPeriodo / datos.totalActivas * 100)
-            .clamp(0, 100)
-            .toDouble()
-        : 0.0;
+    final porcentaje = datos.cobertura;
+    final incluyeMesActual =
+        datos.meses.contains(_claveMes(DateTime.now()));
+    final etiquetaDirecciones = incluyeMesActual
+        ? context.t('stat_total_addresses')
+        : context.t('stat_addresses_at_close');
 
     return Column(
       children: [
@@ -722,78 +944,46 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    context.t('stat_predicated_count', args: ['${datos.predicadasPeriodo}']),
+                    '${datos.completadasCierre} ${context.t('stat_completed').toLowerCase()}',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white.withOpacity(0.85),
                       fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   Text(
-                    context.t('stat_total_count', args: ['${datos.totalActivas}']),
+                    '${datos.pendientesCierre} '
+                    '${context.t('stat_pending').toLowerCase()}',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white.withOpacity(0.85),
                       fontSize: 12,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 4),
-              Builder(
-                builder: (context) {
-                  final ahora = DateTime.now();
-                  final mesActual =
-                      '${ahora.year.toString().padLeft(4, '0')}-${ahora.month.toString().padLeft(2, '0')}';
-                  final predActual = datos.predicadasPorMes[mesActual] ?? 0;
-                  final heredadas = (datos.predicadasPeriodo - predActual)
-                      .clamp(0, datos.predicadasPeriodo);
-                  return Column(
-                    children: [
-                      Text(
-                        'Mes actual: $predActual • Heredado (meses anteriores): $heredadas',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 11,
-                          height: 1.3,
-                        ),
-                      ),
-                      if (datos.predicadasPorMes.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          'Desglose por mes: ${datos.predicadasPorMes.entries.map((e) => '${e.key}: ${e.value}').join(' • ')}',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.6),
-                            fontSize: 9,
-                            height: 1.3,
-                          ),
-                        ),
-                      ],
-                    ],
-                  );
-                },
+              Text(
+                context.t('stat_coverage_hint',
+                    args: ['${datos.cierrePeriodo}']),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.65),
+                  fontSize: 10,
+                  height: 1.3,
+                ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
 
-        // 3 métricas
         Row(
           children: [
             Expanded(
               child: _metricaCard(
-                '${datos.totalTerritorios}',
-                context.t('stat_territories'),
-                Icons.map,
-                _morado,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _metricaCard(
-                '${datos.totalActivas}',
-                context.t('stat_addresses'),
+                '${datos.cierrePeriodo}',
+                etiquetaDirecciones,
                 Icons.home_work_outlined,
                 Colors.blue,
               ),
@@ -801,10 +991,32 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             const SizedBox(width: 8),
             Expanded(
               child: _metricaCard(
-                '${datos.totalRemovidas}',
-                context.t('stat_removed'),
-                Icons.person_off_outlined,
-                Colors.red,
+                '${datos.completadasCierre}',
+                context.t('stat_completed'),
+                Icons.check_circle_outline,
+                _verde,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _metricaCard(
+                '${datos.pendientesCierre}',
+                context.t('stat_pending'),
+                Icons.schedule,
+                Colors.orange,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _metricaCard(
+                '${datos.totalTerritorios}',
+                context.t('stat_territories'),
+                Icons.map,
+                _morado,
               ),
             ),
           ],
@@ -856,6 +1068,10 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
   Widget _buildCreditosCrecimiento(_DatosEstadisticas datos) {
     final pct = datos.crecimientoPorcentaje;
     final positivo = pct >= 0;
+    // Si el período es un mes cerrado, el segundo número no es el total de
+    // hoy sino el cierre de ese mes; la etiqueta lo dice.
+    final incluyeMesActual =
+        datos.meses.contains(_claveMes(DateTime.now()));
 
     const colorAzul = Colors.blue;
 
@@ -913,7 +1129,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             ],
           ),
           const SizedBox(height: 12),
-          // ── Piso inicial │ Total actual ─────────────────
+          // ── Piso inicial │ Total del período (o de hoy si el mes está abierto)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
@@ -940,7 +1156,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    '${context.t('stat_total_now')}: ${datos.totalActivas}',
+                    '${incluyeMesActual ? context.t('stat_total_now') : context.t('stat_total_periodo')}: ${datos.cierrePeriodo}',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -964,7 +1180,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             children: [
               Expanded(
                 child: _miniCrecimiento(
-                  '${datos.crecimientoNeto > 0 ? '+' : ''}${datos.crecimientoNeto}',
+                  '${datos.nuevasPeriodo}',
                   context.t('stat_new_addresses'),
                   colorAzul,
                   Icons.add_home_work,
@@ -1051,7 +1267,8 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       await FirebaseFirestore.instance
           .collection('configuracion')
           .doc('estadisticas')
-          .set({'piso_inicial': nuevo}, SetOptions(merge: true));
+          .set({'piso_manual_${datos.meses.first}': nuevo},
+              SetOptions(merge: true));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(context.t('stat_floor_saved')),
@@ -1178,13 +1395,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
   }
 
   Widget _buildGraficoTorta(_DatosEstadisticas datos) {
-    // totalActivas = directorio global completo (sin las removidas).
-    final activasFijas = datos.totalActivas;
-    // El bloque lleva el mes en el título: las removidas que se muestran son las
-    // del período, no el acumulado histórico. Si no, una baja de septiembre
-    // seguiría figurando como "movimiento" de octubre.
-    final removidasPeriodo = datos.removidasPeriodo;
-    final total = datos.totalActivas + datos.totalRemovidas;
+    final total = datos.cierrePeriodo;
     if (total == 0) {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -1193,18 +1404,14 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
           borderRadius: BorderRadius.circular(16),
         ),
         child: Center(
-          child: Text(context.t('stat_no_data'), style: TextStyle(color: Colors.grey)),
+          child: Text(context.t('stat_no_data'),
+              style: const TextStyle(color: Colors.grey)),
         ),
       );
     }
 
-    final activasPct = total > 0 ? activasFijas / total : 0.0;
-    final removPct = total > 0 ? removidasPeriodo / total : 0.0;
-    final nuevasNeto = datos.crecimientoNeto > 0 ? datos.crecimientoNeto : 0;
-    final nuevasPct = total > 0 ? nuevasNeto / total : 0.0;
-    final predicPct = datos.totalActivas > 0
-        ? datos.predicadasPeriodo / datos.totalActivas
-        : 0.0;
+    final completadasPct = datos.cobertura / 100;
+    final pendientesPct = datos.pendientesCierre / total;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1221,18 +1428,11 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       ),
       child: Column(
         children: [
-          // Barras horizontales como torta simplificada
-          _barraDistribucion(context.t('stat_dist_predicated'), datos.predicadasPeriodo,
-              datos.totalActivas, predicPct, _verde),
+          _barraDistribucion(context.t('stat_completed'),
+              datos.completadasCierre, total, completadasPct, _verde),
           const SizedBox(height: 8),
-          _barraDistribucion(context.t('stat_dist_new'), nuevasNeto,
-              total, nuevasPct, Colors.blue),
-          const SizedBox(height: 8),
-          _barraDistribucion(
-              context.t('stat_dist_active'), activasFijas, total, activasPct, _morado),
-          const SizedBox(height: 8),
-          _barraDistribucion(
-              context.t('stat_dist_removed'), removidasPeriodo, total, removPct, Colors.red),
+          _barraDistribucion(context.t('stat_pending'),
+              datos.pendientesCierre, total, pendientesPct, Colors.orange),
         ],
       ),
     );
@@ -1280,8 +1480,40 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
     );
   }
 
+  /// `true` si el rango [fechaInicio, fechaFin] de la campaña toca alguno de
+  /// los meses del período mostrado. Un extremo nulo se trata como abierto
+  /// (la campaña sigue vigente o no tiene inicio definido); si faltan ambas
+  /// fechas, no hay forma de asignarle un mes y se muestra siempre.
+  bool _campanaEnPeriodo(_DatosCampana c, List<String> meses) {
+    if (meses.isEmpty) return true;
+    if (c.fechaInicio == null && c.fechaFin == null) return true;
+    final iniPartes = meses.first.split('-');
+    final finPartes = meses.last.split('-');
+    final periodoIni =
+        DateTime(int.parse(iniPartes[0]), int.parse(iniPartes[1]), 1);
+    // Primer día del mes siguiente: borde exclusivo, para no perder una
+    // campaña que arranca el último día del mes a cualquier hora.
+    final periodoFinExcl =
+        DateTime(int.parse(finPartes[0]), int.parse(finPartes[1]) + 1, 1);
+    if (c.fechaInicio != null && !c.fechaInicio!.isBefore(periodoFinExcl)) {
+      return false;
+    }
+    if (c.fechaFin != null && c.fechaFin!.isBefore(periodoIni)) {
+      return false;
+    }
+    return true;
+  }
+
   Widget _buildSeccionCampanas(_DatosEstadisticas datos) {
-    if (datos.campanas.isEmpty) {
+    // Cada campaña aparece solo en los meses que abarca su rango de fechas:
+    // una que corre de fines de octubre a principios de noviembre figura en
+    // ambos meses y deja de figurar en diciembre. El progreso mostrado es el
+    // acumulado de la campaña, no se corta por mes.
+    final campanasPeriodo = datos.campanas
+        .where((c) => _campanaEnPeriodo(c, datos.meses))
+        .toList();
+
+    if (campanasPeriodo.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -1289,7 +1521,10 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
           borderRadius: BorderRadius.circular(16),
         ),
         child: Center(
-          child: Text(context.t('stat_no_campanas'),
+          child: Text(
+              datos.campanas.isEmpty
+                  ? context.t('stat_no_campanas')
+                  : context.t('stat_no_campanas_periodo'),
               style: TextStyle(color: Colors.grey, fontSize: 11)),
         ),
       );
@@ -1297,7 +1532,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
 
     return Column(
       children: [
-        for (final c in datos.campanas)
+        for (final c in campanasPeriodo)
           Container(
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(16),
@@ -1359,7 +1594,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                     Expanded(
                       child: Text(
                         '${context.t('stat_period')}: '
-                        '${_fmtFecha(c.fechaInicio)} – ${_fmtFecha(c.fechaFin)}',
+                        '${_fmtFecha(c.fechaInicio)} - ${_fmtFecha(c.fechaFin)}',
                         style:
                             TextStyle(fontSize: 11, color: Colors.grey[600]),
                       ),
@@ -1368,38 +1603,69 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                 ),
                 const SizedBox(height: 8),
                 // Progreso
-                Row(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: (c.progreso / 100).clamp(0.0, 1.0),
-                          minHeight: 10,
-                          backgroundColor: Colors.grey.shade100,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                              c.activa ? _verde : Colors.orange),
+                if (c.sinRegistro)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline,
+                            size: 14, color: Colors.orange.shade800),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '${c.totalDirecciones} '
+                            '${context.t('stat_campana_trabajadas')} · '
+                            '${context.t('stat_campana_sin_registro')}',
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.orange.shade900),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: (c.progreso / 100).clamp(0.0, 1.0),
+                            minHeight: 10,
+                            backgroundColor: Colors.grey.shade100,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                                c.activa ? _verde : Colors.orange),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      '${c.completadas}/${c.totalDirecciones} '
-                      '(${c.progreso.toStringAsFixed(0)}%)',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF263238),
+                      const SizedBox(width: 10),
+                      Text(
+                        '${c.completadas}/${c.totalDirecciones} '
+                        '(${c.progreso.toStringAsFixed(0)}%)',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF263238),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${c.completadas} de ${c.totalDirecciones} '
-                  'con ${c.etiqueta}',
-                  style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${c.completadas} de ${c.totalDirecciones} '
+                    'con ${c.etiqueta} · ${c.pendientes} '
+                    '${context.t('stat_campana_pendientes')}',
+                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1408,33 +1674,13 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
   }
 
   String _fmtFecha(DateTime? fecha) {
-    if (fecha == null) return '—';
+    if (fecha == null) return '-';
     return '${fecha.day}/${fecha.month}/${fecha.year}';
-  }
-
-  String _fechaMesActual() {
-    final ahora = DateTime.now();
-    final es = context.currentLanguage == 'PT';
-    const mesesES = [
-      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-    ];
-    const mesesPT = [
-      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-    ];
-    final meses = es ? mesesPT : mesesES;
-    final idx = (ahora.month - 1).clamp(0, 11);
-    return '${meses[idx]} ${ahora.year}';
   }
 
   Widget _buildTarjetaTerritorio(
       String nombre, _DatosTerritorio datos, _DatosEstadisticas global) {
-    final porcentaje = datos.totalDirecciones > 0
-        ? (datos.predicadas / datos.totalDirecciones * 100)
-            .clamp(0, 100)
-            .toDouble()
-        : 0.0;
+    final porcentaje = datos.cobertura;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1546,9 +1792,10 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                _miniMetrica('${datos.predicadas}', context.t('stat_dist_predicated'), _verde),
-                _miniMetrica('${datos.totalDirecciones - datos.predicadas}',
-                    context.t('stat_pending'), Colors.grey),
+                _miniMetrica('${datos.completadas}',
+                    context.t('stat_completed'), _verde),
+                _miniMetrica('${datos.pendientes}',
+                    context.t('stat_pending'), Colors.orange),
                 _miniMetrica('${datos.removidas}', context.t('stat_removed'), Colors.red),
                 _miniMetrica(
                     '${datos.tarjetasCompletadas}/${datos.totalTarjetas}',
@@ -1576,105 +1823,6 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
           ),
           Text(
             label,
-            style: TextStyle(fontSize: 9, color: Colors.grey[500]),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildResumenMovimientos(_DatosEstadisticas datos) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            context.t('stat_movements'),
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-              color: Color(0xFF263238),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _movimientoItem(
-                  Icons.person_off,
-                  context.t('stat_removed'),
-                  datos.totalRemovidas,
-                  Colors.red,
-                  context.t('stat_removed_not_hispanic'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _movimientoItem(
-                  Icons.restore,
-                  context.t('stat_restored'),
-                  datos.totalRestauradas,
-                  _verde,
-                  context.t('stat_restored_desc'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _movimientoItem(
-                  Icons.delete_forever,
-                  context.t('stat_permanently_deleted'),
-                  datos.totalEliminadasPermanente,
-                  Colors.grey,
-                  context.t('stat_permanently_deleted_desc'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _movimientoItem(
-      IconData icon, String label, int valor, Color color, String sublabel) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 4),
-          Text(
-            '$valor',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-          Text(
-            label,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600, color: color),
-          ),
-          Text(
-            sublabel,
             style: TextStyle(fontSize: 9, color: Colors.grey[500]),
             textAlign: TextAlign.center,
           ),
@@ -1755,13 +1903,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
 
       final pdf = pw.Document();
       final ahora = DateTime.now();
-      final periodoTexto = _mesesSeleccionados == 1
-          ? context.t('stat_period_monthly')
-          : _mesesSeleccionados == 3
-              ? context.t('stat_period_quarterly')
-              : _mesesSeleccionados == 6
-                  ? context.t('stat_period_semiannual')
-                  : context.t('stat_period_annual');
+      final periodoTexto = _labelPeriodoDatos(datos);
       final fechaGenerado =
           '${ahora.day.toString().padLeft(2, '0')}/${ahora.month.toString().padLeft(2, '0')}/${ahora.year}';
 
@@ -1771,16 +1913,19 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
         informeIA = await GroqReporteService.generarInformeEjecutivo(
           resumen: {
             'periodo': periodoTexto,
+            'meses_incluidos': datos.meses,
             'piso_inicial': datos.pisoInicial,
-            'total_activas': datos.totalActivas,
-            'predicadas_periodo': datos.predicadasPeriodo,
-            'nuevas_periodo': datos.crecimientoNeto,
+            'cierre_periodo': datos.cierrePeriodo,
+            'direcciones_completadas': datos.completadasCierre,
+            'direcciones_pendientes': datos.pendientesCierre,
+            'cobertura_porcentaje': datos.cobertura.toStringAsFixed(1),
+            'nuevas_periodo': datos.nuevasPeriodo,
             'removidas_periodo': datos.removidasPeriodo,
             'restauradas_periodo': datos.restauradasPeriodo,
             'eliminadas_permanente': datos.eliminadasPeriodo,
             'crecimiento_neto': datos.crecimientoNeto,
             'crecimiento_porcentaje': datos.crecimientoPorcentaje,
-            'total_removidas': datos.totalRemovidas,
+            'total_removidas_historico': datos.totalRemovidas,
             'total_territorios': datos.totalTerritorios,
           },
         );
@@ -1788,6 +1933,18 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
         debugPrint('Error generando informe IA: $e');
         informeIA = '';
       }
+
+      // La fuente del PDF no trae guion largo ni comillas curvas: la IA a
+      // veces los devuelve y se dibujaban como cuadros vacíos. Se normalizan
+      // antes de armar el documento.
+      informeIA = informeIA
+          .replaceAll('\u2013', '-')
+          .replaceAll('\u2014', '-')
+          .replaceAll('\u2018', "'")
+          .replaceAll('\u2019', "'")
+          .replaceAll('\u201C', '"')
+          .replaceAll('\u201D', '"')
+          .replaceAll('\u2026', '...');
 
       // ── COLORES ──────────────────────────────────────────
       final colorVerde = PdfColor.fromHex('#1B5E20');
@@ -1801,10 +1958,24 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
       final colorNaranja = PdfColor.fromHex('#E65100');
       final colorAzul = PdfColor.fromHex('#0277BD');
 
-      // ── PORCENTAJE COMPLETADO ─────────────────────────────
-      final pct = datos.totalActivas > 0
-          ? (datos.predicadasPeriodo / datos.totalActivas * 100).clamp(0, 100)
-          : 0.0;
+      // ── COHERENCIA TEMPORAL DEL PERÍODO ───────────────────
+      // Si el período es un mes cerrado, el "total" del informe es el cierre
+      // de ese mes, no el directorio de hoy; las etiquetas lo aclaran.
+      final incluyeMesActual = datos.meses.contains(_claveMes(DateTime.now()));
+      final etiquetaTotal = incluyeMesActual
+          ? context.t('stat_total_now')
+          : context.t('stat_total_periodo');
+
+      // ── COBERTURA DEL PERÍODO ─────────────────────────────
+      // Completadas acumuladas sobre el total de direcciones al cierre.
+      final pct = datos.cobertura;
+
+      // ── CAMPAÑAS DEL PERÍODO ──────────────────────────────
+      // Mismo filtro que la pantalla: solo las campañas cuyo rango de fechas
+      // toca los meses del informe. El progreso es el acumulado de cada una.
+      final campanasPeriodo = datos.campanas
+          .where((c) => _campanaEnPeriodo(c, datos.meses))
+          .toList();
 
       // ── PÁGINA 1: RESUMEN EJECUTIVO ───────────────────────
       pdf.addPage(
@@ -1884,7 +2055,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                       children: [
                         // ── KPIs principales ──────────────────────────
-                        pw.Text('RESUMEN EJECUTIVO',
+                        pw.Text('RESUMEN DESCRIPTIVO',
                             style: pw.TextStyle(
                                 fontSize: 11,
                                 fontWeight: pw.FontWeight.bold,
@@ -1893,18 +2064,29 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                         pw.SizedBox(height: 12),
                         pw.Row(
                           children: [
-                            _pdfKpi('Direcciones activas', '${datos.totalActivas}', colorVerde, colorBlanco),
-                            pw.SizedBox(width: 12),
-                            _pdfKpi('Predicadas período', '${datos.predicadasPeriodo}', colorMorado, colorBlanco),
-                            pw.SizedBox(width: 12),
-                            _pdfKpi(context.t('stat_territories'), '${datos.totalTerritorios}', PdfColor.fromHex('#0277BD'), colorBlanco),
+                            _pdfKpi(
+                                incluyeMesActual
+                                    ? context.t('stat_total_addresses')
+                                    : context.t('stat_addresses_at_close'),
+                                '${datos.cierrePeriodo}',
+                                colorMorado,
+                                colorBlanco),
+                            pw.SizedBox(width: 10),
+                            _pdfKpi(context.t('stat_completed'),
+                                '${datos.completadasCierre}', colorVerde, colorBlanco),
+                            pw.SizedBox(width: 10),
+                            _pdfKpi(context.t('stat_pending'),
+                                '${datos.pendientesCierre}', colorNaranja, colorBlanco),
+                            pw.SizedBox(width: 10),
+                            _pdfKpi(context.t('stat_territories'),
+                                '${datos.totalTerritorios}', colorAzul, colorBlanco),
                           ],
                         ),
 
                         pw.SizedBox(height: 24),
 
-                        // ── Barra de progreso ──────────────────────────
-                        pw.Text('PROGRESO DE PREDICACIÓN',
+                        // ── Cobertura de predicación ───────────────────
+                        pw.Text(context.t('stat_pdf_period_coverage').toUpperCase(),
                             style: pw.TextStyle(
                                 fontSize: 11,
                                 fontWeight: pw.FontWeight.bold,
@@ -1922,13 +2104,16 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                             crossAxisAlignment: pw.CrossAxisAlignment.start,
                             children: [
                               pw.Row(
-                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    pw.MainAxisAlignment.spaceBetween,
                                 children: [
-                                  pw.Text('Cobertura del período',
-                                      style: pw.TextStyle(fontSize: 12, color: colorTexto)),
+                                  pw.Text(
+                                      '${context.t('stat_completed')} / ${context.t('stat_total_addresses').toLowerCase()}',
+                                      style: pw.TextStyle(
+                                          fontSize: 12, color: colorTexto)),
                                   pw.Text('${pct.toStringAsFixed(1)}%',
                                       style: pw.TextStyle(
-                                          fontSize: 20,
+                                          fontSize: 22,
                                           fontWeight: pw.FontWeight.bold,
                                           color: colorVerde)),
                                 ],
@@ -1946,97 +2131,63 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                               ),
                               pw.SizedBox(height: 8),
                               pw.Row(
-                                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    pw.MainAxisAlignment.spaceBetween,
                                 children: [
-                                  pw.Text(context.t('stat_predicated_count', args: ['${datos.predicadasPeriodo}']),
-                                      style: pw.TextStyle(fontSize: 10, color: colorVerde, fontWeight: pw.FontWeight.bold)),
-                                  pw.Text('${datos.totalActivas - datos.predicadasPeriodo} pendientes',
-                                      style: pw.TextStyle(fontSize: 10, color: colorTextoSuave)),
+                                  pw.Text(
+                                      '${datos.completadasCierre} ${context.t('stat_completed').toLowerCase()}',
+                                      style: pw.TextStyle(
+                                          fontSize: 10,
+                                          color: colorVerde,
+                                          fontWeight: pw.FontWeight.bold)),
+                                  pw.Text(
+                                      '${datos.pendientesCierre} ${context.t('stat_pending').toLowerCase()}',
+                                      style: pw.TextStyle(
+                                          fontSize: 10,
+                                          color: colorNaranja,
+                                          fontWeight: pw.FontWeight.bold)),
                                 ],
                               ),
+                              pw.SizedBox(height: 6),
+                              pw.Text(
+                                  context.t('stat_coverage_hint', args: [
+                                    '${datos.cierrePeriodo}'
+                                  ]),
+                                  style: pw.TextStyle(
+                                      fontSize: 8.5, color: colorTextoSuave)),
                             ],
                           ),
                         ),
 
-                        pw.SizedBox(height: 24),
+                        pw.SizedBox(height: 22),
 
-                        // ── Gráfico de barras por mes ──────────────────
-                        if (datos.predicadasPorMes.isNotEmpty) ...[
-                          pw.Text('EVOLUCIÓN MENSUAL',
-                              style: pw.TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: pw.FontWeight.bold,
-                                  color: colorTextoSuave,
-                                  letterSpacing: 1.5)),
-                          pw.SizedBox(height: 10),
-                          pw.Container(
-                            height: 150,
-                            padding: const pw.EdgeInsets.all(16),
-                            decoration: pw.BoxDecoration(
-                              color: colorGrisClaro,
-                              borderRadius: pw.BorderRadius.circular(12),
-                              border: pw.Border.all(color: colorGrisMedio),
-                            ),
-                            child: pw.Column(
-                              children: [
-                                pw.Expanded(
-                                  child: pw.Row(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                                    mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
-                                    children: () {
-                                      final maxVal = datos.predicadasPorMes.values
-                                          .fold(0, (a, b) => a > b ? a : b)
-                                          .toDouble();
-                                      return datos.meses.map((mes) {
-                                        final val = datos.predicadasPorMes[mes] ?? 0;
-                                        final h = maxVal > 0 ? (val / maxVal) : 0.0;
-                                        final parts = mes.split('-');
-                                        final label = parts.length >= 2 ? '${_mesCorto(int.parse(parts[1]))}' : mes;
-                                        return pw.Column(
-                                          mainAxisAlignment: pw.MainAxisAlignment.end,
-                                          children: [
-                                            pw.Text('$val', style: pw.TextStyle(fontSize: 8, color: colorVerde, fontWeight: pw.FontWeight.bold)),
-                                            pw.SizedBox(height: 3),
-                                            pw.Container(
-                                              width: 28,
-                                              height: (h * 80).clamp(4, 80),
-                                              decoration: pw.BoxDecoration(
-                                                color: colorVerde,
-                                                borderRadius: pw.BorderRadius.only(
-                                                  topLeft: const pw.Radius.circular(4),
-                                                  topRight: const pw.Radius.circular(4),
-                                                ),
-                                              ),
-                                            ),
-                                            pw.SizedBox(height: 4),
-                                            pw.Text(label, style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
-                                          ],
-                                        );
-                                      }).toList();
-                                    }(),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-
-                        pw.SizedBox(height: 24),
-
-                        // ── Resumen removidas/restauradas ──────────────
+                        // ── Movimiento del período ─────────────────────
+                        pw.Text('MOVIMIENTO DEL PERÍODO',
+                            style: pw.TextStyle(
+                                fontSize: 11,
+                                fontWeight: pw.FontWeight.bold,
+                                color: colorTextoSuave,
+                                letterSpacing: 1.5)),
+                        pw.SizedBox(height: 10),
                         pw.Row(
                           children: [
-                            _pdfInfoCard(context.t('stat_new_addresses'), '${datos.nuevasPeriodo}', PdfColor.fromHex('#0277BD')),
-                            pw.SizedBox(width: 12),
-                            _pdfInfoCard(context.t('stat_removed_not_hispanic'), '${datos.totalRemovidas}', colorNaranja),
-                            pw.SizedBox(width: 12),
-                            _pdfInfoCard('Restauradas', '${datos.totalRestauradas}', colorVerde),
-                            pw.SizedBox(width: 12),
-                            _pdfInfoCard('Eliminadas', '${datos.totalEliminadasPermanente}', PdfColor.fromHex('#B71C1C')),
+                            _pdfInfoCard(context.t('stat_new_addresses'),
+                                '${datos.nuevasPeriodo}', colorAzul),
+                            pw.SizedBox(width: 10),
+                            _pdfInfoCard(context.t('stat_restored'),
+                                '${datos.restauradasPeriodo}', colorVerde),
+                            pw.SizedBox(width: 10),
+                            _pdfInfoCard(context.t('stat_removed'),
+                                '${datos.removidasPeriodo}', colorNaranja),
+                            pw.SizedBox(width: 10),
+                            _pdfInfoCard(
+                                context.t('stat_permanently_deleted'),
+                                '${datos.eliminadasPeriodo}',
+                                PdfColor.fromHex('#B71C1C')),
                           ],
                         ),
 
-                        pw.SizedBox(height: 16),
+                        pw.SizedBox(height: 18),
 
                         // ── Crecimiento del período ─────────────────────
                         pw.Container(
@@ -2048,6 +2199,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                           ),
                           child: pw.Row(
                             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: pw.CrossAxisAlignment.center,
                             children: [
                               pw.Column(
                                 crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -2059,16 +2211,24 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                                           color: colorVerde)),
                                   pw.SizedBox(height: 4),
                                   pw.Text(
-                                    '${context.t('stat_initial_floor')} ${datos.pisoInicial} » ${context.t('stat_total_now')} ${datos.totalActivas} · Nuevas ${datos.crecimientoNeto > 0 ? '+' : ''}${datos.crecimientoNeto} · Restauradas ${datos.restauradasPeriodo} · Removidas ${datos.removidasPeriodo}',
+                                    '${context.t('stat_initial_floor')} ${datos.pisoInicial} » $etiquetaTotal ${datos.cierrePeriodo}',
+                                    style: pw.TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: pw.FontWeight.bold,
+                                        color: colorTexto),
+                                  ),
+                                  pw.SizedBox(height: 2),
+                                  pw.Text(
+                                    'Nuevas ${datos.nuevasPeriodo} · Restauradas ${datos.restauradasPeriodo} · Removidas ${datos.removidasPeriodo}',
                                     style: pw.TextStyle(
                                         fontSize: 9, color: colorTextoSuave),
                                   ),
                                 ],
                               ),
                               pw.Text(
-                                '${datos.crecimientoNeto >= 0 ? '+' : ''}${datos.crecimientoPorcentaje.toStringAsFixed(1)}%',
+                                '${datos.crecimientoNeto >= 0 ? '+' : ''}${datos.crecimientoNeto} (${datos.crecimientoPorcentaje >= 0 ? '+' : ''}${datos.crecimientoPorcentaje.toStringAsFixed(1)}%)',
                                 style: pw.TextStyle(
-                                    fontSize: 22,
+                                    fontSize: 18,
                                     fontWeight: pw.FontWeight.bold,
                                     color: datos.crecimientoNeto >= 0
                                         ? colorVerde
@@ -2118,6 +2278,29 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                   ...datos.restauradasPorMes.values,
                 ].fold<int>(0, (a, b) => a > b ? a : b) +
                 1;
+
+            // Fila por mes con el cierre acumulado: el piso del mes siguiente
+            // es el cierre del anterior. Hace visible qué aportó cada mes,
+            // incluido octubre cuando el período es trimestral.
+            final filasMes = <List<String>>[];
+            var pisoMes = datos.pisoInicial;
+            for (final mes in datos.meses) {
+              final n = datos.nuevasPorMes[mes] ?? 0;
+              final r = datos.restauradasPorMes[mes] ?? 0;
+              final x = datos.removidasPorMes[mes] ?? 0;
+              final cierreMes = pisoMes + n + r - x;
+              filasMes.add([
+                _nombreMes(mes),
+                '$pisoMes',
+                '$n',
+                '$r',
+                '$x',
+                '${datos.predicadasPorMes[mes] ?? 0}',
+                '$cierreMes',
+              ]);
+              pisoMes = cierreMes;
+            }
+
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.stretch,
               children: [
@@ -2129,12 +2312,12 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: pw.CrossAxisAlignment.center,
                     children: [
-                      pw.Text('MOVIMIENTO MENSUAL DE DIRECCIONES',
+                      pw.Text('MOVIMIENTO MENSUAL · $periodoTexto',
                           style: pw.TextStyle(
                               color: colorBlanco,
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: pw.FontWeight.bold,
-                              letterSpacing: 1)),
+                              letterSpacing: 0.8)),
                       pw.Text(fechaGenerado,
                           style: pw.TextStyle(
                               color: PdfColor.fromHex('#C8E6C9'),
@@ -2160,72 +2343,165 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                           ],
                         ),
                         pw.SizedBox(height: 24),
-                        // Barras agrupadas por mes
+                        // Barras agrupadas por mes: valor encima de cada barra
+                        // (solo si es > 0), línea base y rótulos alineados.
                         pw.Expanded(
-                          child: pw.Row(
-                            crossAxisAlignment: pw.CrossAxisAlignment.end,
-                            mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
-                            children: datos.meses.map((mes) {
-                              final nuevas = datos.nuevasPorMes[mes] ?? 0;
-                              final removidas = datos.removidasPorMes[mes] ?? 0;
-                              final restauradas = datos.restauradasPorMes[mes] ?? 0;
-                              final hNuevas = maxMv > 0 ? nuevas / maxMv : 0.0;
-                              final hRemovidas = maxMv > 0 ? removidas / maxMv : 0.0;
-                              final hRestauradas = maxMv > 0 ? restauradas / maxMv : 0.0;
-                              final parts = mes.split('-');
-                              final label = parts.length >= 2
-                                  ? '${_mesCorto(int.parse(parts[1]))}'
-                                  : mes;
-                              return pw.Column(
-                                mainAxisAlignment: pw.MainAxisAlignment.end,
+                          child: pw.Column(
+                            children: [
+                              pw.Expanded(
+                                child: pw.Row(
+                                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                                  mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+                                  children: datos.meses.map((mes) {
+                                    final nuevas = datos.nuevasPorMes[mes] ?? 0;
+                                    final removidas = datos.removidasPorMes[mes] ?? 0;
+                                    final restauradas = datos.restauradasPorMes[mes] ?? 0;
+                                    pw.Widget barra(int valor, double h, PdfColor color) {
+                                      return pw.Column(
+                                        mainAxisAlignment: pw.MainAxisAlignment.end,
+                                        children: [
+                                          if (valor > 0) ...[
+                                            pw.Text('$valor',
+                                                style: pw.TextStyle(
+                                                    fontSize: 7.5,
+                                                    fontWeight: pw.FontWeight.bold,
+                                                    color: color)),
+                                            pw.SizedBox(height: 2),
+                                          ],
+                                          pw.Container(
+                                            width: 16,
+                                            height: valor > 0
+                                                ? (h * 100).clamp(4.0, 100.0)
+                                                : 0.0,
+                                            decoration: pw.BoxDecoration(
+                                                color: color,
+                                                borderRadius: pw.BorderRadius.vertical(
+                                                    top: pw.Radius.circular(3))),
+                                          ),
+                                        ],
+                                      );
+                                    }
+
+                                    return pw.Row(
+                                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                                      children: [
+                                        barra(nuevas, maxMv > 0 ? nuevas / maxMv : 0.0, colorAzul),
+                                        pw.SizedBox(width: 3),
+                                        barra(removidas, maxMv > 0 ? removidas / maxMv : 0.0, colorNaranja),
+                                        pw.SizedBox(width: 3),
+                                        barra(restauradas, maxMv > 0 ? restauradas / maxMv : 0.0, colorVerde),
+                                      ],
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                              // Línea base del gráfico.
+                              pw.Container(height: 1.2, color: colorGrisMedio),
+                              pw.SizedBox(height: 6),
+                              pw.Row(
+                                mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
                                 children: [
-                                  pw.Text(
-                                      '$nuevas / $removidas / $restauradas',
-                                      style: pw.TextStyle(
-                                          fontSize: 7,
-                                          color: colorTextoSuave)),
-                                  pw.SizedBox(height: 6),
-                                  pw.Row(
-                                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                                  for (final mes in datos.meses)
+                                    pw.Expanded(
+                                      child: pw.Text(
+                                          _etiquetaMesCorta(mes),
+                                          textAlign: pw.TextAlign.center,
+                                          style: pw.TextStyle(
+                                              fontSize: 9, color: colorTexto)),
+                                    ),
+                                ],
+                              ),
+                              pw.SizedBox(height: 12),
+                              // Totales del período, para leer el mes sin sumar barras.
+                              pw.Text(
+                                  'Período: ${datos.nuevasPeriodo} altas · ${datos.removidasPeriodo} bajas · ${datos.restauradasPeriodo} restauradas · Neto ${datos.crecimientoNeto >= 0 ? '+' : ''}${datos.crecimientoNeto}',
+                                  style: pw.TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: pw.FontWeight.bold,
+                                      color: colorTextoSuave)),
+                              pw.SizedBox(height: 14),
+                              // Detalle mensual: piso, movimiento y cierre.
+                              pw.Table(
+                                border: pw.TableBorder.all(
+                                    color: colorGrisMedio, width: 0.6),
+                                columnWidths: const {
+                                  0: pw.FlexColumnWidth(2.2),
+                                  1: pw.FlexColumnWidth(1),
+                                  2: pw.FlexColumnWidth(1),
+                                  3: pw.FlexColumnWidth(1),
+                                  4: pw.FlexColumnWidth(1),
+                                  5: pw.FlexColumnWidth(1),
+                                  6: pw.FlexColumnWidth(1),
+                                },
+                                children: [
+                                  pw.TableRow(
+                                    decoration:
+                                        pw.BoxDecoration(color: colorVerde),
                                     children: [
-                                      pw.Container(
-                                        width: 16,
-                                        height: (hNuevas * 90).clamp(3, 90),
-                                        decoration: pw.BoxDecoration(
-                                            color: colorAzul,
-                                            borderRadius: pw.BorderRadius.vertical(
-                                                top: pw.Radius.circular(3))),
-                                      ),
-                                      pw.SizedBox(width: 3),
-                                      pw.Container(
-                                        width: 16,
-                                        height: (hRemovidas * 90).clamp(3, 90),
-                                        decoration: pw.BoxDecoration(
-                                            color: colorNaranja,
-                                            borderRadius: pw.BorderRadius.vertical(
-                                                top: pw.Radius.circular(3))),
-                                      ),
-                                      pw.SizedBox(width: 3),
-                                      pw.Container(
-                                        width: 16,
-                                        height: (hRestauradas * 90).clamp(3, 90),
-                                        decoration: pw.BoxDecoration(
-                                            color: colorVerde,
-                                            borderRadius: pw.BorderRadius.vertical(
-                                                top: pw.Radius.circular(3))),
-                                      ),
+                                      for (final t in const [
+                                        'MES',
+                                        'PISO',
+                                        'NUEVAS',
+                                        'RESTAUR.',
+                                        'REMOVIDAS',
+                                        'COMPLET.',
+                                        'CIERRE',
+                                      ])
+                                        pw.Padding(
+                                          padding: const pw.EdgeInsets
+                                              .symmetric(
+                                                  vertical: 5, horizontal: 4),
+                                          child: pw.Text(t,
+                                              textAlign: t == 'MES'
+                                                  ? pw.TextAlign.left
+                                                  : pw.TextAlign.center,
+                                              style: pw.TextStyle(
+                                                  fontSize: 7.5,
+                                                  fontWeight:
+                                                      pw.FontWeight.bold,
+                                                  color: colorBlanco,
+                                                  letterSpacing: 0.4)),
+                                        ),
                                     ],
                                   ),
-                                  pw.SizedBox(height: 6),
-                                  pw.Text(label,
-                                      style: pw.TextStyle(
-                                          fontSize: 9, color: colorTexto)),
+                                  for (var i = 0; i < filasMes.length; i++)
+                                    pw.TableRow(
+                                      decoration: pw.BoxDecoration(
+                                          color: i.isEven
+                                              ? colorGrisClaro
+                                              : colorBlanco),
+                                      children: [
+                                        for (var c = 0;
+                                            c < filasMes[i].length;
+                                            c++)
+                                          pw.Padding(
+                                            padding: const pw.EdgeInsets
+                                                .symmetric(
+                                                    vertical: 4.5,
+                                                    horizontal: 4),
+                                            child: pw.Text(filasMes[i][c],
+                                                textAlign: c == 0
+                                                    ? pw.TextAlign.left
+                                                    : pw.TextAlign.center,
+                                                style: pw.TextStyle(
+                                                    fontSize: 8,
+                                                    fontWeight: c == 0 ||
+                                                            c == 6
+                                                        ? pw.FontWeight.bold
+                                                        : pw.FontWeight
+                                                            .normal,
+                                                    color: c == 6
+                                                        ? colorVerde
+                                                        : colorTexto)),
+                                          ),
+                                      ],
+                                    ),
                                 ],
-                              );
-                            }).toList(),
+                              ),
+                            ],
                           ),
                         ),
-                        pw.SizedBox(height: 24),
+                        pw.SizedBox(height: 16),
                       ],
                     ),
                   ),
@@ -2251,7 +2527,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
         ),
       );
 
-      // ── PÁGINA 3: INFORME EJECUTIVO (IA) ────────────────
+      // ── PÁGINA 3: INFORME DESCRIPTIVO (IA) ──────────────
       pdf.addPage(
         pw.Page(
           pageTheme: pw.PageTheme(
@@ -2270,7 +2546,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: pw.CrossAxisAlignment.center,
                     children: [
-                      pw.Text('INFORME EJECUTIVO — REDACTADO POR IA',
+                      pw.Text('INFORME DESCRIPTIVO - REDACTADO POR IA',
                           style: pw.TextStyle(
                               color: colorBlanco,
                               fontSize: 14,
@@ -2335,7 +2611,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                             borderRadius: pw.BorderRadius.circular(8),
                           ),
                           child: pw.Text(
-                            'Datos base: ${context.t('stat_initial_floor')} ${datos.pisoInicial} » ${datos.totalActivas} activas · Nuevas ${datos.crecimientoNeto > 0 ? '+' : ''}${datos.crecimientoNeto} · Restauradas ${datos.restauradasPeriodo} · Removidas ${datos.removidasPeriodo} · Eliminadas ${datos.eliminadasPeriodo} · ${datos.crecimientoNeto >= 0 ? '+' : ''}${datos.crecimientoPorcentaje.toStringAsFixed(1)}% de crecimiento',
+                            'Datos base · ${context.t('stat_initial_floor')} ${datos.pisoInicial} » ${datos.cierrePeriodo} ${incluyeMesActual ? 'activas' : 'activas al cierre'} · Completadas ${datos.completadasCierre} · Pendientes ${datos.pendientesCierre} (${datos.cobertura.toStringAsFixed(1)}% de cobertura) · Nuevas ${datos.nuevasPeriodo} · Restauradas ${datos.restauradasPeriodo} · Removidas ${datos.removidasPeriodo} · Eliminadas ${datos.eliminadasPeriodo} · ${datos.crecimientoNeto >= 0 ? '+' : ''}${datos.crecimientoPorcentaje.toStringAsFixed(1)}% de crecimiento',
                             style: pw.TextStyle(
                                 fontSize: 8, color: colorTextoSuave),
                           ),
@@ -2374,6 +2650,18 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
               margin: const pw.EdgeInsets.all(0),
             ),
             build: (pw.Context ctx) {
+              final totalDir = datos.porTerritorio.values
+                  .fold<int>(0, (a, b) => a + b.totalDirecciones);
+              final totalCompl = datos.porTerritorio.values
+                  .fold<int>(0, (a, b) => a + b.completadas);
+              final totalPend = datos.porTerritorio.values
+                  .fold<int>(0, (a, b) => a + b.pendientes);
+              final totalTarj = datos.porTerritorio.values
+                  .fold<int>(0, (a, b) => a + b.totalTarjetas);
+              final totalTarjCompl = datos.porTerritorio.values
+                  .fold<int>(0, (a, b) => a + b.tarjetasCompletadas);
+              final pctGlobal =
+                  totalDir > 0 ? (totalCompl / totalDir * 100) : 0.0;
               return pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                 children: [
@@ -2404,43 +2692,73 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                         children: [
+                          pw.Text(
+                              'Cobertura de predicación sobre el total del directorio · $periodoTexto',
+                              style: pw.TextStyle(
+                                  fontSize: 9, color: colorTextoSuave)),
+                          pw.SizedBox(height: 12),
                           // Cabecera tabla
                           pw.Container(
-                            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const pw.EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
                             decoration: pw.BoxDecoration(color: colorVerde),
                             child: pw.Row(
                               children: [
-                                pw.Expanded(flex: 3, child: pw.Text('TERRITORIO', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold, letterSpacing: 1))),
-                                pw.Expanded(flex: 1, child: pw.Text('DIRS.', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
-                                pw.Expanded(flex: 1, child: pw.Text('PRED.', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
-                                pw.Expanded(flex: 1, child: pw.Text('TARJ.', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
-                                pw.Expanded(flex: 1, child: pw.Text('%', style: pw.TextStyle(color: colorBlanco, fontSize: 9, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(
+                                    flex: 9,
+                                    child: pw.Text('TERRITORIO',
+                                        style: pw.TextStyle(
+                                            color: colorBlanco,
+                                            fontSize: 8,
+                                            fontWeight: pw.FontWeight.bold,
+                                            letterSpacing: 0.4))),
+                                for (final t in const [
+                                  'DIRECCIONES',
+                                  'COMPLETADAS',
+                                  'PENDIENTES',
+                                  'TARJETAS',
+                                  '%',
+                                ])
+                                  pw.Expanded(
+                                    flex: t == '%'
+                                        ? 5
+                                        : t == 'TARJETAS'
+                                            ? 7
+                                            : t == 'COMPLETADAS'
+                                                ? 9
+                                                : 8,
+                                    child: pw.Text(t,
+                                        style: pw.TextStyle(
+                                            color: colorBlanco,
+                                            fontSize: 8,
+                                            fontWeight: pw.FontWeight.bold),
+                                        textAlign: pw.TextAlign.center),
+                                  ),
                               ],
                             ),
                           ),
 
-                          // Filas
+                          // Filas ordenadas de mayor a menor por volumen.
                           ...datos.porTerritorio.entries.toList().asMap().entries.map((entry) {
                             final i = entry.key;
                             final nombre = entry.value.key;
                             final d = entry.value.value;
-                            final pctTer = d.totalDirecciones > 0
-                                ? (d.predicadas / d.totalDirecciones * 100).clamp(0, 100)
-                                : 0.0;
+                            final pctTer = d.cobertura;
                             final bgColor = i.isEven ? colorGrisClaro : colorBlanco;
                             return pw.Container(
                               padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                               decoration: pw.BoxDecoration(color: bgColor),
                               child: pw.Row(
                                 children: [
-                                  pw.Expanded(flex: 3, child: pw.Text(nombre, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorTexto))),
-                                  pw.Expanded(flex: 1, child: pw.Text('${d.totalDirecciones}', style: pw.TextStyle(fontSize: 10, color: colorTexto), textAlign: pw.TextAlign.center)),
-                                  pw.Expanded(flex: 1, child: pw.Text('${d.predicadas}', style: pw.TextStyle(fontSize: 10, color: colorVerde, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
-                                  pw.Expanded(flex: 1, child: pw.Text('${d.totalTarjetas}', style: pw.TextStyle(fontSize: 10, color: colorTexto), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(flex: 9, child: pw.Text(nombre, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorTexto))),
+                                  pw.Expanded(flex: 8, child: pw.Text('${d.totalDirecciones}', style: pw.TextStyle(fontSize: 10, color: colorTexto), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(flex: 9, child: pw.Text('${d.completadas}', style: pw.TextStyle(fontSize: 10, color: colorVerde, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(flex: 8, child: pw.Text('${d.pendientes}', style: pw.TextStyle(fontSize: 10, color: colorNaranja, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center)),
+                                  pw.Expanded(flex: 7, child: pw.Text('${d.tarjetasCompletadas}/${d.totalTarjetas}', style: pw.TextStyle(fontSize: 9, color: colorTexto), textAlign: pw.TextAlign.center)),
                                   pw.Expanded(
-                                    flex: 1,
+                                    flex: 5,
                                     child: pw.Container(
-                                      margin: const pw.EdgeInsets.symmetric(horizontal: 4),
+                                      margin: const pw.EdgeInsets.symmetric(horizontal: 6),
                                       padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                       decoration: pw.BoxDecoration(
                                         color: pctTer >= 80
@@ -2453,7 +2771,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                                       child: pw.Text(
                                         '${pctTer.toStringAsFixed(0)}%',
                                         style: pw.TextStyle(
-                                          fontSize: 9,
+                                          fontSize: 8,
                                           fontWeight: pw.FontWeight.bold,
                                           color: pctTer >= 80
                                               ? colorVerde
@@ -2472,7 +2790,7 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
 
                           pw.SizedBox(height: 20),
 
-                          // Totales
+                          // Totales que cierran con el resumen ejecutivo.
                           pw.Container(
                             padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             decoration: pw.BoxDecoration(
@@ -2481,11 +2799,12 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                             ),
                             child: pw.Row(
                               children: [
-                                pw.Expanded(flex: 3, child: pw.Text('TOTAL GENERAL', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde))),
-                                pw.Expanded(flex: 1, child: pw.Text('${datos.totalActivas}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
-                                pw.Expanded(flex: 1, child: pw.Text('${datos.predicadasPeriodo}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
-                                pw.Expanded(flex: 1, child: pw.Text('', style: pw.TextStyle(fontSize: 10))),
-                                pw.Expanded(flex: 1, child: pw.Text('${pct.toStringAsFixed(1)}%', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 9, child: pw.Text('TOTAL GENERAL', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde))),
+                                pw.Expanded(flex: 8, child: pw.Text('$totalDir', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 9, child: pw.Text('$totalCompl', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 8, child: pw.Text('$totalPend', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorNaranja), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 7, child: pw.Text('$totalTarjCompl/$totalTarj', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
+                                pw.Expanded(flex: 5, child: pw.Text('${pctGlobal.toStringAsFixed(1)}%', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: colorVerde), textAlign: pw.TextAlign.center)),
                               ],
                             ),
                           ),
@@ -2507,6 +2826,216 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
                             style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
                         pw.Text('Página 4',
                             style: pw.TextStyle(fontSize: 8, color: colorTextoSuave)),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      }
+
+      // ── PÁGINA 5: CAMPAÑAS DEL PERÍODO ───────────────────
+      if (campanasPeriodo.isNotEmpty) {
+        final paginaCampanas = datos.porTerritorio.isNotEmpty ? 5 : 4;
+        pdf.addPage(
+          pw.Page(
+            pageTheme: pw.PageTheme(
+              pageFormat: PdfPageFormat.a4,
+              margin: const pw.EdgeInsets.all(0),
+            ),
+            build: (pw.Context ctx) {
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  // Mini header
+                  pw.Container(
+                    height: 56,
+                    color: colorVerde,
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text('CAMPAÑAS DEL PERÍODO',
+                            style: pw.TextStyle(
+                                color: colorBlanco,
+                                fontSize: 14,
+                                fontWeight: pw.FontWeight.bold,
+                                letterSpacing: 1)),
+                        pw.Text(fechaGenerado,
+                            style: pw.TextStyle(
+                                color: PdfColor.fromHex('#C8E6C9'),
+                                fontSize: 10)),
+                      ],
+                    ),
+                  ),
+                  pw.Expanded(
+                    child: pw.Padding(
+                      padding: const pw.EdgeInsets.all(32),
+                      child: campanasPeriodo.isEmpty
+                          ? pw.Center(
+                              child: pw.Text(
+                                  context.t('stat_no_campanas_periodo'),
+                                  style: pw.TextStyle(
+                                      fontSize: 11, color: colorTextoSuave)),
+                            )
+                          : pw.Column(
+                              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                              children: [
+                                pw.Text(
+                                    '${context.t('stat_section_campanas')} · ${_labelPeriodoDatos(datos)}',
+                                    style: pw.TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: pw.FontWeight.bold,
+                                        color: colorTextoSuave,
+                                        letterSpacing: 1.2)),
+                                pw.SizedBox(height: 12),
+                                for (final c in campanasPeriodo)
+                                  pw.Container(
+                                    margin: const pw.EdgeInsets.only(bottom: 14),
+                                    padding: const pw.EdgeInsets.all(16),
+                                    decoration: pw.BoxDecoration(
+                                      color: colorBlanco,
+                                      borderRadius: pw.BorderRadius.circular(10),
+                                      border:
+                                          pw.Border.all(color: colorGrisMedio),
+                                    ),
+                                    child: pw.Column(
+                                      crossAxisAlignment:
+                                          pw.CrossAxisAlignment.start,
+                                      children: [
+                                        pw.Row(
+                                          mainAxisAlignment:
+                                              pw.MainAxisAlignment.spaceBetween,
+                                          crossAxisAlignment:
+                                              pw.CrossAxisAlignment.center,
+                                          children: [
+                                            pw.Text(c.nombre,
+                                                style: pw.TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight:
+                                                        pw.FontWeight.bold,
+                                                    color: colorTexto)),
+                                            pw.Container(
+                                              padding:
+                                                  const pw.EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 3),
+                                              decoration: pw.BoxDecoration(
+                                                color: c.activa
+                                                    ? PdfColor.fromHex('#E8F5E9')
+                                                    : colorGrisClaro,
+                                                borderRadius:
+                                                    pw.BorderRadius.circular(10),
+                                              ),
+                                              child: pw.Text(
+                                                  c.activa
+                                                      ? context.t(
+                                                          'stat_campana_activa')
+                                                      : context.t(
+                                                          'stat_campana_inactiva'),
+                                                  style: pw.TextStyle(
+                                                      fontSize: 8,
+                                                      fontWeight:
+                                                          pw.FontWeight.bold,
+                                                      color: c.activa
+                                                          ? colorVerde
+                                                          : colorTextoSuave)),
+                                            ),
+                                          ],
+                                        ),
+                                        pw.SizedBox(height: 4),
+                                        pw.Text(
+                                            '${context.t('stat_period')}: ${_fmtFecha(c.fechaInicio)} - ${_fmtFecha(c.fechaFin)}',
+                                            style: pw.TextStyle(
+                                                fontSize: 9,
+                                                color: colorTextoSuave)),
+                                        pw.SizedBox(height: 8),
+                                        if (c.sinRegistro)
+                                          pw.Container(
+                                            padding:
+                                                const pw.EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 8),
+                                            decoration: pw.BoxDecoration(
+                                              color: PdfColor.fromHex('#FFF8E1'),
+                                              borderRadius:
+                                                  pw.BorderRadius.circular(6),
+                                              border: pw.Border.all(
+                                                  color: PdfColor.fromHex(
+                                                      '#FFE082')),
+                                            ),
+                                            child: pw.Text(
+                                                '${c.totalDirecciones} '
+                                                '${context.t('stat_campana_trabajadas')} · '
+                                                '${context.t('stat_campana_sin_registro')}',
+                                                style: pw.TextStyle(
+                                                    fontSize: 9,
+                                                    color: PdfColor.fromHex(
+                                                        '#E65100'))),
+                                          )
+                                        else ...[
+                                          pw.ClipRRect(
+                                            horizontalRadius: 4,
+                                            verticalRadius: 4,
+                                            child: pw.LinearProgressIndicator(
+                                              value: (c.progreso / 100)
+                                                  .clamp(0.0, 1.0)
+                                                  .toDouble(),
+                                              backgroundColor: colorGrisClaro,
+                                              valueColor: c.activa
+                                                  ? colorVerde
+                                                  : colorNaranja,
+                                              minHeight: 10,
+                                            ),
+                                          ),
+                                          pw.SizedBox(height: 4),
+                                          pw.Row(
+                                            mainAxisAlignment:
+                                                pw.MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              pw.Text(
+                                                  '${c.completadas} de ${c.totalDirecciones} con ${c.etiqueta} · ${c.pendientes} ${context.t('stat_campana_pendientes')}',
+                                                  style: pw.TextStyle(
+                                                      fontSize: 9,
+                                                      color: colorTextoSuave)),
+                                              pw.Text(
+                                                  '${c.progreso.toStringAsFixed(0)}%',
+                                                  style: pw.TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          pw.FontWeight.bold,
+                                                      color: c.activa
+                                                          ? colorVerde
+                                                          : colorNaranja)),
+                                            ],
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                    ),
+                  ),
+                  // Footer
+                  pw.Container(
+                    height: 36,
+                    color: PdfColor.fromHex('#F9FBE7'),
+                    padding: const pw.EdgeInsets.symmetric(horizontal: 40),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text(
+                            'Congregación Española · Araucária Sur · Paraná, Brasil',
+                            style: pw.TextStyle(
+                                fontSize: 8, color: colorTextoSuave)),
+                        pw.Text('Página $paginaCampanas',
+                            style: pw.TextStyle(
+                                fontSize: 8, color: colorTextoSuave)),
                       ],
                     ),
                   ),
@@ -2600,6 +3129,13 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
     const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
     return meses[(mes - 1).clamp(0, 11)];
   }
+
+  String _etiquetaMesCorta(String mes) {
+    final parts = mes.split('-');
+    if (parts.length < 2) return mes;
+    final m = int.tryParse(parts[1]);
+    return m == null ? mes : _mesCorto(m);
+  }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -2608,35 +3144,55 @@ class _EstadisticasTabState extends State<EstadisticasTab> {
 
 class _DatosEstadisticas {
   final int totalActivas;
+
+  /// Total de direcciones al CIERRE del período. Si el período incluye el mes
+  /// actual coincide con [totalActivas]; si es un mes cerrado, es el
+  /// directorio al terminar ese mes (no el de hoy).
+  final int cierrePeriodo;
   final int pisoInicial;
-  final int predicadasPeriodo;
+
+  /// Direcciones completadas al cierre del período: predicadas alguna vez y
+  /// todavía en el directorio. Es la base de la cobertura, no las predicadas
+  /// solo dentro de los meses mostrados (eso hacía ver 5% cuando el trabajo
+  /// acumulado era del 77%).
+  final int completadasCierre;
   final int totalRemovidas;
-  final int totalRestauradas;
-  final int totalEliminadasPermanente;
   final int totalTerritorios;
   final Map<String, int> predicadasPorMes;
+
+  /// Mapas por mes del RANGO EXTENDIDO (desde el arranque del período hasta
+  /// hoy). Los gráficos leen solo los meses del período ([meses], subconjunto).
   final Map<String, int> nuevasPorMes;
   final Map<String, int> removidasPorMes;
   final Map<String, int> restauradasPorMes;
   final Map<String, int> eliminadasPorMes;
+
+  /// Movimiento del PERÍODO mostrado (suma de los meses seleccionados).
+  final int nuevasPeriodo;
+  final int removidasPeriodo;
+  final int restauradasPeriodo;
+  final int eliminadasPeriodo;
   final List<String> meses;
   final Map<String, _DatosTerritorio> porTerritorio;
 
   // Estadísticas de campañas.
   final List<_DatosCampana> campanas;
 
-  int get nuevasPeriodo =>
-      nuevasPorMes.values.fold(0, (a, b) => a + b);
-  int get removidasPeriodo =>
-      removidasPorMes.values.fold(0, (a, b) => a + b);
-  int get restauradasPeriodo =>
-      restauradasPorMes.values.fold(0, (a, b) => a + b);
-  int get eliminadasPeriodo =>
-      eliminadasPorMes.values.fold(0, (a, b) => a + b);
+  /// Crecimiento real del período: cierre del período menos el piso inicial
+  /// (direcciones que había al comenzar). Es el neto de altas, bajas y
+  /// restauraciones del período; con el piso derivado queda coherente por
+  /// construcción, sin depender de fotos guardadas que se desactualizan.
+  int get crecimientoNeto => cierrePeriodo - pisoInicial;
 
-  /// Crecimiento real del período: total actual menos el piso inicial
-  /// (cantidad de direcciones que había al inicio del período).
-  int get crecimientoNeto => totalActivas - pisoInicial;
+  /// Direcciones del cierre que aún no fueron predicadas.
+  int get pendientesCierre =>
+      (cierrePeriodo - completadasCierre).clamp(0, cierrePeriodo).toInt();
+
+  /// Cobertura del período: completadas sobre el total de direcciones.
+  double get cobertura {
+    if (cierrePeriodo <= 0) return 0;
+    return (completadasCierre / cierrePeriodo * 100).clamp(0, 100);
+  }
 
   /// Tasa de crecimiento en porcentaje relativa al piso inicial.
   double get crecimientoPorcentaje {
@@ -2646,15 +3202,18 @@ class _DatosEstadisticas {
 
   _DatosEstadisticas({
     required this.totalActivas,
+    required this.cierrePeriodo,
     required this.pisoInicial,
-    required this.predicadasPeriodo,
+    required this.completadasCierre,
     required this.totalRemovidas,
-    required this.totalRestauradas,
-    required this.totalEliminadasPermanente,
     required this.totalTerritorios,
     required this.predicadasPorMes,
     required this.meses,
     required this.porTerritorio,
+    required this.nuevasPeriodo,
+    required this.removidasPeriodo,
+    required this.restauradasPeriodo,
+    required this.eliminadasPeriodo,
     required this.nuevasPorMes,
     required this.removidasPorMes,
     required this.restauradasPorMes,
@@ -2673,6 +3232,11 @@ class _DatosCampana {
   final int completadas;
   final String etiqueta;
 
+  /// `true` cuando la campaña cerró con pendientes pero sin ninguna marca de
+  /// entrega: la app no guardó esas entregas y el informe no debe afirmar que
+  /// fueron cero.
+  final bool sinRegistro;
+
   int get pendientes => totalDirecciones - completadas;
   double get progreso =>
       totalDirecciones <= 0 ? 0 : (completadas / totalDirecciones * 100);
@@ -2686,19 +3250,25 @@ class _DatosCampana {
     required this.totalDirecciones,
     required this.completadas,
     this.etiqueta = 'material entregado',
+    this.sinRegistro = false,
   });
 }
 
 class _DatosTerritorio {
   final int totalDirecciones;
-  final int predicadas;
+  final int completadas;
   final int removidas;
   final int totalTarjetas;
   final int tarjetasCompletadas;
 
+  int get pendientes =>
+      (totalDirecciones - completadas).clamp(0, totalDirecciones).toInt();
+  double get cobertura =>
+      totalDirecciones <= 0 ? 0 : (completadas / totalDirecciones * 100);
+
   _DatosTerritorio({
     required this.totalDirecciones,
-    required this.predicadas,
+    required this.completadas,
     required this.removidas,
     required this.totalTarjetas,
     required this.tarjetasCompletadas,
