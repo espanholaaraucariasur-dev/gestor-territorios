@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'auditor_panel_page.dart';
+import '../../widgets/mensaje_animado_dialog.dart';
 
 class MantenimientoTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
@@ -349,6 +350,40 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
     }
   }
 
+  /// Abre el diálogo motivacional con un mensaje real de la base, para ver
+  /// cada escena. Es solo vista previa: no envía nada ni toca tareas.
+  Future<void> _vistaPreviaMotivacional() async {
+    String texto =
+        '¡Gracias por tu valioso apoyo hoy! Tu servicio de casa en casa es de gran ánimo. 🏠';
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('configuracion')
+          .doc('mensajes_motivacionales')
+          .collection('mensajes')
+          .where('activo', isEqualTo: true)
+          .get();
+      final textos = snap.docs
+          .map((d) => (d.data()['texto'] as String?)?.trim() ?? '')
+          .where((t) => t.isNotEmpty)
+          .toList();
+      if (textos.isNotEmpty) {
+        textos.shuffle();
+        texto = textos.first;
+      }
+    } catch (_) {
+      // Sin red: se muestra el texto de ejemplo.
+    }
+    if (!mounted) return;
+    const emojis = ['🌅', '📖', '🌱', '🌿', '🌍', '✨'];
+    final semilla = texto.codeUnits.fold<int>(0, (a, b) => a + b);
+    await MensajeAnimadoDialog.mostrar(
+      context,
+      titulo: '🌟 Mensaje para ti',
+      cuerpo: texto,
+      iconoEmoji: emojis[semilla % emojis.length],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
@@ -436,6 +471,12 @@ class _MantenimientoTabState extends State<MantenimientoTab> {
                 'Limpiar Direcciones Huérfanas',
                 _limpiarDireccionesHuerfanas,
               ),
+            ),
+            _buildCardButton(
+              icon: Icons.auto_awesome_outlined,
+              title: 'Vista previa: mensaje motivacional',
+              description: 'Abre el diálogo animado con un mensaje real, para ver cada escena (amanecer, bosque, atardecer, lluvia).',
+              onTap: _vistaPreviaMotivacional,
             ),
           ],
         ],
