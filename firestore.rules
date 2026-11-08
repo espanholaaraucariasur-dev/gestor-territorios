@@ -161,8 +161,9 @@ service cloud.firestore {
       // la misma expresión. El emulador se queda con el último valor de cada
       // función y eso contamina las reglas de OTRAS colecciones.
       //
-      // REGLA DE ORO: sobre el documento de OTRO solo escribe un admin. El
-      // propio documento nunca admite roles, estado ni el token de otro.
+      // REGLA DE ORO: sobre el documento de OTRO solo escribe un admin, y los
+      // ROLES solo los toca el admin principal. El propio documento nunca
+      // admite roles, estado ni el token de otro.
       allow update: if sesionReal() && (
           // Preferencias del propio documento: hace falta estar aprobado.
           (
@@ -172,11 +173,19 @@ service cloud.firestore {
                  .affectedKeys()
                  .hasOnly(camposPropios())
           )
-          // Sobre el documento de otro: solo un admin, y solo preferencias.
-          // Cambiar rol, aprobar o desactivar a OTRO es de administración.
+          // Sobre el documento de otro: preferencias y estado, solo admin.
           || (
             request.auth.uid != uid
             && esAdmin()
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys()
+                 .hasOnly(camposPropios().concat(['estado', 'activo']))
+          )
+          // Roles de otro usuario: únicamente el admin principal. Un admin
+          // normal no reparte ni quita roles.
+          || (
+            request.auth.uid != uid
+            && esAdminPrincipal()
             && request.resource.data.diff(resource.data)
                  .affectedKeys()
                  .hasOnly(camposPropios()

@@ -133,12 +133,12 @@ async function main() {
     await restaurar();
   });
 
-  await caso('el admin SÍ puede cambiar roles', async () => {
+  await caso('el admin SÍ aprueba y desactiva cuentas', async () => {
     await assertSucceeds(
       como(ADMIN)
         .collection('usuarios')
         .doc(PUBLICADOR)
-        .update({ es_admin_territorios: true })
+        .update({ estado: 'pendiente' })
     );
     await restaurar();
   });
@@ -453,9 +453,26 @@ async function main() {
     await restaurar();
   });
 
-  await caso('el admin SÍ da rol de territorios a otro', async () => {
-    await assertSucceeds(
+  await caso('el admin (no principal) NO reparte roles', async () => {
+    await assertFails(
       como(ADMIN)
+        .collection('usuarios')
+        .doc(PUBLICADOR)
+        .update({ es_admin_territorios: true })
+    );
+    await restaurar();
+  });
+
+  await caso('el admin (no principal) NO se cambia el rol a otro admin', async () => {
+    await assertFails(
+      como(ADMIN).collection('usuarios').doc(ADMIN).update({ es_admin: false })
+    );
+    await restaurar();
+  });
+
+  await caso('el admin principal SÍ da rol de territorios a otro', async () => {
+    await assertSucceeds(
+      como(PRINCIPAL, tokenPrincipal)
         .collection('usuarios')
         .doc(PUBLICADOR)
         .update({ es_admin_territorios: true })
