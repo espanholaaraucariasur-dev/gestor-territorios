@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../../../core/services/algolia_service.dart';
+
 /// Pestaña de "Comentarios".
 ///
 /// Muestra las direcciones que fueron comentadas por el publicador, con:
 /// dirección, tarjeta, territorio, quién la comentó y fecha/hora.
+///
+/// Desde aquí se puede **editar el comentario** y **mover su texto al
+/// complemento** de la dirección: muchos comentarios hablan justamente de la
+/// unidad ("Casa 2", "apto 121"), así que el texto se traslada al campo
+/// `complemento` y se quita de la dirección para que no quede duplicado.
 class ComentariosTab extends StatefulWidget {
   final Map<String, dynamic> usuarioData;
 
@@ -31,6 +38,17 @@ class _ComentariosTabState extends State<ComentariosTab> {
   /// Texto de comentario efectivo de una dirección (cadena vacía si no tiene).
   String _comentarioDe(Map<String, dynamic> d) {
     return _texto(d, ['comentario', 'comentario_cierre']);
+  }
+
+  /// Clave del comentario que se editó: `comentario_cierre` lo escriben los
+  /// cierres (comercio cerrado) y `comentario` el resto. Se respeta cuál
+  /// estaba para no crear un campo nuevo que la bandeja no lea.
+  String _claveComentario(Map<String, dynamic> d) {
+    for (final k in ['comentario', 'comentario_cierre']) {
+      final v = d[k];
+      if (v is String && v.trim().isNotEmpty) return k;
+    }
+    return 'comentario';
   }
 
   DateTime _fecha(Map<String, dynamic> d) {
@@ -175,6 +193,13 @@ class _ComentariosTabState extends State<ComentariosTab> {
                 ),
               ),
               IconButton(
+                icon: const Icon(Icons.edit_outlined,
+                    color: Color(0xFF4A148C), size: 20),
+                tooltip: 'Editar comentario',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _editarComentario(doc),
+              ),
+              IconButton(
                 icon: const Icon(Icons.archive_outlined,
                     color: Colors.teal, size: 20),
                 tooltip: 'Archivar',
@@ -222,6 +247,176 @@ class _ComentariosTabState extends State<ComentariosTab> {
     return (d['nombre'] as String?)?.trim().isNotEmpty == true
         ? (d['nombre'] as String).trim()
         : ((d['email'] as String?)?.trim() ?? '');
+  }
+
+  /// Quita el complemento actual de la cadena de la calle.
+  ///
+  /// `calle` guarda la dirección completa ya formateada ("Rua Xingu, 710,
+  /// Iguaçu, Araucária - PR"), así que el complemento se busca como subcadena
+  /// literal y, si aparece, se elimina junto con las comas que quedan
+  /// huérfanas. Si no aparece, la calle se deja intacta.
+  String _quitarDeCalle(String calle, String complemento) {
+    final c = complemento.trim();
+    if (c.isEmpty) return calle;
+    if (!calle.toLowerCase().contains(c.toLowerCase())) return calle;
+    var limpia = calle.replaceFirst(RegExp(RegExp.escape(c), caseSensitive: false), '');
+    limpia = limpia.replaceAll(RegExp(r'\s*,\s*,'), ',');
+    limpia = limpia.replaceAll(RegExp(r'^\s*,\s*'), '');
+    limpia = limpia.replaceAll(RegExp(r'\s*,\s*$'), '');
+    limpia = limpia.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return limpia.isEmpty ? calle : limpia;
+  }
+
+  /// Edita el comentario de una dirección y permite pasarlo al complemento.
+  ///
+  /// Reglas:
+  ///  - El texto editado se guarda en el mismo campo que ya tenía
+  ///    (`comentario` o `comentario_cierre`).
+  ///  - Con "Agregar al complemento", el texto pasa a `complemento`: si ya
+  ///    había complemento se REEMPLAZA (es la corrección de la unidad); si no
+  ///    había, se crea. El texto se quita de `comentario` para no duplicarlo.
+  ///  - Si el complemento viejo estaba escrito dentro de la calle, se quita de
+  ///    ahí, de modo que la dirección no quede con la unidad repetida.
+  Future<void> _editarComentario(QueryDocumentSnapshot doc) async {
+    final d = doc.data() as Map<String, dynamic>;
+    final clave = _claveComentario(d);
+    final calle = _texto(d, ['calle']);
+    final complementoActual = (d['complemento'] as String?)?.trim() ?? '';
+    final textoCtrl = TextEditingController(text: _comentarioDe(d));
+    var alComplemento = false;
+    var conservarComentario = true;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setDialogState) => AlertDialog(
+          title: const Text('Editar comentario'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  calle.isEmpty ? '(sin dirección)' : calle,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: textoCtrl,
+                  autofocus: true,
+                  maxLines: 4,
+                  minLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Comentario',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: alComplemento,
+                  onChanged: (v) =>
+                      setDialogState(() => alComplemento = v ?? false),
+                  title: const Text('Agregar el texto al complemento',
+                      style: TextStyle(fontSize: 13)),
+                  subtitle: Text(
+                    complementoActual.isEmpty
+                        ? 'La dirección no tiene complemento: se creará con este texto.'
+                        : 'Complemento actual: "$complementoActual" (se reemplaza).',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  ),
+                ),
+                if (alComplemento)
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: conservarComentario,
+                    onChanged: (v) => setDialogState(
+                        () => conservarComentario = v ?? false),
+                    title: const Text('Conservar también como comentario',
+                        style: TextStyle(fontSize: 13)),
+                    subtitle: Text(
+                      conservarComentario
+                          ? 'Seguirá apareciendo en esta bandeja.'
+                          : 'La dirección saldrá de la bandeja de comentarios.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Guardar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+
+    final texto = textoCtrl.text.trim();
+    final cambios = <String, dynamic>{};
+
+    if (alComplemento) {
+      if (texto.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Escribe el texto que irá al complemento'),
+          backgroundColor: Colors.orange,
+        ));
+        return;
+      }
+      cambios['complemento'] = texto;
+      cambios['complemento_actualizado_en'] = FieldValue.serverTimestamp();
+      cambios['complemento_actualizado_por'] = _adminNombre;
+      final calleLimpia = _quitarDeCalle(calle, complementoActual);
+      if (calleLimpia != calle) cambios['calle'] = calleLimpia;
+      if (!conservarComentario) {
+        cambios[clave] = FieldValue.delete();
+      }
+    } else {
+      if (texto.isEmpty) {
+        cambios[clave] = FieldValue.delete();
+      } else {
+        cambios[clave] = texto;
+      }
+    }
+
+    if (cambios.isEmpty) return;
+
+    try {
+      await doc.reference.update(cambios);
+      // El complemento es parte de la dirección: Algolia tiene que verlo para
+      // que la búsqueda siga encontrando la unidad.
+      if (alComplemento) {
+        final actualizado = {...d, ...cambios};
+        actualizado.remove('complemento_actualizado_en');
+        actualizado.remove('complemento_actualizado_por');
+        await AlgoliaService.sincronizarUna(doc.id, actualizado);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(alComplemento
+            ? 'Comentario y complemento actualizados'
+            : 'Comentario actualizado'),
+        backgroundColor: const Color(0xFF4A148C),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('No se pudo guardar: $e'),
+        backgroundColor: Colors.redAccent,
+      ));
+    }
   }
 
   Future<void> _archivar(QueryDocumentSnapshot doc) async {
