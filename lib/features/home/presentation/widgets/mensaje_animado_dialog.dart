@@ -24,12 +24,23 @@ import 'package:flutter/services.dart';
 class MensajeAnimadoDialog {
   const MensajeAnimadoDialog._();
 
+  /// Escena de fondo, elegida por el texto para que cada mensaje tenga la
+  /// suya estable: amanecer, bosque, atardecer o lluvia suave.
+  static EscenaMensaje escenaDe(String texto) {
+    var h = 0;
+    for (final c in texto.codeUnits) {
+      h = ((h << 5) - h + c) & 0x7fffffff;
+    }
+    return EscenaMensaje.values[h % EscenaMensaje.values.length];
+  }
+
   static Future<void> mostrar(
     BuildContext context, {
     required String titulo,
     required String cuerpo,
     String iconoEmoji = '🌅',
     VoidCallback? onVerTarjetas,
+    EscenaMensaje? escena,
   }) {
     HapticFeedback.lightImpact();
     return showGeneralDialog<void>(
@@ -43,6 +54,7 @@ class MensajeAnimadoDialog {
         cuerpo: cuerpo,
         iconoEmoji: iconoEmoji,
         onVerTarjetas: onVerTarjetas,
+        escena: escena ?? escenaDe(cuerpo.isNotEmpty ? cuerpo : titulo),
       ),
       transitionBuilder: (ctx, animation, secondaryAnimation, child) {
         return FadeTransition(
@@ -127,18 +139,24 @@ double _c01(double v) => v < 0 ? 0 : (v > 1 ? 1 : v);
 // Pantalla
 // ---------------------------------------------------------------------------
 
+/// Escenas de fondo del mensaje. Amanecer, bosque, atardecer y lluvia:
+/// solo naturaleza y luz, nunca símbolos religiosos.
+enum EscenaMensaje { amanecer, bosque, atardecer, lluvia }
+
 class _MensajeAnimadoPagina extends StatefulWidget {
   const _MensajeAnimadoPagina({
     required this.titulo,
     required this.cuerpo,
     required this.iconoEmoji,
     required this.onVerTarjetas,
+    required this.escena,
   });
 
   final String titulo;
   final String cuerpo;
   final String iconoEmoji;
   final VoidCallback? onVerTarjetas;
+  final EscenaMensaje escena;
 
   @override
   State<_MensajeAnimadoPagina> createState() => _MensajeAnimadoPaginaState();
@@ -159,6 +177,10 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
   late final Animation<double> _aBotones;
 
   bool _iniciado = false;
+  late final double _floteAmplitud;
+  late final double _floteGiro;
+  late final int _floteVelocidad;
+  late final double _floteFase;
 
   Animation<double> _tramo(double inicio, double fin,
       [Curve curva = Curves.easeOutCubic]) {
@@ -196,6 +218,17 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
       ),
     );
     _mensaje = _parsearMensaje(widget.cuerpo);
+    // La tarjeta respira: sube y baja unos píxeles con un giro leve. Cada
+    // mensaje tiene su propia deriva, ángulo y ritmo (del texto), así que el
+    // movimiento nunca es el mismo dos veces.
+    var h = 0;
+    for (final c in widget.cuerpo.codeUnits) {
+      h = ((h << 5) - h + c) & 0x7fffffff;
+    }
+    _floteAmplitud = 5 + (h % 5).toDouble();
+    _floteGiro = ((h >> 4) % 11 - 5) / 10 * 0.01;
+    _floteVelocidad = 1 + ((h >> 8) % 3);
+    _floteFase = ((h >> 11) % 100) / 100.0;
   }
 
   @override
@@ -250,6 +283,7 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
                   entrada: _entrada,
                   ambiente: _ambiente,
                   particulas: _particulas,
+                  escena: widget.escena,
                 ),
               ),
             ),
@@ -304,9 +338,25 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
       clipBehavior: Clip.none,
       alignment: Alignment.topCenter,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 42),
-          child: _aparecer(_aTarjeta, _tarjeta(), deslizar: 28),
+        // La tarjeta flota: combina la entrada animada con el respiro
+        // ambiental. Si el sistema pide quitar animaciones, queda quieta.
+        AnimatedBuilder(
+          animation: _ambiente,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 42),
+            child: _aparecer(_aTarjeta, _tarjeta(), deslizar: 28),
+          ),
+          builder: (context, hijo) {
+            final a = _ambiente.value * 2 * math.pi * _floteVelocidad +
+                _floteFase * 6.28;
+            return Transform.translate(
+              offset: Offset(0, math.sin(a) * _floteAmplitud),
+              child: Transform.rotate(
+                angle: math.sin(a * 0.7) * _floteGiro,
+                child: hijo,
+              ),
+            );
+          },
         ),
         _emoji(),
       ],
@@ -528,34 +578,52 @@ class _CieloPainter extends CustomPainter {
     required this.entrada,
     required this.ambiente,
     required this.particulas,
+    required this.escena,
   }) : super(repaint: Listenable.merge([entrada, ambiente]));
 
   final Animation<double> entrada;
   final Animation<double> ambiente;
   final List<_Particula> particulas;
+  final EscenaMensaje escena;
 
   @override
   void paint(Canvas canvas, Size size) {
     final t = Curves.easeOutCubic.transform(_c01(entrada.value));
     final amb = ambiente.value;
     final rect = Offset.zero & size;
+    final paleta = _paletaCielo(escena, t);
 
-    // 1) Cielo: de la noche al amanecer.
+    // 1) Cielo: cada escena tiene su propia transición día/noche.
     canvas.drawRect(
       rect,
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            Color.lerp(const Color(0xFF071F17), const Color(0xFF0F4D3A), t)!,
-            Color.lerp(const Color(0xFF0E3326), const Color(0xFF4DB27A), t)!,
-            Color.lerp(const Color(0xFF14402F), const Color(0xFFFFD98A), t)!,
-          ],
+          colors: paleta.cielo,
           stops: const [0.0, 0.62, 1.0],
         ).createShader(rect),
     );
 
+    switch (escena) {
+      case EscenaMensaje.bosque:
+        _pintarBosque(canvas, size, t, amb, paleta);
+        break;
+      case EscenaMensaje.atardecer:
+        _pintarAtardecer(canvas, size, t, amb);
+        break;
+      case EscenaMensaje.lluvia:
+        _pintarLluvia(canvas, size, t, amb, paleta);
+        break;
+      case EscenaMensaje.amanecer:
+        _pintarAmanecer(canvas, size, t, amb);
+        break;
+    }
+  }
+
+  /// El cuerpo de la escena original: sol que sube, haces en abanico y
+  /// colinas. Se mantiene intacto (amanecer).
+  void _pintarAmanecer(Canvas canvas, Size size, double t, double amb) {
     // 2) Sol que sube desde detrás de las colinas.
     final radio = size.shortestSide * 0.17;
     final centro = Offset(size.width / 2, size.height * (1.10 - 0.30 * t));
@@ -624,6 +692,101 @@ class _CieloPainter extends CustomPainter {
 
     // 4) Motas de luz que suben. Velocidad y deriva son enteras para que al
     // reiniciar el ciclo no se note el salto.
+    _motas(canvas, size, t, amb,
+        halo: const Color.fromRGBO(255, 236, 160, 1),
+        nucleo: const Color.fromRGBO(255, 248, 210, 1));
+  }
+
+  /// Bosque: tres filas de copas que se aclaran con la entrada, con luciérnagas.
+  void _pintarBosque(Canvas canvas, Size size, double t, double amb,
+      _PaletaCielo paleta) {
+    final alto = size.height;
+    final filas = [
+      (0.66, const Color(0xFF2E7D32), 46.0),
+      (0.78, const Color(0xFF1B5E20), 56.0),
+      (0.90, const Color(0xFF0D3311), 62.0),
+    ];
+    for (var f = 0; f < filas.length; f++) {
+      final fila = filas[f];
+      final baseY = alto * (fila.$1 as double);
+      final color = fila.$2 as Color;
+      final radioCopa = fila.$3 as double;
+      var i = 0;
+      for (double x = -radioCopa;
+          x <= size.width + radioCopa;
+          x += radioCopa * 1.1) {
+        final balanceo = math.sin(amb * 2 * math.pi + i * 1.3 + f) * 3;
+        canvas.drawCircle(
+          Offset(x + balanceo, baseY - radioCopa * 0.35),
+          radioCopa * (0.55 + 0.35 * t),
+          Paint()..color = color,
+        );
+        i++;
+      }
+      canvas.drawRect(
+        Rect.fromLTRB(0, baseY, size.width, alto),
+        Paint()..color = color.withValues(alpha: 0.55 + 0.45 * t),
+      );
+    }
+    _motas(canvas, size, t, amb,
+        halo: const Color.fromRGBO(220, 255, 190, 1),
+        nucleo: const Color.fromRGBO(245, 255, 235, 1),
+        tamExtra: 0.6);
+  }
+
+  /// Atardecer: sol grande bajando al horizonte con franjas cálidas.
+  void _pintarAtardecer(Canvas canvas, Size size, double t, double amb) {
+    final radio = size.shortestSide * 0.20;
+    final centro =
+        Offset(size.width / 2, size.height * (0.55 + 0.25 * (1 - t)));
+    final respira = 1 + 0.02 * math.sin(amb * 2 * math.pi);
+    canvas.drawCircle(centro, radio * 3.0 * respira,
+        Paint()..color = const Color.fromRGBO(255, 138, 60, 0.16 * 1));
+    canvas.drawCircle(
+      centro,
+      radio * respira,
+      Paint()
+        ..shader = const RadialGradient(
+          colors: [Color(0xFFFFF3C4), Color(0xFFFFB74D)],
+        ).createShader(Rect.fromCircle(center: centro, radius: radio)),
+    );
+    final subida = (1 - t) * 40;
+    _colina(canvas, size, size.height * 0.88 + subida, 12, 1.1,
+        const Color(0xFF4E342E));
+    _colina(canvas, size, size.height * 0.94 + subida, 10, 3.0,
+        const Color(0xFF2D1B16));
+    _motas(canvas, size, t, amb,
+        halo: const Color.fromRGBO(255, 200, 130, 1),
+        nucleo: const Color.fromRGBO(255, 240, 210, 1),
+        tamExtra: 0.4);
+  }
+
+  /// Lluvia suave: gotas que caen en diagonal sobre colinas azuladas.
+  void _pintarLluvia(Canvas canvas, Size size, double t, double amb,
+      _PaletaCielo paleta) {
+    final subida = (1 - t) * 50;
+    _colina(canvas, size, size.height * 0.86 + subida, 13, 0.9,
+        const Color(0xFF33691E));
+    _colina(canvas, size, size.height * 0.93 + subida, 11, 2.7,
+        const Color(0xFF1B4312));
+    final pincel = Paint()
+      ..color = const Color.fromRGBO(200, 225, 255, 0.75)
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round;
+    for (final p in particulas) {
+      final avance = (amb * p.velocidad + p.fase) % 1.0;
+      final y = avance * size.height;
+      final x = p.x * size.width +
+          math.sin(amb * 2 * math.pi * p.deriva + p.fase * 6.28) * 10 -
+          avance * 30;
+      if (avance <= 0.02 || avance >= 0.98) continue;
+      canvas.drawLine(Offset(x, y), Offset(x + 3, y + 14), pincel);
+    }
+  }
+
+  /// Motas de luz compartidas por amanecer, bosque y atardecer.
+  void _motas(Canvas canvas, Size size, double t, double amb,
+      {required Color halo, required Color nucleo, double tamExtra = 0}) {
     final pincel = Paint();
     for (final p in particulas) {
       final avance = (amb * p.velocidad + p.fase) % 1.0;
@@ -632,10 +795,48 @@ class _CieloPainter extends CustomPainter {
           math.sin(amb * 2 * math.pi * p.deriva + p.fase * 6.28) * 18;
       final opacidad = math.sin(avance * math.pi) * 0.85 * t;
       if (opacidad <= 0.01) continue;
-      pincel.color = Color.fromRGBO(255, 236, 160, _c01(opacidad * 0.25));
-      canvas.drawCircle(Offset(x, y), p.tam * 3, pincel);
-      pincel.color = Color.fromRGBO(255, 248, 210, _c01(opacidad));
-      canvas.drawCircle(Offset(x, y), p.tam, pincel);
+      pincel.color = Color.fromRGBO(
+          (halo.r * 255).round(),
+          (halo.g * 255).round(),
+          (halo.b * 255).round(),
+          _c01(opacidad * 0.25));
+      canvas.drawCircle(Offset(x, y), p.tam * 3 + tamExtra * 3, pincel);
+      pincel.color = Color.fromRGBO(
+          (nucleo.r * 255).round(),
+          (nucleo.g * 255).round(),
+          (nucleo.b * 255).round(),
+          _c01(opacidad));
+      canvas.drawCircle(Offset(x, y), p.tam + tamExtra, pincel);
+    }
+  }
+
+  /// Cielos por escena: inicio (noche) y fin (día) de la transición.
+  _PaletaCielo _paletaCielo(EscenaMensaje escena, double t) {
+    switch (escena) {
+      case EscenaMensaje.bosque:
+        return _PaletaCielo([
+          Color.lerp(const Color(0xFF0A1F14), const Color(0xFF2E7D32), t)!,
+          Color.lerp(const Color(0xFF12281A), const Color(0xFF66BB6A), t)!,
+          Color.lerp(const Color(0xFF1A3324), const Color(0xFFC8E6C9), t)!,
+        ]);
+      case EscenaMensaje.atardecer:
+        return _PaletaCielo([
+          Color.lerp(const Color(0xFF241019), const Color(0xFF6D2B3C), t)!,
+          Color.lerp(const Color(0xFF3A1B26), const Color(0xFFE2683C), t)!,
+          Color.lerp(const Color(0xFF4A2430), const Color(0xFFFFD54F), t)!,
+        ]);
+      case EscenaMensaje.lluvia:
+        return _PaletaCielo([
+          Color.lerp(const Color(0xFF0D1B2A), const Color(0xFF3E5C76), t)!,
+          Color.lerp(const Color(0xFF16283D), const Color(0xFF6B8CA8), t)!,
+          Color.lerp(const Color(0xFF1D3557), const Color(0xFFBFD7EA), t)!,
+        ]);
+      case EscenaMensaje.amanecer:
+        return _PaletaCielo([
+          Color.lerp(const Color(0xFF071F17), const Color(0xFF0F4D3A), t)!,
+          Color.lerp(const Color(0xFF0E3326), const Color(0xFF4DB27A), t)!,
+          Color.lerp(const Color(0xFF14402F), const Color(0xFFFFD98A), t)!,
+        ]);
     }
   }
 
@@ -658,6 +859,13 @@ class _CieloPainter extends CustomPainter {
   bool shouldRepaint(covariant _CieloPainter old) {
     return old.entrada != entrada ||
         old.ambiente != ambiente ||
-        old.particulas != particulas;
+        old.particulas != particulas ||
+        old.escena != escena;
   }
+}
+
+/// Tres tonos de cielo (arriba, medio, horizonte) para una escena.
+class _PaletaCielo {
+  const _PaletaCielo(this.cielo);
+  final List<Color> cielo;
 }

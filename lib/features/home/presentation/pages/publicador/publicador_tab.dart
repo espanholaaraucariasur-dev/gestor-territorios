@@ -172,6 +172,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
     }
   }
 
+  /// Una tarea con `enviar_en` de hace más de 24 h nunca se envió (la app
+  /// estuvo cerrada, o el ciclo se reinició sin limpiar). Se cierra sola
+  /// para que el próximo ciclo empiece fresco, en vez de pudrirse.
+  static const int _horasMaxEsperaMotivacional = 24;
+
   Future<void> _verificarTareaPendiente() async {
     try {
       final email = widget.usuarioEmail;
@@ -185,6 +190,11 @@ class _PublicadorTabState extends State<PublicadorTab> {
 
       final enviarEn = (tarea['enviar_en'] as Timestamp?)?.toDate();
       if (enviarEn == null) return;
+      if (DateTime.now().difference(enviarEn).inHours >=
+          _horasMaxEsperaMotivacional) {
+        await _cerrarTareaMotivacional('caducada (>24h sin enviar)');
+        return;
+      }
 
       if (DateTime.now().isAfter(enviarEn)) {
         // Ya pasaron los 10 min — enviar ahora
@@ -468,6 +478,30 @@ class _PublicadorTabState extends State<PublicadorTab> {
   }
 
   /// El publicador tomó o recibió una tarjeta: el ciclo vuelve a empezar.
+  /// Cierra la tarea sin enviar (caducada, sin mensajes, texto vacío).
+  /// Deja `ultimo_envio` para el cooldown solo cuando se pide.
+  Future<void> _cerrarTareaMotivacional(String motivo,
+      {bool conUltimoEnvio = false}) async {
+    _timerMotivacional?.cancel();
+    try {
+      final cambios = <String, dynamic>{
+        'enviado': true,
+        'enviar_en': FieldValue.delete(),
+        'cierre_motivo': motivo,
+      };
+      if (conUltimoEnvio) {
+        cambios['ultimo_envio'] = FieldValue.serverTimestamp();
+      }
+      await FirebaseFirestore.instance
+          .collection('tareas_motivacionales')
+          .doc(widget.usuarioEmail)
+          .set(cambios, SetOptions(merge: true));
+      debugPrint('\u2139\uFE0F Tarea motivacional cerrada: $motivo');
+    } catch (e) {
+      debugPrint('Error cerrando tarea motivacional: $e');
+    }
+  }
+
   Future<void> _reiniciarCicloMotivacional() async {
     _timerMotivacional?.cancel();
     try {
@@ -605,6 +639,12 @@ class _PublicadorTabState extends State<PublicadorTab> {
       // (protege contra timers viejos que disparen antes de tiempo)
       final enviarEn = (tarea['enviar_en'] as Timestamp?)?.toDate();
       if (enviarEn != null && DateTime.now().isBefore(enviarEn)) {
+        // Caducada mientras se esperaba: cerrar sin enviar ni reprogramar.
+        if (DateTime.now().difference(enviarEn).inHours >=
+            _horasMaxEsperaMotivacional) {
+          await _cerrarTareaMotivacional('caducada (>24h sin enviar)');
+          return;
+        }
         debugPrint(
             '⏰ Aún no cumplen 10 min — reprogramando en ${enviarEn.difference(DateTime.now()).inMinutes + 1} min');
         _programarTimerMotivacional(enviarEn.difference(DateTime.now()));
@@ -621,26 +661,39 @@ class _PublicadorTabState extends State<PublicadorTab> {
       if (msgsSnap.docs.isEmpty) {
         // Sin mensajes configurados: cerrar la tarea para no reintentar en
         // silencio en cada apertura (antes quedaba pendiente para siempre).
-        try {
-          await FirebaseFirestore.instance
-              .collection('tareas_motivacionales')
-              .doc(email)
-              .update({
-            'enviado': true,
-            'enviar_en': FieldValue.delete(),
-            'ultimo_envio': FieldValue.serverTimestamp(),
-          });
-        } catch (_) {}
-        debugPrint(
-            'ℹ️ Sin mensajes motivacionales configurados — tarea cerrada');
+        await _cerrarTareaMotivacional('sin mensajes configurados',
+            conUltimoEnvio: true);
         return;
       }
 
-      final idx = DateTime.now().millisecondsSinceEpoch % msgsSnap.docs.length;
-      final msgData = msgsSnap.docs[idx].data();
+      // Rotación por persona: se elige el mensaje activo menos usado por este
+      // publicador (empate: el más viejo). Queda en `conteo_mensajes` de su
+      // tarea, así los 10 mensajes rotan de verdad en vez de repetirse.
+      final conteo =
+          (tarea['conteo_mensajes'] as Map<String, dynamic>?) ?? {};
+      final ordenados = msgsSnap.docs.toList()
+        ..sort((a, b) {
+          final ca = (conteo[a.id] as num?)?.toInt() ?? 0;
+          final cb = (conteo[b.id] as num?)?.toInt() ?? 0;
+          if (ca != cb) return ca.compareTo(cb);
+          final fa = (a.data()['created_at'] as Timestamp?)
+                  ?.millisecondsSinceEpoch ??
+              0;
+          final fb = (b.data()['created_at'] as Timestamp?)
+                  ?.millisecondsSinceEpoch ??
+              0;
+          return fa.compareTo(fb);
+        });
+      final elegido = ordenados.first;
+      final msgData = elegido.data();
       final texto =
           (msgData['texto'] as String? ?? '').replaceAll('{nombre}', nombre);
-      if (texto.isEmpty) return;
+      if (texto.isEmpty) {
+        await _cerrarTareaMotivacional('texto vacío',
+            conUltimoEnvio: true);
+        return;
+      }
+      final usos = ((conteo[elegido.id] as num?)?.toInt() ?? 0) + 1;
 
       // Enviar solo el mensaje configurado, sin título redundante
       await NotificacionService.enviarAUser(
@@ -650,13 +703,16 @@ class _PublicadorTabState extends State<PublicadorTab> {
         tipo: TipoNotificacion.motivacional,
       );
 
-      // Marcar tarea como enviada con timestamp para cooldown
+      // Marcar tarea como enviada con timestamp para cooldown, y sumar el
+      // uso del mensaje elegido para la rotación por persona.
       await FirebaseFirestore.instance
           .collection('tareas_motivacionales')
           .doc(email)
           .update({
         'enviado': true,
         'ultimo_envio': FieldValue.serverTimestamp(),
+        'ultimo_mensaje_id': elegido.id,
+        'conteo_mensajes.${elegido.id}': usos,
       });
 
       debugPrint('✅ Mensaje motivacional enviado a $nombre');
