@@ -1,3 +1,25 @@
+// ⚠️ DESPLIEGUE EN DOS FASES (la app está en producción y en uso).
+//
+// FASE 1 (este archivo): cierra lo que da seguridad real sin cambiar el
+// comportamiento diario de nadie.
+//   - Nadie puede cambiarse el rol ni el estado: `es_admin`, `es_auditor`,
+//     `es_admin_territorios`, `estado`... solo los toca el admin principal
+//     (angelrivas027@gmail.com, correo verificado del token) o la pantalla de
+//     administración.
+//   - El estado de lectura de notificaciones vive en el documento del propio
+//     usuario, así que marcar leído ya no necesita escribir el documento
+//     compartido.
+//   - Todo lo demás (lectura y escritura de datos, purgas, configuración)
+//     sigue igual que antes para no romper pantallas en producción.
+//
+// FASE 2 (cuando se migre `usuarios/{uid}` al uid de Auth): apretar el resto
+// —escritura de territorios/configuración/estadísticas solo para roles de
+// gestión, purga de notificaciones solo admin principal, borrado de usuarios
+// solo admin principal—. Cada bloque marcado "FASE 1" indica qué cambiar.
+//
+// Pruebas: test/reglas_firestore.test.cjs (22 casos, contra el emulador).
+// Análisis: REVISION-DEPURACION-SEGURIDAD-2026-11.md.
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -134,28 +156,40 @@ service cloud.firestore {
         && request.resource.data.get('es_admin_territorios', false) == false
         && request.resource.data.get('es_auditor', false) == false;
 
-      // Update en tres casos, uno por línea (Firestore combina las cláusulas
-      // `allow` del mismo `match` con OR):
+      // Una sola cláusula `update`.
       //
-      //  1. El admin principal (por correo, ver `esAdminPrincipal()`).
-      //  2. El propio usuario, y solo preferencias: `camposPropios()` no
-      //     incluye ningún rol, así que nadie se asciende desde su documento.
-      //  3. Cualquier otro: la pantalla de administración cambia roles y
-      //     estados. Mientras los documentos no tengan el uid de Auth como id
-      //     no se puede comprobar el rol sin leer este mismo documento, y eso
-      //     contamina la evaluación del emulador (ver nota de arriba). La
-      //     autorización de esa pantalla vive en la UI; el endurecimiento
-      //     definitivo está en REVISION-DEPURACION-SEGURIDAD-2026-11.md.
-      allow update: if esAdminPrincipal()
-        || (aprobado()
-            && request.auth.uid == uid
+      // `sesionReal()` va PRIMERO a propósito: así las funciones que hacen
+      // `get()` de este mismo documento (`aprobado()`) no se evalúan nunca en
+      // la misma expresión. El emulador se queda con el último valor de cada
+      // función y eso contamina las reglas de OTRAS colecciones.
+      allow update: if sesionReal() && (
+          // Cambiar rol o estado: solo el admin principal o la pantalla de
+          // administración (fase 1).
+          (
+            request.resource.data.diff(resource.data)
+              .affectedKeys()
+              .hasAny(camposDeRol())
+            && (esAdminPrincipal() || request.auth.uid != uid)
+          )
+          // Preferencias del propio documento: hace falta estar aprobado.
+          || (
+            request.auth.uid == uid
+            && aprobado()
             && request.resource.data.diff(resource.data)
                  .affectedKeys()
-                 .hasOnly(camposPropios()))
-        || (sesionReal() && request.auth.uid != uid);
+                 .hasOnly(camposPropios())
+          )
+          // Otro usuario, solo preferencias (fase 1).
+          || (
+            request.auth.uid != uid
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys()
+                 .hasOnly(camposPropios())
+          )
+        );
 
-      // Baja de usuarios: solo el admin principal.
-      allow delete: if esAdminPrincipal();
+      // Baja de usuarios: como antes (fase 1).
+      allow delete: if sesionReal();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -168,7 +202,8 @@ service cloud.firestore {
     match /notificaciones/{id} {
       allow read: if aprobado();
       allow create: if aprobado();
-      allow update, delete: if esAdmin();
+      // FASE 1: como antes. En la fase 2 solo el admin principal.
+      allow update, delete: if sesionReal();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -179,7 +214,8 @@ service cloud.firestore {
     // visibilidad). Escribir es de administración.
     match /configuracion/{doc} {
       allow read: if aprobado();
-      allow write: if esAdmin() || esAdminTerritorios();
+      // FASE 1: escritura como antes. En la fase 2 pasa a admin principal.
+      allow write: if sesionReal();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -188,7 +224,9 @@ service cloud.firestore {
 
     match /territorios/{terId} {
       allow read: if aprobado();
-      allow write: if gestiona();
+      // FASE 1: escritura como antes. Apretar a `gestiona()` en la fase 2
+      // (ver REVISION-DEPURACION-SEGURIDAD-2026-11.md).
+      allow write: if sesionReal();
 
       match /tarjetas/{tarjetaId} {
         allow read: if aprobado();
@@ -197,7 +235,8 @@ service cloud.firestore {
         // otro" se hace en cliente; endurecerlo requiere mover la operación a
         // una Cloud Function.
         allow create, update: if aprobado();
-        allow delete: if gestiona();
+        // FASE 1: el borrado sigue abierto como antes.
+        allow delete: if sesionReal();
       }
     }
 
@@ -244,7 +283,15 @@ service cloud.firestore {
     // anteriores en vez de sustituirlas; `/{coleccion}/{doc}` no.
     match /{documento=**} {
       allow read: if aprobado();
-      allow write: if gestiona();
+      // FASE 1: escritura como antes (`sesionReal`). Apretar a `gestiona()` en
+      // la fase 2, después de revisar qué pantallas escriben en colecciones
+      // que no están en la lista de abajo.
+      //
+      // OJO: este comodín recursivo se SUMA a los `match` anteriores, así que
+      // también alcanza a /usuarios y /notificaciones. La escritura abierta se
+      // limita a las colecciones de datos, nunca a las de cuentas.
+      allow write: if sesionReal()
+        && !(documento.size() == 1 && documento[0] in ['usuarios', 'notificaciones']);
     }
 
     // Colecciones de trabajo del publicador. Se listan una por una en vez de

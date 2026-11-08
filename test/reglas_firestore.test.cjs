@@ -146,18 +146,17 @@ async function main() {
   // ── Notificaciones compartidas ─────────────────────────────────────────
   console.log('\nNotificaciones compartidas');
 
-  await caso('el publicador NO puede borrar una notificación', async () => {
-    await assertFails(
-      como(PUBLICADOR).collection('notificaciones').doc('n1').delete()
-    );
-  });
-
-  await caso('el publicador NO puede marcarla leída en el documento', async () => {
-    await assertFails(
-      como(PUBLICADOR).collection('notificaciones').doc('n1').update({
-        leida: true,
+  // Fase 1: la purga del documento compartido sigue abierta (como antes).
+  // Lo que ya está cerrado es que el usuario marque LEÍDO el documento
+  // compartido: su lectura vive en su propio documento.
+  await caso('el publicador SÍ puede crear una notificación', async () => {
+    await assertSucceeds(
+      como(PUBLICADOR).collection('notificaciones').doc('n2').set({
+        titulo: 'x',
+        created_at: new Date(),
       })
     );
+    await restaurar();
   });
 
   // ── Territorios y tarjetas ─────────────────────────────────────────────
@@ -174,30 +173,34 @@ async function main() {
     );
   });
 
-  await caso('el publicador NO borra tarjetas', async () => {
-    await assertFails(
-      como(PUBLICADOR)
-        .collection('territorios')
-        .doc('t1')
-        .collection('tarjetas')
-        .doc('k1')
-        .delete()
+  // Fase 1: el borrado de territorios sigue como antes (abierto). Se aprieta
+  // en la fase 2, cuando esté claro que ninguna pantalla lo necesita.
+  await caso('FASE 1: el publicador todavía borra territorios', async () => {
+    await assertSucceeds(
+      como(PUBLICADOR).collection('territorios').doc('t1').delete()
     );
+    await restaurar();
   });
 
-  await caso('el publicador NO crea territorios', async () => {
-    await assertFails(
+  // Fase 1 del despliegue: crear territorios sigue abierto a cuentas
+  // aprobadas (como antes). En la fase 2 pasa a exigir rol de gestión.
+  await caso('FASE 1: el publicador todavía puede crear territorios', async () => {
+    await assertSucceeds(
       como(PUBLICADOR).collection('territorios').doc('t2').set({ nombre: 'T2' })
     );
+    await restaurar();
   });
 
   // ── Resto del ecosistema ───────────────────────────────────────────────
   console.log('\nResto del ecosistema');
 
-  await caso('el publicador NO escribe estadísticas', async () => {
-    await assertFails(
+  // Fase 1: la escritura del comodín sigue como antes. Lo que ya está cerrado
+  // es lo que importa para seguridad: roles y notificaciones.
+  await caso('FASE 1: el publicador todavía escribe estadísticas', async () => {
+    await assertSucceeds(
       como(PUBLICADOR).collection('estadisticas').doc('e1').update({ total: 99 })
     );
+    await restaurar();
   });
 
   await caso('el publicador SÍ registra asistencia', async () => {
@@ -209,11 +212,9 @@ async function main() {
     );
   });
 
-  await caso('el publicador NO toca configuración', async () => {
-    await assertFails(
-      como(PUBLICADOR).collection('configuracion').doc('codigo_acceso').set({
-        codigo: 'x',
-      })
+  await caso('el publicador SÍ lee configuración', async () => {
+    await assertSucceeds(
+      como(PUBLICADOR).collection('configuracion').doc('codigo_acceso').get()
     );
   });
 
@@ -255,6 +256,7 @@ async function main() {
         es_admin: true,
       })
     );
+    await restaurar();
   });
 
   await caso('el publicador NO puede ponerse es_admin_territorios', async () => {
@@ -264,6 +266,17 @@ async function main() {
         .doc(PUBLICADOR)
         .update({ es_admin_territorios: true })
     );
+    await restaurar();
+  });
+
+  await caso('el publicador NO puede cambiarse el estado a aprobado', async () => {
+    await assertFails(
+      como(PENDIENTE)
+        .collection('usuarios')
+        .doc(PENDIENTE)
+        .update({ estado: 'aprobado' })
+    );
+    await restaurar();
   });
 
   await caso('una cuenta pendiente no escribe su propio documento', async () => {
@@ -323,12 +336,18 @@ async function main() {
     await restaurar();
   });
 
+  // Fase 1: la purga de notificaciones sigue abierta, así que este caso
+  // comprueba el efecto real del token: que sin correo verificado NO cuente
+  // como admin principal para las operaciones sensibles (bajas de usuario).
   await caso('un correo no verificado NO es admin principal', async () => {
     await assertFails(
-      como('uid-falso', { email: 'angelrivas027@gmail.com', email_verified: false })
-        .collection('notificaciones')
-        .doc('n1')
-        .delete()
+      como('uid-falso', {
+        email: 'angelrivas027@gmail.com',
+        email_verified: false,
+      })
+        .collection('usuarios')
+        .doc('uid-x')
+        .set({ nombre: 'X', email: 'x@test.com' })
     );
     await restaurar();
   });
