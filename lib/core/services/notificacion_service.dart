@@ -304,12 +304,25 @@ class NotificacionService {
   static bool _aplica(PerfilNotificacion perfil, Map<String, dynamic> data) {
     if (perfil.nombre.isNotEmpty) {
       final dest = data['destinatarios'];
-      if (dest is List && dest.any((d) => d == perfil.nombre)) return true;
+      if (dest is List &&
+          dest.any((d) => d is String && d.trim() == perfil.nombre)) {
+        return true;
+      }
+      // Documentos viejos que guardaban el destinatario uno a uno.
+      final individual = data['destinatario_nombre'];
+      if (individual is String && individual.trim() == perfil.nombre) {
+        return true;
+      }
     }
-    final roles = data['destinatarios_roles'];
-    if (roles is List) {
-      for (final r in roles) {
-        if (r is String && perfil.roles.contains(r)) return true;
+    // Se aceptan los dos nombres de campo porque en la base conviven los dos
+    // (`para_roles` lo escribían pantallas antiguas) y con uno solo había
+    // notificaciones invisibles para todos.
+    for (final clave in const ['destinatarios_roles', 'para_roles']) {
+      final roles = data[clave];
+      if (roles is List) {
+        for (final r in roles) {
+          if (r is String && perfil.roles.contains(r.trim())) return true;
+        }
       }
     }
     return false;
