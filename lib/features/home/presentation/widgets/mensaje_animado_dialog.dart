@@ -182,8 +182,10 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
   late final int _floteVelocidad;
   late final double _floteFase;
 
+  static const Cubic _curvaOrganica = Cubic(0.16, 1, 0.3, 1);
+
   Animation<double> _tramo(double inicio, double fin,
-      [Curve curva = Curves.easeOutCubic]) {
+      [Curve curva = _curvaOrganica]) {
     return _entrada.drive(CurveTween(curve: Interval(inicio, fin, curve: curva)));
   }
 
@@ -199,12 +201,12 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
       duration: const Duration(seconds: 14),
     );
 
-    _aEmoji = _tramo(0.12, 0.50, Curves.elasticOut);
+    _aEmoji = _tramo(0.10, 0.45);
     _aTarjeta = _tramo(0.20, 0.50);
-    _aTitulo = _tramo(0.32, 0.58);
-    _aCuerpo = _tramo(0.44, 0.72);
+    _aTitulo = _tramo(0.30, 0.55);
+    _aCuerpo = _tramo(0.42, 0.72);
     _aCita = _tramo(0.58, 0.88);
-    _aBotones = _tramo(0.78, 1.0);
+    _aBotones = _tramo(0.76, 1.0);
 
     final azar = math.Random(11);
     _particulas = List.generate(
@@ -254,15 +256,19 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
 
   void _cerrar() => Navigator.of(context).pop();
 
-  Widget _aparecer(Animation<double> a, Widget child, {double deslizar = 14}) {
+  /// Entrada orgánica estilo Telegram: fundido + deslizamiento hacia arriba
+  /// con `cubic-bezier(0.16, 1, 0.3, 1)`. La curva ya viene en la animación
+  /// (Interval); aquí solo se mapea el progreso a opacidad y desplazamiento.
+  Widget _aparecer(Animation<double> a, Widget child, {double deslizar = 26}) {
     return AnimatedBuilder(
       animation: a,
       child: child,
       builder: (context, hijo) {
+        final v = _c01(a.value);
         return Opacity(
-          opacity: _c01(a.value),
+          opacity: v,
           child: Transform.translate(
-            offset: Offset(0, (1 - _c01(a.value)) * deslizar),
+            offset: Offset(0, (1 - v) * deslizar),
             child: hijo,
           ),
         );
@@ -333,212 +339,215 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
     );
   }
 
+  /// Contenido flotante sin caja ni tarjeta: icono (rama) arriba, texto
+  /// protagonista en el centro, cita y botones abajo. Todo respira con un
+  /// vaivén vertical sutil continuo para que la interfaz se sienta viva.
   Widget _contenido() {
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.topCenter,
-      children: [
-        // La tarjeta flota: combina la entrada animada con el respiro
-        // ambiental. Si el sistema pide quitar animaciones, queda quieta.
-        AnimatedBuilder(
-          animation: _ambiente,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 42),
-            child: _aparecer(_aTarjeta, _tarjeta(), deslizar: 28),
-          ),
-          builder: (context, hijo) {
-            final a = _ambiente.value * 2 * math.pi * _floteVelocidad +
-                _floteFase * 6.28;
-            return Transform.translate(
-              offset: Offset(0, math.sin(a) * _floteAmplitud),
-              child: Transform.rotate(
-                angle: math.sin(a * 0.7) * _floteGiro,
-                child: hijo,
-              ),
-            );
-          },
-        ),
-        _emoji(),
-      ],
-    );
-  }
-
-  Widget _emoji() {
-    return AnimatedBuilder(
-      animation: Listenable.merge([_aEmoji, _ambiente]),
-      builder: (context, _) {
-        final pulso = 1 + 0.035 * math.sin(_ambiente.value * 2 * math.pi * 2);
-        final escala = math.max(0.001, _aEmoji.value * pulso);
-        return Opacity(
-          opacity: _c01(_aEmoji.value),
-          child: Transform.scale(
-            scale: escala,
-            child: Container(
-              width: 84,
-              height: 84,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const RadialGradient(
-                  colors: [Color(0xFFFFF8E1), Color(0xFFFFE082)],
-                ),
-                border: Border.all(color: const Color(0xFFFFFFFF), width: 3),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color.fromRGBO(255, 214, 79, 0.55),
-                    blurRadius: 24,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
-              child: Text(widget.iconoEmoji, style: const TextStyle(fontSize: 40)),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _tarjeta() {
-    final m = _mensaje;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(22, 54, 22, 18),
-      decoration: BoxDecoration(
-        color: const Color.fromRGBO(255, 255, 255, 0.95),
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: const [
-          BoxShadow(
-            color: Color.fromRGBO(0, 0, 0, 0.28),
-            blurRadius: 32,
-            offset: Offset(0, 16),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _aparecer(
-            _aTitulo,
-            Text(
-              widget.titulo,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                height: 1.2,
-                color: Color(0xFF1B5E20),
-              ),
-            ),
-          ),
-          if (m.texto.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _aparecer(
-              _aCuerpo,
-              Text(
-                m.texto,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 15.5,
-                  height: 1.5,
-                  color: Color(0xFF37474F),
-                ),
-              ),
-            ),
-          ],
-          if (m.cita != null) ...[
-            const SizedBox(height: 16),
-            _aparecer(_aCita, _bloqueCita(m)),
-          ],
-          const SizedBox(height: 18),
-          _aparecer(_aBotones, _botones()),
-        ],
-      ),
-    );
-  }
-
-  Widget _bloqueCita(_MensajeParseado m) {
     return AnimatedBuilder(
       animation: _ambiente,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.format_quote_rounded, color: Color(0xFFBF8F00), size: 22),
-          if (m.versiculo != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              '«${m.versiculo}»',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 15,
-                height: 1.45,
-                fontStyle: FontStyle.italic,
-                color: Color(0xFF4E3B00),
-              ),
+          _iconoRama(),
+          const SizedBox(height: 22),
+          _aparecer(
+            _aTitulo,
+            _textoConBrillo(
+              widget.titulo,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+              brillo: const Color.fromRGBO(255, 255, 255, 0.55),
             ),
-            const SizedBox(height: 8),
-          ],
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF8D6E00)),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  m.cita!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF6D4C00),
-                  ),
-                ),
-              ),
-            ],
+            deslizar: 24,
           ),
+          if (_mensaje.texto.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _aparecer(
+              _aCuerpo,
+              _textoConBrillo(
+                _mensaje.texto,
+                fontSize: 26,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+                color: Colors.white,
+                brillo: const Color.fromRGBO(255, 255, 255, 0.65),
+              ),
+              deslizar: 30,
+            ),
+          ],
+          if (_mensaje.cita != null) ...[
+            const SizedBox(height: 16),
+            _aparecer(_aCita, _citaFlotante(_mensaje)),
+          ],
+          const SizedBox(height: 26),
+          _aparecer(_aBotones, _botonesFlotantes()),
         ],
       ),
       builder: (context, hijo) {
-        final brillo = 0.5 + 0.5 * math.sin(_ambiente.value * 2 * math.pi);
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFF8E1),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: Color.fromRGBO(255, 193, 7, 0.35 + 0.35 * brillo),
-              width: 1.4,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Color.fromRGBO(255, 193, 7, 0.10 + 0.18 * brillo),
-                blurRadius: 16,
-              ),
-            ],
+        final a = _ambiente.value * 2 * math.pi * _floteVelocidad +
+            _floteFase * 6.28;
+        return Transform.translate(
+          offset: Offset(0, math.sin(a) * _floteAmplitud),
+          child: Transform.rotate(
+            angle: math.sin(a * 0.7) * _floteGiro,
+            child: hijo,
           ),
-          child: hijo,
         );
       },
     );
   }
 
-  Widget _botones() {
+  /// Texto con resplandor difuminado detrás (sin contenedor): el brillo lo
+  /// separa ópticamente del fondo dinámico.
+  Widget _textoConBrillo(
+    String texto, {
+    required double fontSize,
+    required FontWeight fontWeight,
+    required Color color,
+    required Color brillo,
+    double? height,
+  }) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Text(
+          texto,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Roboto',
+            fontSize: fontSize,
+            fontWeight: fontWeight,
+            height: height ?? 1.25,
+            color: Colors.transparent,
+            shadows: [
+              Shadow(color: brillo, blurRadius: 22),
+              Shadow(color: brillo, blurRadius: 44),
+            ],
+          ),
+        ),
+        Text(
+          texto,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Roboto',
+            fontSize: fontSize,
+            fontWeight: fontWeight,
+            height: height ?? 1.25,
+            color: color,
+            shadows: const [
+              Shadow(
+                color: Color.fromRGBO(0, 0, 0, 0.45),
+                blurRadius: 10,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Icono superior con la rama: levita (sube y baja suave) en continuo y
+  /// lleva un halo difuminado detrás, sin círculo ni borde sólido.
+  Widget _iconoRama() {
+    return _aparecer(
+      _aEmoji,
+      AnimatedBuilder(
+        animation: _ambiente,
+        builder: (context, _) {
+          final levita =
+              math.sin(_ambiente.value * 2 * math.pi * 2) * 7;
+          return Transform.translate(
+            offset: Offset(0, levita),
+            child: Container(
+              width: 96,
+              height: 96,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Color.fromRGBO(255, 240, 200, 0.35),
+                    blurRadius: 48,
+                    spreadRadius: 6,
+                  ),
+                ],
+              ),
+              child: Text(
+                widget.iconoEmoji,
+                style: const TextStyle(fontSize: 56),
+              ),
+            ),
+          );
+        },
+      ),
+      deslizar: 30,
+    );
+  }
+
+  /// Cita bíblica flotante: sin caja, con brillo suave dorado.
+  Widget _citaFlotante(_MensajeParseado m) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (m.versiculo != null) ...[
+          _textoConBrillo(
+            '«${m.versiculo}»',
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            height: 1.45,
+            color: const Color(0xFFFFF3C4),
+            brillo: const Color.fromRGBO(255, 220, 130, 0.55),
+          ),
+          const SizedBox(height: 8),
+        ],
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.menu_book_rounded,
+                size: 15, color: Color(0xFFFFE082)),
+            const SizedBox(width: 6),
+            Flexible(
+              child: _textoConBrillo(
+                m.cita!,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFFFFE082),
+                brillo: const Color.fromRGBO(255, 200, 100, 0.5),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Botones sin tarjeta: cerrar en texto claro, ver-tarjetas en píldora.
+  Widget _botonesFlotantes() {
     return Wrap(
       alignment: WrapAlignment.center,
       crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 8,
-      runSpacing: 4,
+      spacing: 10,
+      runSpacing: 6,
       children: [
-        TextButton(onPressed: _cerrar, child: const Text('Cerrar')),
+        TextButton(
+          onPressed: _cerrar,
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white70,
+          ),
+          child: const Text('Cerrar'),
+        ),
         if (widget.onVerTarjetas != null)
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1B5E20),
-              foregroundColor: Colors.white,
+              backgroundColor: const Color.fromRGBO(255, 255, 255, 0.92),
+              foregroundColor: const Color(0xFF1B5E20),
               shape: const StadiumBorder(),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              elevation: 6,
+              shadowColor: const Color.fromRGBO(0, 0, 0, 0.35),
             ),
             onPressed: () {
               final alVer = widget.onVerTarjetas;
@@ -551,6 +560,7 @@ class _MensajeAnimadoPaginaState extends State<_MensajeAnimadoPagina>
       ],
     );
   }
+
 }
 
 // ---------------------------------------------------------------------------
