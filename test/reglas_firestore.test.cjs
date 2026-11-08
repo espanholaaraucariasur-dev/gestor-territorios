@@ -389,13 +389,90 @@ async function main() {
     await restaurar();
   });
 
-  // PENDIENTE (ver REVISION-DEPURACION-SEGURIDAD-2026-11.md):
-  //  - "el publicador NO puede editar el documento de otro"
-  //  - "el admin NO puede quitarse su propio es_admin"
-  // Hoy las dos pasan: mientras los documentos no tengan el uid de Auth como
-  // id no hay forma de comprobar el rol sin leer el propio documento, y eso
-  // desestabiliza la evaluación del emulador. Quedan como deuda declarada
-  // hasta migrar el id del documento.
+  // ── Fase 2: nadie escribe sobre otro salvo administración ──────────────
+  console.log('\nFase 2 — escritura sobre otros usuarios');
+
+  await caso('el publicador NO puede editar el documento de otro', async () => {
+    await assertFails(
+      como(PUBLICADOR)
+        .collection('usuarios')
+        .doc(PENDIENTE)
+        .update({ nombre: 'cambiado' })
+    );
+  });
+
+  await caso('el publicador NO puede escribir el fcm_token de otro', async () => {
+    await assertFails(
+      como(PUBLICADOR)
+        .collection('usuarios')
+        .doc(PENDIENTE)
+        .update({ fcm_token: 'robado' })
+    );
+  });
+
+  await caso('el publicador NO puede borrar la cuenta de otro', async () => {
+    await assertFails(
+      como(PUBLICADOR).collection('usuarios').doc(PENDIENTE).delete()
+    );
+  });
+
+  await caso('el publicador NO puede quitarse es_admin a sí mismo', async () => {
+    // Se degrada primero al publicador con la sesión sin reglas: la regla de
+    // `usuarios` compara contra `resource.data`, no contra el perfil, así que
+    // con `es_admin: true` en el documento el update pasaría la comprobación
+    // de claves. El caso real es que un publicador NUNCA llega a tenerlo.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx
+        .firestore()
+        .collection('usuarios')
+        .doc(PUBLICADOR)
+        .update({ es_admin: true });
+    });
+    await assertFails(
+      como(PUBLICADOR)
+        .collection('usuarios')
+        .doc(PUBLICADOR)
+        .update({ es_admin: false })
+    );
+    await restaurar();
+  });
+
+  await caso('el admin NO puede quitarse su propio es_admin', async () => {
+    await assertFails(
+      como(ADMIN).collection('usuarios').doc(ADMIN).update({ es_admin: false })
+    );
+  });
+
+  await caso('el admin SÍ aprueba a otro usuario', async () => {
+    await assertSucceeds(
+      como(ADMIN)
+        .collection('usuarios')
+        .doc(PENDIENTE)
+        .update({ estado: 'aprobado' })
+    );
+    await restaurar();
+  });
+
+  await caso('el admin SÍ da rol de territorios a otro', async () => {
+    await assertSucceeds(
+      como(ADMIN)
+        .collection('usuarios')
+        .doc(PUBLICADOR)
+        .update({ es_admin_territorios: true })
+    );
+    await restaurar();
+  });
+
+  await caso('el admin SÍ borra la cuenta de otro', async () => {
+    await assertSucceeds(
+      como(ADMIN).collection('usuarios').doc(PENDIENTE).delete()
+    );
+    await restaurar();
+  });
+
+  // La migración usuarios/{uid} ya está hecha en producción: el id del
+  // documento de usuario es el uid de Auth, así que estas dos se pueden
+  // cerrar sin la deuda que las bloqueaba.
 
   await env.cleanup();
 

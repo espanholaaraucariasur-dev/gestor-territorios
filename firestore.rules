@@ -160,43 +160,34 @@ service cloud.firestore {
       // `get()` de este mismo documento (`aprobado()`) no se evalúan nunca en
       // la misma expresión. El emulador se queda con el último valor de cada
       // función y eso contamina las reglas de OTRAS colecciones.
+      //
+      // REGLA DE ORO: sobre el documento de OTRO solo escribe un admin. El
+      // propio documento nunca admite roles, estado ni el token de otro.
       allow update: if sesionReal() && (
-          // Cambiar un rol de cuenta (es_admin, es_auditor...): solo el admin
-          // principal o la pantalla de administración (fase 1).
-          (
-            request.resource.data.diff(resource.data)
-              .affectedKeys()
-              .hasAny(camposDeRol())
-            && (esAdminPrincipal() || request.auth.uid != uid)
-          )
-          // Aprobar / desaprobar una cuenta: solo el admin principal o la
-          // pantalla de administración. Un usuario pendiente NO puede
-          // aprobarse a sí mismo.
-          || (
-            request.resource.data.diff(resource.data)
-              .affectedKeys()
-              .hasAny(['estado', 'activo'])
-            && (esAdminPrincipal() || request.auth.uid != uid)
-          )
           // Preferencias del propio documento: hace falta estar aprobado.
-          || (
+          (
             request.auth.uid == uid
             && aprobado()
             && request.resource.data.diff(resource.data)
                  .affectedKeys()
                  .hasOnly(camposPropios())
           )
-          // Otro usuario, solo preferencias (fase 1).
+          // Sobre el documento de otro: solo un admin, y solo preferencias.
+          // Cambiar rol, aprobar o desactivar a OTRO es de administración.
           || (
             request.auth.uid != uid
+            && esAdmin()
             && request.resource.data.diff(resource.data)
                  .affectedKeys()
-                 .hasOnly(camposPropios())
+                 .hasOnly(camposPropios()
+                   .concat(camposDeRol())
+                   .concat(['estado', 'activo']))
           )
         );
 
-      // Baja de usuarios: como antes (fase 1).
-      allow delete: if sesionReal();
+      // Baja de usuarios: solo administración. Antes bastaba una sesión real,
+      // así que cualquier publicador podía borrar la cuenta de otro.
+      allow delete: if esAdmin();
     }
 
     // ─────────────────────────────────────────────────────────────
