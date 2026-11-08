@@ -253,10 +253,11 @@ service cloud.firestore {
       }
     }
 
-    // Búsqueda por collection group (auditoría y "mis tarjetas").
+    // Búsqueda por collection group (auditoría y "mis tarjetas"). FASE 1:
+    // escritura como antes; la lectura es la que cierra el acceso.
     match /tarjetas/{tarjetaId=**} {
       allow read: if aprobado();
-      allow write: if gestiona();
+      allow write: if sesionReal();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -268,18 +269,21 @@ service cloud.firestore {
       // El publicador envía direcciones nuevas: create abierto a aprobados.
       allow create: if aprobado();
       allow update: if aprobado();
-      allow delete: if gestiona();
+      // FASE 1: el borrado sigue como antes.
+      allow delete: if sesionReal();
     }
 
     match /direcciones_removidas/{doc} {
       allow read: if aprobado();
-      allow write: if gestiona();
+      // FASE 1: escritura como antes.
+      allow write: if sesionReal();
     }
 
     match /sugerencias/{doc} {
       allow read: if aprobado();
       allow create: if aprobado();
-      allow update, delete: if gestiona();
+      // FASE 1: escritura como antes.
+      allow update, delete: if sesionReal();
     }
 
     // ─────────────────────────────────────────────────────────────
