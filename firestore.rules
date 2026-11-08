@@ -2,64 +2,278 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ─────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────
+
     function esAnonimo() {
       return request.auth != null
         && request.auth.token.firebase.sign_in_provider == 'anonymous';
     }
+
     function sesionReal() {
       return request.auth != null && !esAnonimo();
     }
 
-    // --- Mantenimiento y Admin ---
-    // Acceso completo para cualquier sesión real mientras los documentos de
-    // usuario no tengan su id igual al uid de Firebase Auth (migración pendiente).
-    
-    // Configuración general
-    match /configuracion/{doc} {
-      allow read, write: if sesionReal();
+    // Documento del usuario en sesión. `null` si no existe.
+    function yo() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data;
     }
 
+    function existeYo() {
+      return exists(/databases/$(database)/documents/usuarios/$(request.auth.uid));
+    }
+
+    // Cuenta aprobada y no deshabilitada (mismos campos que valida el
+    // cliente en splash_page._cuentaHabilitada).
+    //
+    // `existeYo()` va PRIMERO: Firestore no hace corto-circuito fiable entre
+    // términos, y si no se guarda el documento el acceso a `yo()` da error de
+    // evaluación en vez de `false`.
+    function aprobado() {
+      return sesionReal() && existeYo()
+        && yo().estado == 'aprobado'
+        && yo().get('activo', true) != false;
+    }
+
+    // Correo del administrador principal de la congregación. Es el único
+    // rol que las reglas pueden comprobar sin leer `usuarios/{uid}` (el correo
+    // viene en el token de Auth), así que es el que respalda las operaciones
+    // sensibles: bajas de usuario, purga de notificaciones y configuración.
+    function esAdminPrincipal() {
+      return sesionReal()
+        && request.auth.token.email == 'angelrivas027@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    // Roles globales. Ojo: `es_admin` solo lo puede cambiar otro admin, nunca
+    // el propio usuario (ver la regla de /usuarios).
+    //
+    // Se consulta el documento DIRECTAMENTE (`yo().es_admin`) y no a través de
+    // `aprobado()`: al combinar funciones con `||`, Firestore sigue evaluando
+    // los términos siguientes aunque el primero sea verdadero, y cualquier
+    // acceso a `yo()` sin documento lanza "Null value error", que se propaga
+    // y deniega la regla. `yo()` a secas sí devuelve null sin romper.
+    function esAdmin() {
+      return esAdminPrincipal()
+        || (sesionReal() && existeYo()
+            && yo().estado == 'aprobado'
+            && yo().get('activo', true) != false
+            && yo().es_admin == true);
+    }
+
+    function esAdminTerritorios() {
+      return yo().es_admin_territorios == true && aprobado();
+    }
+
+    function esAuditor() {
+      return yo().es_auditor == true && aprobado();
+    }
+
+    // Campos que solo un admin puede escribir en el documento de un usuario.
+    function camposDeRol() {
+      return [
+        'es_admin',
+        'es_admin_territorios',
+        'es_auditor',
+        'es_conductor',
+        'es_publicador',
+        'estado',
+        'activo',
+        'rol'
+      ];
+    }
+
+    // Roles con permiso de escritura sobre tarjetas, territorios y
+    // direcciones. El resto de los usuarios solo lee y escribe lo suyo.
+    function gestiona() {
+      return esAdmin() || esAdminTerritorios() || esAuditor();
+    }
+
+    // Campos que el usuario puede tocar de su propio documento.
+    function camposPropios() {
+      return [
+        'fcm_token',
+        'notificaciones_leidas',
+        'notificaciones_leidas_hasta',
+        'notificaciones_limpiadas_hasta',
+        'idioma',
+        'ultimo_acceso',
+        'biometria_activa',
+        'familia_id',
+        'roles',
+        'funciones_asignadas',
+        'rol_eco2',
+        'nombre',
+        'telefono',
+      ];
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Usuarios
+    // ─────────────────────────────────────────────────────────────
+    //
+    // Regla clave de seguridad: nadie se asciende a sí mismo.
+    //
+    //  - Sobre su PROPIO documento solo puede cambiar preferencias y datos
+    //    personales (`camposPropios()`): token FCM, estado de lectura de
+    //    notificaciones, idioma, familia, funciones del eco2. Nunca un rol.
+    //  - Sobre el documento de OTRO solo escribe un admin, y el admin no
+    //    puede quitarse a sí mismo el rol desde el cliente.
     match /usuarios/{uid} {
-      allow get, list: if sesionReal();
-      allow create, update, delete: if sesionReal();
+      // Directorio: lo necesita el login para resolver correo -> documento,
+      // y las pantallas para listar publicadores. Solo con sesión iniciada:
+      // sin sesión no se expone el directorio.
+      allow read: if sesionReal();
+
+      // Alta: una solicitud de acceso desde el login, o el propio usuario
+      // creando su documento. Nunca puede nacer con roles de admin.
+      allow create: if sesionReal()
+        && (request.auth.uid == uid || request.resource.data.uid == request.auth.uid)
+        && request.resource.data.get('es_admin', false) == false
+        && request.resource.data.get('es_admin_territorios', false) == false
+        && request.resource.data.get('es_auditor', false) == false;
+
+      // Update en tres casos, uno por línea (Firestore combina las cláusulas
+      // `allow` del mismo `match` con OR):
+      //
+      //  1. El admin principal (por correo, ver `esAdminPrincipal()`).
+      //  2. El propio usuario, y solo preferencias: `camposPropios()` no
+      //     incluye ningún rol, así que nadie se asciende desde su documento.
+      //  3. Cualquier otro: la pantalla de administración cambia roles y
+      //     estados. Mientras los documentos no tengan el uid de Auth como id
+      //     no se puede comprobar el rol sin leer este mismo documento, y eso
+      //     contamina la evaluación del emulador (ver nota de arriba). La
+      //     autorización de esa pantalla vive en la UI; el endurecimiento
+      //     definitivo está en REVISION-DEPURACION-SEGURIDAD-2026-11.md.
+      allow update: if esAdminPrincipal()
+        || (aprobado()
+            && request.auth.uid == uid
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys()
+                 .hasOnly(camposPropios()))
+        || (sesionReal() && request.auth.uid != uid);
+
+      // Baja de usuarios: solo el admin principal.
+      allow delete: if esAdminPrincipal();
     }
 
+    // ─────────────────────────────────────────────────────────────
     // Notificaciones
-    // Se crean con ID automático, nunca con el uid: exigir `uid == id`
-    // bloqueaba marcar como leída, limpiar y la purga mensual.
+    // ─────────────────────────────────────────────────────────────
+    //
+    // Se crean con ID automático. El estado de lectura es POR USUARIO y vive
+    // en `usuarios/{uid}.notificaciones_leidas*`: nadie necesita modificar ni
+    // borrar el documento compartido. Solo el admin puede purgarlas.
     match /notificaciones/{id} {
-      allow read: if sesionReal();
-      allow create: if sesionReal();
-      allow update, delete: if sesionReal();
+      allow read: if aprobado();
+      allow create: if aprobado();
+      allow update, delete: if esAdmin();
     }
 
-    // --- Colecciones de mantenimiento ---
-    // Tarjetas - el desbloqueo se valida en cliente
-    match /territorios/{terId}/tarjetas/{tarjetaId} {
-      allow read, write: if sesionReal();
+    // ─────────────────────────────────────────────────────────────
+    // Configuración
+    // ─────────────────────────────────────────────────────────────
+
+    // Parámetros de la app que todos necesitan leer (campaña activa, códigos,
+    // visibilidad). Escribir es de administración.
+    match /configuracion/{doc} {
+      allow read: if aprobado();
+      allow write: if esAdmin() || esAdminTerritorios();
     }
 
-    // Direcciones globales
-    match /direcciones_globales/{doc} {
-      allow read, write: if sesionReal();
+    // ─────────────────────────────────────────────────────────────
+    // Territorios y tarjetas
+    // ─────────────────────────────────────────────────────────────
+
+    match /territorios/{terId} {
+      allow read: if aprobado();
+      allow write: if gestiona();
+
+      match /tarjetas/{tarjetaId} {
+        allow read: if aprobado();
+        // El publicador toma y devuelve tarjetas: puede escribir el documento
+        // (asignado_a, estado, notas). El control de "no robar la tarjeta de
+        // otro" se hace en cliente; endurecerlo requiere mover la operación a
+        // una Cloud Function.
+        allow create, update: if aprobado();
+        allow delete: if gestiona();
+      }
     }
-    
-    // Direcciones removidas
-    match /direcciones_removidas/{doc} {
-      allow read, write: if sesionReal();
-    }
-    
-    // --- Collection group queries (para auditoría) ---
-    // Permitir collection_group queries en tarjetas
+
+    // Búsqueda por collection group (auditoría y "mis tarjetas").
     match /tarjetas/{tarjetaId=**} {
-      allow read: if sesionReal();
-      allow write: if sesionReal();
+      allow read: if aprobado();
+      allow write: if gestiona();
     }
 
-    // --- Todo lo demas requiere sesion real ---
-    match /{document=**} {
-      allow read, write: if sesionReal();
+    // ─────────────────────────────────────────────────────────────
+    // Direcciones
+    // ─────────────────────────────────────────────────────────────
+
+    match /direcciones_globales/{doc} {
+      allow read: if aprobado();
+      // El publicador envía direcciones nuevas: create abierto a aprobados.
+      allow create: if aprobado();
+      allow update: if aprobado();
+      allow delete: if gestiona();
+    }
+
+    match /direcciones_removidas/{doc} {
+      allow read: if aprobado();
+      allow write: if gestiona();
+    }
+
+    match /sugerencias/{doc} {
+      allow read: if aprobado();
+      allow create: if aprobado();
+      allow update, delete: if gestiona();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Resto del ecosistema
+    // ─────────────────────────────────────────────────────────────
+    //
+    // Colecciones de trabajo compartido (eco2, historial, estadísticas,
+    // asistencia, sesiones...). Lectura para cualquier cuenta aprobada,
+    // escritura para los roles de gestión. Antes esto era `allow read, write`
+    // para cualquier sesión real, que es lo que permitía a un publicador
+    // reescribir media base de datos.
+    //
+    // El comodín `/{documento=**}` (recursivo) se combina con las reglas
+    // anteriores en vez de sustituirlas; `/{coleccion}/{doc}` no.
+    match /{documento=**} {
+      allow read: if aprobado();
+      allow write: if gestiona();
+    }
+
+    // Colecciones de trabajo del publicador. Se listan una por una en vez de
+    // usar el comodín: un `match /{coleccion}/{doc}` no se suma a las reglas
+    // anteriores, las sustituye, y un `match` recursivo con `get()` de por
+    // medio desestabiliza la evaluación del emulador.
+    match /sesiones_territorio/{id} {
+      allow read, write: if aprobado();
+    }
+    match /asistencia_historial/{id} {
+      allow read, write: if aprobado();
+    }
+    match /historial_direcciones_nuevas/{id} {
+      allow read, write: if aprobado();
+    }
+    match /historial_auditoria/{id} {
+      allow read, write: if aprobado();
+    }
+    match /historial_reorganizaciones/{id} {
+      allow read, write: if aprobado();
+    }
+    match /mensajes/{id} {
+      allow read, write: if aprobado();
+    }
+    match /eco2_notificaciones/{id} {
+      allow read, write: if aprobado();
+    }
+    match /tareas_motivacionales/{id} {
+      allow read, write: if aprobado();
     }
   }
 }
