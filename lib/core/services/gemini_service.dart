@@ -1,15 +1,28 @@
 import 'package:google_generative_ai/google_generative_ai.dart';
 
+import '../config/app_secrets.dart';
+
 /// Servicio Gemini AI para Araucaria Sur.
 /// - Traducción ES→PT de alta calidad
 /// - Análisis de patrones de predicación
 /// Plan Free: 1,500 req/día, 1M tokens/mes — suficiente para 40 usuarios.
 class GeminiService {
-  static const String _apiKey = 'AIzaSyB-tEoKnO74NI-FiumWLooLoQi_Gf3TrAE';
+  /// La llave se pasa al compilar con --dart-define=GEMINI_API_KEY=...
+  /// para que no quede escrita en el APK.
+  static const String _apiKey =
+      String.fromEnvironment('GEMINI_API_KEY', defaultValue: AppSecrets.geminiApiKey);
 
   static GenerativeModel? _model;
 
+  static void _checkKey() {
+    if (_apiKey.isEmpty) {
+      throw Exception(
+          'Gemini sin llave: compila con --dart-define=GEMINI_API_KEY=... para habilitar la traducción con IA.');
+    }
+  }
+
   static GenerativeModel get _instance {
+    _checkKey();
     _model ??= GenerativeModel(
       model: 'gemini-1.5-flash',
       apiKey: _apiKey,
