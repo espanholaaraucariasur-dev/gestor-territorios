@@ -104,12 +104,6 @@ service cloud.firestore {
       ];
     }
 
-    // Roles con permiso de escritura sobre tarjetas, territorios y
-    // direcciones. El resto de los usuarios solo lee y escribe lo suyo.
-    function gestiona() {
-      return esAdmin() || esAdminTerritorios() || esAuditor();
-    }
-
     // Campos que el usuario puede tocar de su propio documento.
     function camposPropios() {
       return [
@@ -308,7 +302,7 @@ service cloud.firestore {
       // también alcanza a /usuarios y /notificaciones. La escritura abierta se
       // limita a las colecciones de datos, nunca a las de cuentas.
       allow write: if sesionReal()
-        && !(documento.size() == 1 && documento[0] in ['usuarios', 'notificaciones']);
+        && !(documento[0] in ['usuarios', 'notificaciones']);
     }
 
     // Colecciones de trabajo del publicador. Se listan una por una en vez de
