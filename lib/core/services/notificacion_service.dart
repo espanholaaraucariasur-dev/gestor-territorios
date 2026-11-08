@@ -391,44 +391,59 @@ class NotificacionService {
     return count;
   }
 
-  static Future<void> marcarLeidas(PerfilNotificacion perfil) async {
-    final docs = await _obtenerDocs(perfil);
-    WriteBatch batch = _db.batch();
-    var ops = 0;
-    for (final doc in docs) {
-      if (doc.data()['leida'] == true) continue;
-      batch.update(doc.reference, {'leida': true});
-      if (++ops >= 380) {
-        await batch.commit();
-        // Un WriteBatch no se puede reutilizar después de commit().
-        batch = _db.batch();
-        ops = 0;
-      }
-    }
-    if (ops > 0) await batch.commit();
+  /// Marca como leídas todas las notificaciones visibles del perfil.
+  ///
+  /// El estado de lectura vive en el documento del PROPIO usuario
+  /// (`notificaciones_leidas_hasta`), no en el documento compartido de la
+  /// notificación: un admin que pulsa "Leer todas" ya no le apaga el aviso
+  /// a los demás.
+  ///
+  /// [lectura] debe ser el `NotificacionLecturaStore` ya inicializado con el
+  /// usuario en sesión. Sin él no se puede saber a quién marcar, así que la
+  /// llamada falla en vez de escribir en el documento compartido.
+  static Future<void> marcarLeidas(
+    PerfilNotificacion perfil, {
+    NotificacionLecturaStore? lectura,
+  }) async {
+    final store = _requiereLectura(lectura);
+    final docs = await _obtenerDocs(perfil, store);
+    if (docs.isEmpty) return;
+    await store.marcarTodas(docs);
   }
 
-  static Future<void> limpiar(PerfilNotificacion perfil) async {
-    final docs = await _obtenerDocs(perfil);
-    WriteBatch batch = _db.batch();
-    var ops = 0;
-    for (final doc in docs) {
-      batch.delete(doc.reference);
-      if (++ops >= 380) {
-        await batch.commit();
-        batch = _db.batch();
-        ops = 0;
-      }
-    }
-    if (ops > 0) await batch.commit();
+  /// Oculta para el usuario actual todas sus notificaciones.
+  ///
+  /// No borra ningún documento: los avisos son compartidos y borrarlos dejaba
+  /// sin bandeja a los demás usuarios del mismo rol. Solo avanza
+  /// `notificaciones_limpiadas_hasta` en el documento del usuario.
+  static Future<void> limpiar(
+    PerfilNotificacion perfil, {
+    NotificacionLecturaStore? lectura,
+  }) async {
+    final store = _requiereLectura(lectura);
+    await store.limpiar();
   }
 
+  static NotificacionLecturaStore _requiereLectura(
+      NotificacionLecturaStore? lectura) {
+    if (lectura == null || lectura.usuarioDocId == null) {
+      throw StateError(
+        'NotificacionLecturaStore no está inicializado: no se puede marcar '
+        'o limpiar notificaciones sin saber a qué usuario pertenecen.',
+      );
+    }
+    return lectura;
+  }
+
+  /// Documentos que este usuario ve y todavía no ha ocultado.
   static Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _obtenerDocs(
-      PerfilNotificacion perfil) async {
+    PerfilNotificacion perfil, [
+    NotificacionLecturaStore? lectura,
+  ]) async {
     // Sin `orderBy` ni `take`: se lee una vez y se filtra en memoria para no
     // depender de índices y no dejar notificaciones antiguas sin marcar/borrar.
     final snap = await _db.collection('notificaciones').get();
-    return filtrarNotificaciones(perfil, snap);
+    return filtrarNotificaciones(perfil, snap, lectura);
   }
 
   // ─────────────────────────── MÉTODOS EXPLÍCITOS MEJORADOS ───────────────────────────
