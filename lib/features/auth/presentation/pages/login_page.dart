@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../core/services/notificacion_service.dart';
+import '../../../../core/services/notification_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:local_auth/local_auth.dart';
@@ -295,6 +298,7 @@ class _PantallaAccesoLegacyState extends State<PantallaAccesoLegacy>
       }
 
       if (mounted) {
+        unawaited(NotificationService().onUserSignedIn());
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(

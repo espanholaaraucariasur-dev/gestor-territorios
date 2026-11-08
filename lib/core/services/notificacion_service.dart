@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'notificacion_lectura_store.dart';
+
 enum TipoNotificacion {
   motivacional,
   avisoDevolucion,
@@ -85,11 +87,13 @@ class NotificacionService {
     String? emailResuelto, // Inyectado desde el llamador
   }) async {
     final destUsuarios = (usuarios ?? const <String>[])
-        .where((u) => u.trim().isNotEmpty)
+        .map((u) => u.trim())
+        .where((u) => u.isNotEmpty)
         .toSet()
         .toList();
     final destRoles = (roles ?? const <String>[])
-        .where((r) => r.trim().isNotEmpty)
+        .map((r) => r.trim())
+        .where((r) => r.isNotEmpty)
         .toSet()
         .toList();
 
@@ -290,66 +294,114 @@ class NotificacionService {
   // depender de índices compuestos de Firestore. Así la campanilla y el
   // listado nunca salen en blanco, pase lo que pase.
 
-  static Stream<QuerySnapshot> _snapGlobal() {
-    // Cada llamada crea una suscripción NUEVA e independiente. No se cachea el
-    // stream: `snapshots()` es de suscripción única y reutilizarlo entre el
-    // badge y el listado rompería al segundo StreamBuilder (el stream ya fue
-    // escuchado). La ordenación por un solo campo usa índice automático.
-    return _db
-        .collection('notificaciones')
-        .orderBy('created_at', descending: true)
-        .snapshots();
+  /// ¿La notificación corresponde al perfil?
+  ///
+  /// Acepta el esquema actual (`destinatarios` / `destinatarios_roles`) y el
+  /// antiguo (`destinatario_nombre` / `para_roles`), porque hay documentos
+  /// escritos antes de unificar los nombres de campo.
+  static bool aplica(PerfilNotificacion perfil, Map<String, dynamic> data) {
+    return _destinatario(perfil, data);
   }
 
-  static bool _aplica(PerfilNotificacion perfil, Map<String, dynamic> data) {
+  static bool _destinatario(
+      PerfilNotificacion perfil, Map<String, dynamic> data) {
     if (perfil.nombre.isNotEmpty) {
       final dest = data['destinatarios'];
-      if (dest is List && dest.any((d) => d == perfil.nombre)) return true;
-    }
-    final roles = data['destinatarios_roles'];
-    if (roles is List) {
-      for (final r in roles) {
-        if (r is String && perfil.roles.contains(r)) return true;
+      if (dest is List &&
+          dest.any((d) => d is String && d.trim() == perfil.nombre)) {
+        return true;
       }
+      final individual = data['destinatario_nombre'];
+      if (individual is String && individual.trim() == perfil.nombre) {
+        return true;
+      }
+    }
+    final roles = <Object?>[
+      ...?(data['destinatarios_roles'] as List?),
+      ...?(data['para_roles'] as List?),
+    ];
+    for (final r in roles) {
+      if (r is String && perfil.roles.contains(r.trim())) return true;
     }
     return false;
   }
 
-  static Stream<int> streamConteo(PerfilNotificacion perfil) {
-    return _snapGlobal().map((snap) {
-      var count = 0;
-      for (final d in snap.docs) {
-        final data = d.data() as Map<String, dynamic>? ?? const <String, dynamic>{};
-        if (data['leida'] == true) continue;
-        if (_aplica(perfil, data)) count++;
+  static DateTime? _fecha(Map<String, dynamic> data) {
+    for (final clave in const ['created_at', 'enviado_en']) {
+      final valor = data[clave];
+      if (valor is Timestamp) return valor.toDate();
+      if (valor is DateTime) return valor;
+      if (valor is String) {
+        final parseada = DateTime.tryParse(valor);
+        if (parseada != null) return parseada;
       }
-      return count;
-    });
+    }
+    return null;
   }
 
-  static Stream<List<QueryDocumentSnapshot>> streamNotificaciones(
-      PerfilNotificacion perfil) {
-    return _snapGlobal().map((snap) {
-      final out = <QueryDocumentSnapshot>[];
-      for (final d in snap.docs) {
-        final data = d.data() as Map<String, dynamic>? ?? const <String, dynamic>{};
-        if (_aplica(perfil, data)) out.add(d);
+  /// Más recientes primero. Los documentos sin fecha quedan al final para no
+  /// desplazar las notificaciones nuevas.
+  static int _compararRecientes(
+    QueryDocumentSnapshot<Map<String, dynamic>> a,
+    QueryDocumentSnapshot<Map<String, dynamic>> b,
+  ) {
+    final fa = _fecha(a.data());
+    final fb = _fecha(b.data());
+    if (fa == null && fb == null) return 0;
+    if (fa == null) return 1;
+    if (fb == null) return -1;
+    return fb.compareTo(fa);
+  }
+
+  /// Notificaciones visibles para el perfil, más recientes primero.
+  ///
+  /// Con [lectura] se descartan las que el usuario limpió de su bandeja. El
+  /// documento compartido no se modifica: el estado de lectura es por usuario.
+  static List<QueryDocumentSnapshot<Map<String, dynamic>>> filtrarNotificaciones(
+    PerfilNotificacion perfil,
+    QuerySnapshot<Map<String, dynamic>> snap, [
+    NotificacionLecturaStore? lectura,
+  ]) {
+    final out = snap.docs.where((d) {
+      if (!aplica(perfil, d.data())) return false;
+      return lectura == null || !lectura.estaOculta(d.id, d.data());
+    }).toList()
+      ..sort(_compararRecientes);
+    return out;
+  }
+
+  static int contarNoLeidas(
+    PerfilNotificacion perfil,
+    QuerySnapshot<Map<String, dynamic>> snap, [
+    NotificacionLecturaStore? lectura,
+  ]) {
+    var count = 0;
+    for (final d in snap.docs) {
+      final data = d.data();
+      if (!aplica(perfil, data)) continue;
+      if (lectura != null) {
+        if (lectura.estaOculta(d.id, data)) continue;
+        if (lectura.estaLeida(d.id, data)) continue;
+        count++;
+        continue;
       }
-      return out.take(50).toList();
-    });
+      if (data['leida'] == true) continue;
+      count++;
+    }
+    return count;
   }
 
   static Future<void> marcarLeidas(PerfilNotificacion perfil) async {
     final docs = await _obtenerDocs(perfil);
-    final batch = _db.batch();
+    WriteBatch batch = _db.batch();
     var ops = 0;
     for (final doc in docs) {
-      final data = doc.data() as Map<String, dynamic>? ?? const <String, dynamic>{};
-      if (data['leida'] == true) continue;
+      if (doc.data()['leida'] == true) continue;
       batch.update(doc.reference, {'leida': true});
-      ops++;
-      if (ops >= 380) {
+      if (++ops >= 380) {
         await batch.commit();
+        // Un WriteBatch no se puede reutilizar después de commit().
+        batch = _db.batch();
         ops = 0;
       }
     }
@@ -358,28 +410,25 @@ class NotificacionService {
 
   static Future<void> limpiar(PerfilNotificacion perfil) async {
     final docs = await _obtenerDocs(perfil);
-    final batch = _db.batch();
+    WriteBatch batch = _db.batch();
     var ops = 0;
     for (final doc in docs) {
       batch.delete(doc.reference);
-      ops++;
-      if (ops >= 380) {
+      if (++ops >= 380) {
         await batch.commit();
+        batch = _db.batch();
         ops = 0;
       }
     }
     if (ops > 0) await batch.commit();
   }
 
-  static Future<List<QueryDocumentSnapshot>> _obtenerDocs(
+  static Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _obtenerDocs(
       PerfilNotificacion perfil) async {
-    final snap = await _snapGlobal().first;
-    final out = <QueryDocumentSnapshot>[];
-    for (final d in snap.docs) {
-      final data = d.data() as Map<String, dynamic>? ?? const <String, dynamic>{};
-      if (_aplica(perfil, data)) out.add(d);
-    }
-    return out.take(200).toList();
+    // Sin `orderBy` ni `take`: se lee una vez y se filtra en memoria para no
+    // depender de índices y no dejar notificaciones antiguas sin marcar/borrar.
+    final snap = await _db.collection('notificaciones').get();
+    return filtrarNotificaciones(perfil, snap);
   }
 
   // ─────────────────────────── MÉTODOS EXPLÍCITOS MEJORADOS ───────────────────────────

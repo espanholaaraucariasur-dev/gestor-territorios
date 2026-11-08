@@ -24,11 +24,18 @@ class NotificationService {
       StreamController<RemoteMessage>.broadcast();
   Stream<RemoteMessage> get messageStream => _messageStreamController.stream;
 
+  bool _initialized = false;
+
   Future<void> initialize() async {
+    if (_initialized) return;
+    _initialized = true;
     try {
       if (kIsWeb) {
+        // En web no se piden permisos ni se obtiene token automáticamente,
+        // pero sí se escuchan los mensajes para mostrarlos en primer plano.
         debugPrint('🌐 Running on web - FCM limited functionality');
-        await _getAndSaveToken();
+        FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+        FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
         return;
       }
       await _requestPermissions();
@@ -42,11 +49,40 @@ class NotificationService {
       FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
       FirebaseMessaging.onBackgroundMessage(
           _firebaseMessagingBackgroundHandler);
-      await _getAndSaveToken();
       _firebaseMessaging.onTokenRefresh.listen(_saveTokenToFirestore);
       debugPrint('✅ NotificationService initialized successfully');
     } catch (e) {
       debugPrint('❌ Error initializing NotificationService: $e');
+    }
+  }
+
+  /// Registra el token del dispositivo cuando ya hay una sesión autenticada.
+  ///
+  /// Debe llamarse tras el login (y al restaurar la sesión), porque escribir
+  /// en `usuarios` requiere `request.auth != null` en las reglas.
+  Future<void> onUserSignedIn() async {
+    if (kIsWeb) return;
+    await _getAndSaveToken();
+  }
+
+  /// Quita el token del usuario que cierra sesión para que este dispositivo
+  /// no siga recibiendo sus push.
+  Future<void> onUserSignedOut() async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final email = currentUser?.email;
+      if (email == null) return;
+      final snap = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return;
+      await snap.docs.first.reference.update({
+        'fcm_token': FieldValue.delete(),
+      });
+    } catch (e) {
+      debugPrint('❌ Error clearing FCM token: $e');
     }
   }
 
@@ -118,33 +154,40 @@ class NotificationService {
     );
   }
 
-  Future<void> _getAndSaveToken() async {
-    try {
-      String? token = await _firebaseMessaging.getToken();
-      if (token != null) {
-        debugPrint('🔑 FCM Token: $token');
-        await _saveTokenToFirestore(token);
+  Future<void> _getAndSaveToken({int intentos = 2}) async {
+    for (var intento = 1; intento <= intentos; intento++) {
+      try {
+        final token = await _firebaseMessaging.getToken();
+        if (token != null) {
+          debugPrint('🔑 FCM Token obtenido (intento $intento)');
+          if (await _saveTokenToFirestore(token)) return;
+        }
+      } catch (e) {
+        debugPrint('❌ Error getting FCM token (intento $intento): $e');
       }
-    } catch (e) {
-      debugPrint('❌ Error getting FCM token: $e');
+      if (intento < intentos) {
+        await Future.delayed(const Duration(seconds: 3));
+      }
     }
   }
 
-  Future<void> _saveTokenToFirestore(String token) async {
+  Future<bool> _saveTokenToFirestore(String token) async {
     try {
       User? currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser == null || currentUser.email == null) return;
+      if (currentUser == null || currentUser.email == null) return false;
       // Los docs de usuarios tienen ID automático: localizar por email
       final snap = await FirebaseFirestore.instance
           .collection('usuarios')
           .where('email', isEqualTo: currentUser.email)
           .limit(1)
           .get();
-      if (snap.docs.isEmpty) return;
+      if (snap.docs.isEmpty) return false;
       await snap.docs.first.reference.update({'fcm_token': token});
       debugPrint('✅ FCM token saved to Firestore');
+      return true;
     } catch (e) {
       debugPrint('❌ Error saving FCM token to Firestore: $e');
+      return false;
     }
   }
 

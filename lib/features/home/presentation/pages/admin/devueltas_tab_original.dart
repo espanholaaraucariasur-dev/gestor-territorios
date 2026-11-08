@@ -208,7 +208,7 @@ class _RemovidasTabState extends State<RemovidasTab> {
           'tipo': 'restauracion',
           'leida': false,
           'created_at': FieldValue.serverTimestamp(),
-          'para_roles': ['es_admin', 'es_admin_territorios'],
+          'destinatarios_roles': ['es_admin', 'es_admin_territorios'],
         },
       );
 
@@ -366,7 +366,7 @@ class _RemovidasTabState extends State<RemovidasTab> {
           'tipo': 'alerta_60',
           'leida': false,
           'created_at': FieldValue.serverTimestamp(),
-          'para_roles': ['es_admin', 'es_admin_territorios'],
+          'destinatarios_roles': ['es_admin', 'es_admin_territorios'],
         });
         await doc.reference.update({'alerta_60_enviada': true});
       } else if (dias >= 30 && !alerta30) {
@@ -376,7 +376,7 @@ class _RemovidasTabState extends State<RemovidasTab> {
           'tipo': 'alerta_30',
           'leida': false,
           'created_at': FieldValue.serverTimestamp(),
-          'para_roles': ['es_admin', 'es_admin_territorios'],
+          'destinatarios_roles': ['es_admin', 'es_admin_territorios'],
         });
         await doc.reference.update({'alerta_30_enviada': true});
       }

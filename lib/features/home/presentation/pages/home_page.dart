@@ -15,7 +15,9 @@ import 'package:araucaria_sur/core/services/notification_service.dart';
 import 'package:araucaria_sur/core/services/auto_return_service.dart';
 import 'package:araucaria_sur/core/services/offline_sync_service.dart';
 import 'package:araucaria_sur/features/home/presentation/pages/admin/auditor_panel_page.dart';
+import 'package:araucaria_sur/core/services/notificacion_lectura_store.dart';
 import 'package:araucaria_sur/core/services/notificacion_service.dart';
+import 'package:araucaria_sur/core/services/notification_center.dart';
 import 'package:araucaria_sur/core/utils/transferencia_tarjeta.dart';
 import '../../../../core/l10n/translation_service.dart';
 
@@ -54,6 +56,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   bool _eco2Visible = false;
   bool _esAdminEco2 = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  /// Suscripción compartida: el cajón usa la misma que la campanilla.
+  final Stream<QuerySnapshot<Map<String, dynamic>>> _snapNotificaciones =
+      NotificationCenter.instance.snapshots;
 
   /// Cierra el menú lateral SIN usar `Navigator.pop`.
   ///
@@ -272,6 +278,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
   }
 
   void _cerrarSesion() async {
+    // Quita el token push de este usuario y descarta la suscripción ANTES de
+    // cerrar sesión: si quedara viva, Firestore la marcaría con
+    // permission-denied y el siguiente usuario no podría reintentarla.
+    await NotificationService().onUserSignedOut();
+    await NotificationCenter.instance.reiniciar();
+    await NotificacionLecturaStore.instance.reiniciar();
     try {
       await FirebaseAuth.instance.signOut();
     } catch (e) {
@@ -562,12 +574,16 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
                         label: context.t('notifications'),
                         subtitle: context.t('last_alerts'),
                         color: const Color(0xFF1B5E20),
-                        trailing: StreamBuilder<int>(
-                          stream: NotificacionService.streamConteo(
-                              NotificacionService.perfilDesdeUsuario(
-                                  widget.usuarioData)),
+                        trailing: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: _snapNotificaciones,
                           builder: (context, snap) {
-                            final count = snap.data ?? 0;
+                            final count = snap.hasData
+                                ? NotificacionService.contarNoLeidas(
+                                    NotificacionService.perfilDesdeUsuario(
+                                        widget.usuarioData),
+                                    snap.data!,
+                                    NotificacionLecturaStore.instance)
+                                : 0;
                             if (count == 0) {
                               return const Icon(Icons.chevron_right,
                                   color: Colors.grey, size: 18);
@@ -831,7 +847,13 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         centerTitle: true,
         actions: [
           // Badge de notificaciones
-          NotificacionesBadge(usuarioData: widget.usuarioData),
+          NotificacionesBadge(
+            key: ValueKey(widget.usuarioData['docId'] ??
+                widget.usuarioData['uid'] ??
+                widget.usuarioData['email'] ??
+                ''),
+            usuarioData: widget.usuarioData,
+          ),
           const SizedBox(width: 4),
         ],
       ),

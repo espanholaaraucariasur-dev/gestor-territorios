@@ -1,5 +1,7 @@
 import 'package:araucaria_sur/core/services/navegacion_service.dart';
+import 'package:araucaria_sur/core/services/notificacion_lectura_store.dart';
 import 'package:araucaria_sur/core/services/notificacion_service.dart';
+import 'package:araucaria_sur/core/services/notification_center.dart';
 import 'package:araucaria_sur/features/home/presentation/widgets/mensaje_animado_dialog.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -14,15 +16,31 @@ class NotificacionesBadge extends StatefulWidget {
 }
 
 class _NotificacionesBadgeState extends State<NotificacionesBadge> {
+  // Una sola suscripción para toda la app; el stream se crea una vez.
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _snapshots =
+      NotificationCenter.instance.snapshots;
+
+  @override
+  void initState() {
+    super.initState();
+    NotificacionLecturaStore.instance.inicializar(widget.usuarioData);
+  }
+
   @override
   Widget build(BuildContext context) {
     final perfil = NotificacionService.perfilDesdeUsuario(widget.usuarioData);
-    return StreamBuilder<int>(
-      stream: NotificacionService.streamConteo(perfil),
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _snapshots,
       builder: (context, snap) {
-        final count = snap.data ?? 0;
+        final count = snap.hasData
+            ? NotificacionService.contarNoLeidas(
+                perfil, snap.data!, NotificacionLecturaStore.instance)
+            : 0;
+        final error = snap.hasError;
         return IconButton(
-          tooltip: 'Notificaciones',
+          tooltip: error
+              ? 'No se pudieron cargar las notificaciones'
+              : 'Notificaciones',
           icon: Stack(
             clipBehavior: Clip.none,
             children: [
@@ -50,6 +68,19 @@ class _NotificacionesBadgeState extends State<NotificacionesBadge> {
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
                       ),
+                    ),
+                  ),
+                )
+              else if (error)
+                Positioned(
+                  right: -2,
+                  top: -2,
+                  child: Container(
+                    width: 9,
+                    height: 9,
+                    decoration: const BoxDecoration(
+                      color: Colors.orange,
+                      shape: BoxShape.circle,
                     ),
                   ),
                 ),
@@ -83,6 +114,38 @@ class _NotificacionesSheet extends StatefulWidget {
 }
 
 class _NotificacionesSheetState extends State<_NotificacionesSheet> {
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _snapshots =
+      NotificationCenter.instance.snapshots;
+
+  /// Estado de lectura propio de este usuario (el documento compartido no se
+  /// toca: marcarlo afectaría a todos los que reciben la misma notificación).
+  final _lectura = NotificacionLecturaStore.instance;
+
+  /// Documentos del último snapshot, para "Leer todas".
+  List<QueryDocumentSnapshot<Map<String, dynamic>>>? snapDocs;
+
+  @override
+  void initState() {
+    super.initState();
+    _lectura.inicializar(widget.usuarioData);
+  }
+
+  /// Ejecuta una acción de escritura y avisa si Firestore la rechaza.
+  Future<void> _ejecutarAccion(
+    Future<void> Function() accion,
+    String mensajeError,
+  ) async {
+    try {
+      await accion();
+    } catch (e) {
+      debugPrint('Notificaciones: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(mensajeError), backgroundColor: Colors.red),
+      );
+    }
+  }
+
   IconData _iconoTipo(String tipo) {
     switch (tipo) {
       case 'motivacional':
@@ -139,7 +202,7 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
   ///   porque es el único que sabe cambiar de modo y de pestaña.
   void _alTocar(
     BuildContext context,
-    QueryDocumentSnapshot doc,
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
     Map<String, dynamic> data,
     String titulo,
     String cuerpo,
@@ -270,9 +333,14 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: () async {
-                    await NotificacionService.marcarLeidas(perfil);
-                  },
+                  onPressed: () => _ejecutarAccion(
+                    () => _lectura.marcarTodas(
+                      snapDocs?.where((d) =>
+                              !_lectura.estaOculta(d.id, d.data())) ??
+                          const [],
+                    ),
+                    'No se pudieron marcar como leídas.',
+                  ),
                   icon: const Icon(Icons.done_all, size: 18),
                   label: const Text('Leer todas'),
                 ),
@@ -300,7 +368,10 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                       ),
                     );
                     if (ok == true) {
-                      await NotificacionService.limpiar(perfil);
+                      await _ejecutarAccion(
+                        _lectura.limpiar,
+                        'No se pudieron limpiar las notificaciones.',
+                      );
                     }
                   },
                   icon: const Icon(Icons.delete_sweep_outlined, size: 18),
@@ -311,8 +382,8 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
           ),
           const Divider(height: 1),
           Expanded(
-            child: StreamBuilder<List<QueryDocumentSnapshot>>(
-              stream: NotificacionService.streamNotificaciones(perfil),
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _snapshots,
               builder: (context, snap) {
                 if (snap.hasError) {
                   debugPrint('Error notificaciones: ${snap.error}');
@@ -333,7 +404,7 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            'Revisa la consola para el detalle (posible índice compuesto de Firestore).',
+                            'Revisa tu conexión e inténtalo de nuevo.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                                 fontSize: 11, color: Colors.grey.shade500),
@@ -347,8 +418,13 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                     !snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final docs = snap.data ?? [];
-                if (docs.isEmpty) {
+                snapDocs = snap.hasData ? snap.data!.docs : null;
+                final docs = snap.hasData
+                    ? NotificacionService.filtrarNotificaciones(
+                        perfil, snap.data!, _lectura)
+                    : const <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                final visibles = docs.take(50).toList();
+                if (visibles.isEmpty) {
                   return const Center(
                     child: Text('No tienes notificaciones',
                         style: TextStyle(color: Colors.grey)),
@@ -356,17 +432,18 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                 }
                 return ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: docs.length,
+                  itemCount: visibles.length,
                   separatorBuilder: (_, index) =>
                       const Divider(height: 1, indent: 68),
                   itemBuilder: (context, i) {
-                    final doc = docs[i];
-                    final data = doc.data() as Map<String, dynamic>;
+                    final doc = visibles[i];
+                    final data = doc.data();
                     final titulo = (data['titulo'] as String?) ?? '';
                     final cuerpo = (data['cuerpo'] as String?) ?? '';
                     final tipo = (data['tipo'] as String?) ?? '';
-                    final leida = (data['leida'] as bool?) ?? false;
-                    final fecha = _formatearFecha(data['created_at']);
+                    final leida = _lectura.estaLeida(doc.id, data);
+                    final fecha =
+                        _formatearFecha(data['created_at'] ?? data['enviado_en']);
                     return ListTile(
                       leading: CircleAvatar(
                         backgroundColor: leida
@@ -416,7 +493,10 @@ class _NotificacionesSheetState extends State<_NotificacionesSheet> {
                             ),
                       onTap: () {
                         if (!leida) {
-                          doc.reference.update({'leida': true});
+                          _ejecutarAccion(
+                            () => _lectura.marcarLeida(doc.id),
+                            'No se pudo marcar como leída.',
+                          );
                         }
                         _alTocar(context, doc, data, titulo, cuerpo, tipo);
                       },

@@ -2,6 +2,7 @@ import 'dart:async';
 import '../../../../core/l10n/translation_service.dart';
 import '../../../../core/services/update_service.dart';
 import '../../../../core/services/auto_return_service.dart';
+import '../../../../core/services/notification_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -117,6 +118,7 @@ class _SplashPageState extends State<SplashPage> {
             return 0;
           });
         }
+        unawaited(NotificationService().onUserSignedIn());
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -141,6 +143,7 @@ class _SplashPageState extends State<SplashPage> {
             _irALogin();
             return;
           }
+          unawaited(NotificationService().onUserSignedIn());
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(

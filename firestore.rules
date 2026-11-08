@@ -26,10 +26,12 @@ service cloud.firestore {
     }
 
     // Notificaciones
+    // Se crean con ID automático, nunca con el uid: exigir `uid == id`
+    // bloqueaba marcar como leída, limpiar y la purga mensual.
     match /notificaciones/{id} {
       allow read: if sesionReal();
       allow create: if sesionReal();
-      allow update, delete: if sesionReal() && request.auth.uid == id;
+      allow update, delete: if sesionReal();
     }
 
     // --- Colecciones de mantenimiento ---
