@@ -3,9 +3,9 @@
 // FASE 1 (este archivo): cierra lo que da seguridad real sin cambiar el
 // comportamiento diario de nadie.
 //   - Nadie puede cambiarse el rol ni el estado: `es_admin`, `es_auditor`,
-//     `es_admin_territorios`, `estado`... solo los toca el admin principal
-//     (angelrivas027@gmail.com, correo verificado del token) o la pantalla de
-//     administración.
+//     `es_admin_territorios`, `estado`, `activo`... solo los toca el admin
+//     principal (angelrivas027@gmail.com, correo verificado del token) o la
+//     pantalla de administración. Una cuenta nueva no puede nacer aprobada.
 //   - El estado de lectura de notificaciones vive en el documento del propio
 //     usuario, así que marcar leído ya no necesita escribir el documento
 //     compartido.
@@ -100,8 +100,6 @@ service cloud.firestore {
         'es_auditor',
         'es_conductor',
         'es_publicador',
-        'estado',
-        'activo',
         'rol'
       ];
     }
@@ -154,7 +152,13 @@ service cloud.firestore {
         && (request.auth.uid == uid || request.resource.data.uid == request.auth.uid)
         && request.resource.data.get('es_admin', false) == false
         && request.resource.data.get('es_admin_territorios', false) == false
-        && request.resource.data.get('es_auditor', false) == false;
+        && request.resource.data.get('es_auditor', false) == false
+        // Una cuenta nueva NO puede nacer aprobada ni activa: la aprueba un
+        // administrador desde la pantalla de usuarios pendientes.
+        && (!('estado' in request.resource.data.keys())
+            || request.resource.data.estado == 'pendiente')
+        && (!('activo' in request.resource.data.keys())
+            || request.resource.data.activo != false);
 
       // Una sola cláusula `update`.
       //
@@ -163,12 +167,21 @@ service cloud.firestore {
       // la misma expresión. El emulador se queda con el último valor de cada
       // función y eso contamina las reglas de OTRAS colecciones.
       allow update: if sesionReal() && (
-          // Cambiar rol o estado: solo el admin principal o la pantalla de
-          // administración (fase 1).
+          // Cambiar un rol de cuenta (es_admin, es_auditor...): solo el admin
+          // principal o la pantalla de administración (fase 1).
           (
             request.resource.data.diff(resource.data)
               .affectedKeys()
               .hasAny(camposDeRol())
+            && (esAdminPrincipal() || request.auth.uid != uid)
+          )
+          // Aprobar / desaprobar una cuenta: solo el admin principal o la
+          // pantalla de administración. Un usuario pendiente NO puede
+          // aprobarse a sí mismo.
+          || (
+            request.resource.data.diff(resource.data)
+              .affectedKeys()
+              .hasAny(['estado', 'activo'])
             && (esAdminPrincipal() || request.auth.uid != uid)
           )
           // Preferencias del propio documento: hace falta estar aprobado.

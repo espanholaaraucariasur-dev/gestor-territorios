@@ -352,6 +352,43 @@ async function main() {
     await restaurar();
   });
 
+  await caso('una cuenta nueva NO puede nacer aprobada', async () => {
+    await assertFails(
+      como(PENDIENTE).collection('usuarios').doc('uid-nuevo2').set({
+        nombre: 'Nuevo',
+        email: 'n2@test.com',
+        estado: 'aprobado',
+        es_publicador: true,
+      })
+    );
+  });
+
+  await caso('una solicitud de acceso normal sí se crea', async () => {
+    // Contexto nuevo sin token extra, como un usuario recién registrado.
+    await assertSucceeds(
+      env.authenticatedContext('uid-solicitante').firestore()
+        .collection('usuarios').doc('uid-solicitante').set({
+        nombre: 'Nuevo',
+        email: 'n3@test.com',
+        estado: 'pendiente',
+        es_publicador: true,
+      })
+    );
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().collection('usuarios').doc('uid-solicitante').delete();
+    });
+  });
+
+  await caso('el admin principal aprueba una cuenta', async () => {
+    await assertSucceeds(
+      como(PRINCIPAL, tokenPrincipal)
+        .collection('usuarios')
+        .doc(PENDIENTE)
+        .update({ estado: 'aprobado' })
+    );
+    await restaurar();
+  });
+
   // PENDIENTE (ver REVISION-DEPURACION-SEGURIDAD-2026-11.md):
   //  - "el publicador NO puede editar el documento de otro"
   //  - "el admin NO puede quitarse su propio es_admin"
