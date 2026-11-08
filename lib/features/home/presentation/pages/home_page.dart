@@ -64,9 +64,10 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
     final scaffold = _scaffoldKey.currentState;
     if (scaffold != null && scaffold.isDrawerOpen) {
       scaffold.closeDrawer();
-    } else {
-      Navigator.of(context).maybePop();
     }
+    // Si el cajón ya estaba cerrado NO se toca el Navigator: `maybePop()`
+    // aquí podía sacar una pantalla de más y dejar el `Scaffold` del inicio
+    // sin cuerpo, con solo el encabezado y el fondo gris.
   }
 
   late TabController _tabControllerAdmin;
@@ -836,7 +837,12 @@ class _PantallaHomeLegacyState extends State<PantallaHomeLegacy>
         ],
       ),
       body: IndexedStack(
-        index: _indiceActual,
+        // Los hijos del stack se CONSTRUYEN todos, aunque no se vean: la vista
+        // que no es la activa queda viva por debajo. Si al volver al inicio la
+        // vista de tarjetas quedaba de primera, se veía su fondo gris con el
+        // encabezado y el menú del `Scaffold` encima, y el menú parecía
+        // desaparecer. El índice lo decide siempre [_indiceActual].
+        index: _indiceActual.clamp(0, 1),
         children: [
           _buildVistaHome(nombre, esConductor, esAdmin, esAdminTerritorios),
           _buildVistaTarjetas(),
